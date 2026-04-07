@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Quick alias: spawn a Claude Code agent with a repo.
+# Usage: agent-claude <repo-url> [extra-repo-urls...]
+set -euo pipefail
+
+AGENT="$(dirname "$0")/agent"
+
+if [ $# -eq 0 ]; then
+  echo "Usage: agent-claude <repo-url> [repo-url...]" >&2
+  exit 1
+fi
+
+args=()
+for url in "$@"; do
+  args+=(--repo "$url")
+done
+
+exec "$AGENT" spawn claude "${args[@]}"

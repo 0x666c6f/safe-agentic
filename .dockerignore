@@ -1,0 +1,6 @@
+.git
+bin/
+vm/
+README.md
+*.md
+!config/

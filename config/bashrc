@@ -1,0 +1,31 @@
+# safe-agentic container shell configuration
+
+# Starship prompt
+eval "$(starship init bash)"
+
+# Zoxide
+eval "$(zoxide init bash)"
+
+# Modern tool aliases
+alias ls='eza --icons'
+alias ll='eza -la --icons --git'
+alias tree='eza --tree --icons'
+alias cat='bat --plain'
+alias grep='rg'
+alias find='fd'
+
+# Paths
+export GOPATH=/home/agent/go
+export PATH="/home/agent/go/bin:/home/agent/.local/bin:$PATH"
+export TF_PLUGIN_CACHE_DIR=/home/agent/.terraform.d/plugin-cache
+
+# Default to workspace
+cd /workspace 2>/dev/null || true
+
+# Show context on shell start
+if [ -n "${AGENT_TYPE:-}" ]; then
+  echo "╭─ safe-agentic container"
+  echo "│  Agent: ${AGENT_TYPE:-shell}"
+  echo "│  Workspace: /workspace"
+  echo "╰─ Ready."
+fi
