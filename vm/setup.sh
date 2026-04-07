@@ -39,16 +39,27 @@ done
 
 # Remove OrbStack macOS integration commands
 echo "==> Removing macOS integration commands..."
+MASK_DIRS=""
 for cmd in open osascript code mac; do
-  CMDPATH=$(which "$cmd" 2>/dev/null || true)
-  if [ -n "$CMDPATH" ] && [ -L "$CMDPATH" ]; then
-    # Only remove if it's a symlink (OrbStack installs these as symlinks)
+  CMDPATH=$(command -v "$cmd" 2>/dev/null || true)
+  if [ -n "$CMDPATH" ] && echo "$CMDPATH" | grep -q '^/opt/orbstack-guest/'; then
+    CMDDIR=$(dirname "$CMDPATH")
+    if ! echo " $MASK_DIRS " | grep -Fq " $CMDDIR "; then
+      MASK_DIRS="$MASK_DIRS $CMDDIR"
+    fi
+  elif [ -n "$CMDPATH" ] && [ -L "$CMDPATH" ]; then
     echo "    Removing $CMDPATH (symlink to macOS)"
-    sudo rm -f "$CMDPATH"
+    sudo rm -f "$CMDPATH" 2>/dev/null || true
   elif [ -n "$CMDPATH" ] && file "$CMDPATH" 2>/dev/null | grep -qi "orbstack\|mac"; then
     echo "    Removing $CMDPATH (OrbStack binary)"
-    sudo rm -f "$CMDPATH"
+    sudo rm -f "$CMDPATH" 2>/dev/null || true
   fi
+done
+
+for dir in $MASK_DIRS; do
+  echo "    Masking $dir (OrbStack integration dir)"
+  sudo mkdir -p "$dir"
+  sudo mount -t tmpfs -o ro,noexec,nosuid,size=1k none "$dir" 2>/dev/null || true
 done
 
 # Verify hardening
@@ -107,22 +118,21 @@ fi
 
 # Configure Docker daemon
 DAEMON_JSON=/etc/docker/daemon.json
-if [ ! -f "$DAEMON_JSON" ]; then
-  echo "==> Configuring Docker daemon..."
-  sudo tee "$DAEMON_JSON" > /dev/null <<'DJEOF'
+echo "==> Configuring Docker daemon..."
+sudo tee "$DAEMON_JSON" > /dev/null <<'DJEOF'
 {
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
     "max-file": "3"
   },
+  "userns-remap": "default",
   "default-address-pools": [
     {"base": "172.20.0.0/16", "size": 24}
   ]
 }
 DJEOF
-  sudo systemctl restart docker
-fi
+sudo systemctl restart docker
 
 # Enable and start Docker
 sudo systemctl enable docker

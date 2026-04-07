@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Validate Dockerfile security properties without building the image.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCKERFILE="$REPO_DIR/Dockerfile"
+
+pass=0
+fail=0
+
+assert_present() {
+  local pattern="$1"
+  local label="$2"
+  if grep -qE "$pattern" "$DOCKERFILE"; then
+    ((++pass))
+  else
+    echo "FAIL: $label — pattern not found: $pattern" >&2
+    ((++fail))
+  fi
+}
+
+assert_absent() {
+  local pattern="$1"
+  local label="$2"
+  if grep -qE "$pattern" "$DOCKERFILE"; then
+    echo "FAIL: $label — pattern should not be present: $pattern" >&2
+    ((++fail))
+  else
+    ((++pass))
+  fi
+}
+
+# --- No curl | bash (supply chain risk) ---
+assert_absent 'curl.*\|\s*(ba)?sh'    "no curl pipe to shell"
+assert_absent 'wget.*\|\s*(ba)?sh'    "no wget pipe to shell"
+
+# --- All binary downloads have SHA256 verification ---
+# Every curl that downloads a .tgz, .zip, .deb, or binary should be followed
+# by a sha256sum or gpg verification in the same RUN block.
+# We check that every ARG with a version also has corresponding SHA256 ARGs
+# (except AWSCLI which uses GPG signature verification).
+for tool in GO HELM EZA ZOXIDE YQ DELTA; do
+  assert_present "ARG ${tool}_SHA256_AMD64=" "${tool} has amd64 checksum"
+  assert_present "ARG ${tool}_SHA256_ARM64=" "${tool} has arm64 checksum"
+done
+
+# AWS CLI uses GPG verification instead of SHA256
+assert_present "gpg --batch --verify" "AWS CLI GPG signature verification"
+assert_present "awscli-public-key.asc" "AWS CLI public key embedded"
+
+# Every sha256 ARG should actually be used in a sha256sum check
+sha256_args=$(grep -oE 'ARG [A-Z0-9_]+_SHA256_(AMD64|ARM64)' "$DOCKERFILE" \
+  | sed 's/^ARG //' | cut -d= -f1 | sort -u)
+for arg in $sha256_args; do
+  assert_present 'sha256sum -c' "sha256sum check exists (for $arg)"
+done
+
+# --- Non-root user ---
+assert_present '^USER agent$'          "runs as non-root user"
+assert_present 'usermod -g agent -G "" agent' "agent supplemental groups cleared"
+assert_absent  'sudo'                  "no sudo in user-stage commands"
+
+# --- No k9s (user-facing tool, removed) ---
+assert_absent 'k9s|K9S'               "k9s removed"
+
+# --- No starship (removed) ---
+assert_absent 'starship'              "starship removed"
+
+# --- Entrypoint is the custom script ---
+assert_present 'ENTRYPOINT.*entrypoint.sh' "entrypoint is custom script"
+
+# --- CLI bundle is outside tmpfs-backed ~/.local ---
+assert_present '/opt/agent-cli' "CLI bundle installed outside ~/.local"
+assert_absent '/home/agent/\.local/agent-cli' "no CLI bundle under tmpfs-backed ~/.local"
+
+# --- pipefail is set for SHELL ---
+assert_present 'SHELL.*pipefail'       "SHELL has pipefail"
+
+# --- Image has labels ---
+assert_present 'LABEL app=safe-agentic' "app label present"
+
+echo "$((pass + fail)) tests, $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

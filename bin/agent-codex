@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick alias: spawn a Codex agent with SSH and a repo.
+# Quick alias: spawn a Codex agent with a repo.
 # Usage: agent-codex <repo-url> [repo-url...]
 set -euo pipefail
 
@@ -10,9 +10,17 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-args=(--ssh)
+args=()
+enable_ssh=false
 for url in "$@"; do
+  case "$url" in
+    git@*|ssh://*) enable_ssh=true ;;
+  esac
   args+=(--repo "$url")
 done
+
+if $enable_ssh; then
+  args=(--ssh "${args[@]}")
+fi
 
 exec "$AGENT" spawn codex "${args[@]}"

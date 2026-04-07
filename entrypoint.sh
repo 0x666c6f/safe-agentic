@@ -11,18 +11,43 @@ cp /home/agent/.ssh.baked/* /home/agent/.ssh/ 2>/dev/null || true
 chmod 700 /home/agent/.ssh
 chmod 600 /home/agent/.ssh/* 2>/dev/null || true
 
-# Copy baked-in starship config to writable tmpfs mount
-if [ -f /home/agent/.config.baked/starship.toml ]; then
-  mkdir -p /home/agent/.config
-  cp /home/agent/.config.baked/starship.toml /home/agent/.config/starship.toml
-fi
-
-# Git configuration (writes to tmpfs-backed ~/.gitconfig)
-git config --global user.name "AI Agent"
-git config --global user.email "agent@safe-agentic.local"
-git config --global url."git@github.com:".insteadOf "https://github.com/"
+# Git configuration (writes to tmpfs-backed /home/agent/.config/git/config)
+: "${GIT_CONFIG_GLOBAL:=/home/agent/.config/git/config}"
+mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
+git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
+git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
+
+repo_clone_path() {
+  local repo_url="$1"
+  local clone_path
+  local owner repo
+
+  # Strip trailing .git suffix
+  clone_path="${repo_url%.git}"
+
+  # Extract the path after the host
+  case "$clone_path" in
+    https://*|ssh://*) clone_path="${clone_path#*://*/}" ;; # URL-style scheme://host/org/repo
+    *:*/*)   clone_path="${clone_path##*:}" ;;    # scp-style git@host:org/repo
+    *)       return 1 ;;
+  esac
+
+  # Must contain exactly one slash (owner/repo, two components)
+  [[ "$clone_path" == */* ]] || return 1
+  owner="${clone_path%/*}"
+  repo="${clone_path#*/}"
+  [[ "$owner" == */* ]] && return 1
+
+  # Reject dot-prefixed names, empty, and unsafe characters
+  case "$owner" in ""|.*) return 1 ;; esac
+  case "$repo"  in ""|.*) return 1 ;; esac
+  [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  [[ "$repo"  =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+
+  printf '%s/%s\n' "$owner" "$repo"
+}
 
 # ---------------------------------------------------------------------------
 # Clone repositories
@@ -31,8 +56,10 @@ if [ -n "${REPOS:-}" ]; then
   IFS=',' read -ra REPO_LIST <<< "$REPOS"
   for repo_url in "${REPO_LIST[@]}"; do
     repo_url=$(echo "$repo_url" | xargs)  # trim whitespace
-    # Use org/repo as clone path to avoid collisions (e.g., org-a/api vs org-b/api)
-    clone_path=$(echo "$repo_url" | sed -E 's#^.*[:/]([^/]+/[^/]+)(\.git)?$#\1#')
+    clone_path=$(repo_clone_path "$repo_url") || {
+      echo "[entrypoint] Refusing repo URL with unsafe clone path: $repo_url" >&2
+      exit 1
+    }
     clone_dir="/workspace/$clone_path"
     if [ -d "$clone_dir" ]; then
       echo "[entrypoint] $clone_dir already exists, skipping clone"
@@ -45,7 +72,10 @@ if [ -n "${REPOS:-}" ]; then
 
   # If single repo, cd into it
   if [ "${#REPO_LIST[@]}" -eq 1 ]; then
-    clone_path=$(echo "${REPO_LIST[0]}" | sed -E 's#^.*[:/]([^/]+/[^/]+)(\.git)?$#\1#')
+    clone_path=$(repo_clone_path "${REPO_LIST[0]}") || {
+      echo "[entrypoint] Refusing repo URL with unsafe clone path: ${REPO_LIST[0]}" >&2
+      exit 1
+    }
     cd "/workspace/$clone_path"
   fi
 fi

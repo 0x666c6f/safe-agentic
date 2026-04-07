@@ -1,0 +1,153 @@
+# Security Model
+
+> See [architecture.md](architecture.md) for full system diagrams, sequence flows, and component maps.
+
+## Three isolation boundaries
+
+```mermaid
+graph TB
+    subgraph B1["Boundary 1 — OrbStack VM"]
+        direction LR
+        b1a["macOS mounts blocked"]
+        b1b["Integration cmds removed"]
+        b1c["fstab persistence"]
+        b1d["Docker userns-remap"]
+    end
+    subgraph B2["Boundary 2 — Docker Container"]
+        direction LR
+        b2a["Read-only rootfs"]
+        b2b["cap-drop ALL"]
+        b2c["no-new-privileges"]
+        b2d["Resource limits"]
+        b2e["Non-root, no sudo"]
+    end
+    subgraph B3["Boundary 3 — Container Isolation"]
+        direction LR
+        b3a["Separate networks"]
+        b3b["Separate volumes"]
+        b3c["No shared state"]
+    end
+
+    B1 --> B2 --> B3
+
+    style B1 fill:#fee,stroke:#c33
+    style B2 fill:#ffd,stroke:#c93
+    style B3 fill:#dfd,stroke:#393
+```
+
+## Defaults vs opt-in
+
+| Feature | Default (safe) | Opt-in (wider surface) |
+|---------|---------------|----------------------|
+| SSH agent | OFF — no access to your keys | `--ssh` forwards 1Password agent |
+| Auth tokens | Ephemeral — discarded on exit | `--reuse-auth` persists across sessions |
+| Rootfs | Read-only | — |
+| Capabilities | ALL dropped + no-new-privileges | — |
+| Network | Dedicated bridge per container | `--network <name>` joins existing |
+| Resources | 8g memory, 4 CPUs, 512 PIDs | `--memory`, `--cpus`, `--pids-limit` |
+| Host keys | GitHub baked + StrictHostKeyChecking | — |
+| Sudo | Removed | — |
+
+## What each flag exposes
+
+### `--ssh`
+
+Forwards your 1Password SSH agent socket into the container (mounted read-only):
+
+```mermaid
+sequenceDiagram
+    participant Agent as Agent (container)
+    participant VM as OrbStack VM
+    participant Mac as macOS
+    participant 1P as 1Password
+    participant GH as GitHub
+
+    Agent->>VM: git push via SSH socket (:ro)
+    VM->>Mac: OrbStack forwarding
+    Mac->>1P: Sign challenge
+    Note over 1P: Private key never<br/>leaves 1Password
+    1P-->>Mac: Signature
+    Mac-->>VM: Response
+    VM-->>Agent: Authenticated
+    Agent->>GH: Push (host key verified)
+```
+
+The agent can:
+- Clone and push to any repo your SSH key has access to
+- Authenticate to any SSH host your key works with
+
+It **cannot** read your private key (1Password agent never exposes it).
+
+**When to use:** Private repos (`git@` URLs).
+**Risk:** A compromised agent could push malicious code to repos you have write access to.
+
+### `--reuse-auth`
+
+Stores the OAuth token in a named Docker volume that survives container restarts.
+
+**When to use:** Avoid re-authenticating every session.
+**Risk:** A compromised container could steal the token from the shared volume. Run `agent cleanup` to revoke.
+
+### `--network <name>`
+
+Joins an existing Docker network instead of creating a dedicated one.
+
+**When to use:** Multiple containers that need to communicate, or `--network agent-isolated` for air-gapped operation.
+**Risk:** Containers on the same network can reach each other.
+
+## Supply chain hardening
+
+All binaries installed in the Docker image are verified:
+
+| Source | Verification |
+|--------|-------------|
+| Direct downloads (Go, Helm, eza, zoxide, yq, delta) | SHA256 checksum pinned per-architecture |
+| AWS CLI | GPG signature verified against embedded public key |
+| Apt packages (Node.js, Terraform, kubectl, gh, etc.) | Signed apt repositories with pinned GPG keys |
+| AI CLIs (Claude Code, Codex) | npm lockfile pinned (`npm ci`) |
+
+No `curl | bash` install patterns are used.
+
+## Container filesystem layout
+
+```mermaid
+graph TD
+    subgraph ro["Read-only rootfs (immutable)"]
+        usr["/usr — system binaries"]
+        opt["/opt/agent-cli — claude, codex"]
+        ssh_baked[".ssh.baked — GitHub host keys"]
+    end
+    subgraph tmpfs["tmpfs (RAM — lost on exit)"]
+        tmp["/tmp — 512m, noexec"]
+        config[".config — git config, 32m"]
+        ssh[".ssh — keys/config, 1m"]
+        local[".local — 64m"]
+    end
+    subgraph vols["Docker volumes (ephemeral by default)"]
+        workspace["/workspace — cloned repos"]
+        auth[".claude / .codex — OAuth token"]
+        caches[".npm, .cache/pip, go, .terraform.d"]
+    end
+
+    style ro fill:#f5f5f5,stroke:#999
+    style tmpfs fill:#fff3e0,stroke:#e65100
+    style vols fill:#e3f2fd,stroke:#1565c0
+```
+
+All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes (from `--reuse-auth`) persist until `agent cleanup`.
+
+## VM hardening details
+
+`vm/setup.sh` applies these protections every time the VM starts:
+
+1. **Unmounts macOS paths** — `/Users`, `/mnt/mac`, `/Volumes`, `/private`, `/opt/orbstack`
+2. **Overlays read-only tmpfs** — even if OrbStack re-mounts, the tmpfs hides the content
+3. **Adds fstab entries** — persist blocking across VM reboots
+4. **Removes OrbStack integration commands** — `open`, `osascript`, `code`, `mac`
+5. **Masks OrbStack integration directories** — tmpfs over `/opt/orbstack-guest/`
+6. **Verifies hardening** — checks that mounts are blocked and commands are gone
+7. **Enables Docker userns-remap** — container UIDs are remapped to unprivileged host UIDs
+
+### Known limitation
+
+OrbStack may restore macOS mounts when the VM restarts. Always use `agent vm start` (which re-applies hardening) instead of `orb start` directly.

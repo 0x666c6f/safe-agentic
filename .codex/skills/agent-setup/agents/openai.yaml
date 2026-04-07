@@ -1,0 +1,4 @@
+interface:
+  display_name: "Setup Safe Agentic"
+  short_description: "Set up or rebuild safe-agentic"
+  default_prompt: "Use $agent-setup to set up, rebuild, or troubleshoot the safe-agentic environment."

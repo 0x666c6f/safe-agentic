@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Safe Agents"
+  short_description: "Manage running safe-agentic sessions"
+  default_prompt: "Use $agent-manage to inspect or clean up running safe-agentic containers."

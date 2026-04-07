@@ -1,8 +1,5 @@
 # safe-agentic container shell configuration
 
-# Starship prompt
-eval "$(starship init bash)"
-
 # Zoxide
 eval "$(zoxide init bash)"
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spawn Safe Agent"
+  short_description: "Spawn Claude or Codex in sandbox"
+  default_prompt: "Use $agent-spawn to launch a safe-agentic Claude or Codex session for a repository."
