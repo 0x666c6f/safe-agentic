@@ -57,7 +57,7 @@ defaults_error() {
 
 default_key_allowed() {
   case "$1" in
-    SAFE_AGENTIC_DEFAULT_CPUS|SAFE_AGENTIC_DEFAULT_IDENTITY|SAFE_AGENTIC_DEFAULT_MEMORY|SAFE_AGENTIC_DEFAULT_NETWORK|SAFE_AGENTIC_DEFAULT_PIDS_LIMIT|SAFE_AGENTIC_DEFAULT_REUSE_AUTH|SAFE_AGENTIC_DEFAULT_SSH|GIT_AUTHOR_EMAIL|GIT_AUTHOR_NAME|GIT_COMMITTER_EMAIL|GIT_COMMITTER_NAME)
+    SAFE_AGENTIC_DEFAULT_CPUS|SAFE_AGENTIC_DEFAULT_DOCKER|SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET|SAFE_AGENTIC_DEFAULT_IDENTITY|SAFE_AGENTIC_DEFAULT_MEMORY|SAFE_AGENTIC_DEFAULT_NETWORK|SAFE_AGENTIC_DEFAULT_PIDS_LIMIT|SAFE_AGENTIC_DEFAULT_REUSE_AUTH|SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH|SAFE_AGENTIC_DEFAULT_SSH|GIT_AUTHOR_EMAIL|GIT_AUTHOR_NAME|GIT_COMMITTER_EMAIL|GIT_COMMITTER_NAME)
       return 0
       ;;
     *)
@@ -545,6 +545,10 @@ run_container() {
   local status=0
 
   orb run -m "$VM_NAME" "${docker_cmd[@]}" || status=$?
+  if [ "${DOCKER_RUNTIME_KIND:-off}" = "dind" ]; then
+    remove_docker_runtime_for_container "$ACTIVE_CONTAINER_NAME"
+    reset_docker_runtime_state
+  fi
   if $managed_network; then
     remove_managed_network "$network_name"
   fi
@@ -565,6 +569,7 @@ build_container_runtime() {
   local agent_label ssh_label
 
   docker_cmd=(docker run -it --rm)
+  ACTIVE_CONTAINER_NAME="$container_name"
   docker_cmd+=(--pull=never)
   docker_cmd+=(--name "$container_name")
   docker_cmd+=(--hostname "$container_name")

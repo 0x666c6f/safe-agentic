@@ -58,6 +58,9 @@ agent-codex git@github.com:myorg/myrepo.git
 
 # Advanced flags still work
 agent-claude --name api-fix --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/myrepo.git
+
+# GitHub CLI auth + Docker access also pass through
+agent-codex --reuse-gh-auth --docker git@github.com:myorg/myrepo.git
 ```
 
 ### Named sessions
@@ -89,6 +92,32 @@ agent spawn claude --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 ```
 
 The token is stored in a named Docker volume (`agent-claude-auth` / `agent-codex-auth`) that persists until `agent cleanup --auth` or manual volume removal.
+
+### Persistent GitHub CLI auth
+
+`gh` is installed in the image. By default, `gh auth login` state is per-session and disappears on exit.
+
+To persist it:
+
+```bash
+agent spawn claude --reuse-gh-auth --repo https://github.com/myorg/myrepo.git
+```
+
+This stores GitHub CLI auth in `agent-gh-auth` until `agent cleanup --auth`.
+
+### Docker inside the agent
+
+`docker` and Compose are installed in the image, but daemon access is opt-in:
+
+```bash
+# Safer default: per-session Docker-in-Docker sidecar
+agent shell --docker --repo https://github.com/myorg/myrepo.git
+
+# Broader access: mount the VM Docker socket directly
+agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
+```
+
+Use `--docker` unless you explicitly need the VM daemon. `--docker-socket` gives the agent direct control over Docker in the VM.
 
 ### Git identity
 
@@ -247,6 +276,8 @@ SAFE_AGENTIC_DEFAULT_MEMORY=16g
 SAFE_AGENTIC_DEFAULT_CPUS=8
 SAFE_AGENTIC_DEFAULT_NETWORK=agent-isolated
 SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=true
+SAFE_AGENTIC_DEFAULT_DOCKER=true
 SAFE_AGENTIC_DEFAULT_SSH=false
 SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
 ```
@@ -296,10 +327,10 @@ For Claude or Codex first run, wait for the login URL/device code prompt inside 
 | Category | Tools |
 |----------|-------|
 | AI agents | `claude`, `codex` |
-| SRE | `terraform`, `kubectl`, `helm`, `aws`, `vault` |
+| SRE | `terraform`, `kubectl`, `helm`, `aws`, `vault`, `docker`, `docker compose` |
 | Modern CLI | `rg`, `fd`, `bat`, `eza`, `z` (zoxide), `fzf`, `jq`, `yq`, `delta`, `gh` |
-| Runtimes | Node.js 22, Python 3.12, Go 1.23 |
-| Build | `gcc`, `make`, `npm`, `pip`, `go build` |
+| Runtimes | Node.js 22, `npm`, `pnpm`, `bun`, Python 3.12, Go 1.23 |
+| Build | `pip`, `go build`, `docker build` (with `--docker` or `--docker-socket`) |
 
 ## Typical workflows
 

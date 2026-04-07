@@ -9,6 +9,7 @@ for script in \
   bin/agent \
   bin/agent-alias \
   bin/agent-lib.sh \
+  bin/docker-runtime.sh \
   bin/agent-claude \
   bin/agent-codex \
   bin/repo-url.sh \

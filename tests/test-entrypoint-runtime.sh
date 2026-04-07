@@ -30,8 +30,12 @@ EOF
 
 cat >"$FAKE_BIN/mkdir" <<'EOF'
 #!/bin/bash
-if [ "${1:-}" = "-p" ] && [[ "${2:-}" == /workspace/* ]]; then
-  exit 0
+if [ "${1:-}" = "-p" ]; then
+  case "${2:-}" in
+    /workspace/*|/run/safe-agentic-docker|/var/lib/docker)
+      exit 0
+      ;;
+  esac
 fi
 exec /bin/mkdir "$@"
 EOF
@@ -76,7 +80,14 @@ fi
 exit 0
 EOF
 
-chmod +x "$FAKE_BIN/cp" "$FAKE_BIN/chmod" "$FAKE_BIN/mkdir" "$FAKE_BIN/git" "$FAKE_BIN/bash" "$FAKE_BIN/claude" "$FAKE_BIN/codex"
+cat >"$FAKE_BIN/dockerd" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf 'dockerd|%s|%s\n' "$PWD" "$*" >>"${TEST_EXEC_LOG:?}"
+exit 0
+EOF
+
+chmod +x "$FAKE_BIN/cp" "$FAKE_BIN/chmod" "$FAKE_BIN/mkdir" "$FAKE_BIN/git" "$FAKE_BIN/bash" "$FAKE_BIN/claude" "$FAKE_BIN/codex" "$FAKE_BIN/dockerd"
 
 pass=0
 fail=0
@@ -149,6 +160,13 @@ assert_status() {
 
 RUN_ARGS=()
 LAST_STATUS=0
+
+# --- internal dockerd branch starts daemon and exits cleanly ---
+rm -f "$HOME_DIR/.codex/auth.json"
+RUN_ARGS=()
+run_entrypoint SAFE_AGENTIC_INTERNAL_DOCKERD=1
+assert_status 0 "internal dockerd exits cleanly"
+assert_contains "$(cat "$EXEC_LOG")" "dockerd|$RUN_DIR|--group agent --host unix:///run/safe-agentic-docker/docker.sock --data-root /var/lib/docker" "internal dockerd exec"
 
 # --- shell branch uses safe git fallbacks + login shell ---
 rm -f "$HOME_DIR/.codex/auth.json"

@@ -49,7 +49,7 @@ case "$cmd" in
         exit 0
         ;;
       "docker volume ls -q")
-        printf 'agent-claude-auth\nagent-codex-auth\n'
+        printf 'agent-claude-auth\nagent-codex-auth\nagent-gh-auth\n'
         exit 0
         ;;
       "docker network ls -q --filter label=app=safe-agentic --filter label=safe-agentic.type=container-network")
@@ -164,7 +164,7 @@ assert_contains "$cleanup_log" "docker image prune -f --filter label=app=safe-ag
 # --- cleanup --auth also removes shared auth volumes ---
 run_agent "$REPO_DIR/bin/agent" cleanup --auth >/dev/null 2>&1
 cleanup_auth_log="$(cat "$ORB_LOG")"
-assert_contains "$cleanup_auth_log" "docker volume rm agent-claude-auth agent-codex-auth" "cleanup auth volumes"
+assert_contains "$cleanup_auth_log" "docker volume rm agent-claude-auth agent-codex-auth agent-gh-auth" "cleanup auth volumes"
 
 # --- custom network uses existing network and skips managed create ---
 run_agent "$REPO_DIR/bin/agent" spawn claude --name custom --network custom-net --repo https://github.com/acme/repo.git >/dev/null 2>&1
@@ -186,6 +186,15 @@ run_agent "$REPO_DIR/bin/agent" shell --network custom-net >/dev/null 2>&1
 shell_run="$(last_docker_run)"
 assert_not_contains "$shell_run" "/home/agent/.claude" "shell no claude auth"
 assert_not_contains "$shell_run" "/home/agent/.codex" "shell no codex auth"
+
+# --- docker sidecar is cleaned up after run exits ---
+run_agent "$REPO_DIR/bin/agent" spawn claude --docker --name docky --repo https://github.com/acme/repo.git >/dev/null 2>&1
+docker_log="$(cat "$ORB_LOG")"
+assert_contains "$docker_log" "docker run -d --name safe-agentic-docker-agent-claude-docky" "docker sidecar started"
+assert_contains "$docker_log" "docker rm -f safe-agentic-docker-agent-claude-docky" "docker sidecar removed"
+assert_contains "$docker_log" "docker volume rm agent-claude-docky-" "docker sidecar volume cleanup starts"
+assert_contains "$docker_log" "-docker-sock agent-claude-docky-" "docker sidecar socket/data volumes removed"
+assert_contains "$docker_log" "-docker-data" "docker sidecar data volume removed"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -41,6 +41,8 @@ graph TB
 |---------|---------------|----------------------|
 | SSH agent | OFF — no access to your keys | `--ssh` forwards 1Password agent |
 | Auth tokens | Ephemeral — discarded on exit | `--reuse-auth` persists across sessions |
+| GitHub CLI auth | Ephemeral — discarded on exit | `--reuse-gh-auth` persists across sessions |
+| Docker access | OFF | `--docker` starts DinD; `--docker-socket` mounts the VM daemon |
 | Rootfs | Read-only | — |
 | Capabilities | ALL dropped + no-new-privileges | — |
 | Network | Dedicated bridge per container; private/local egress blocked; TCP 22/80/443 only | `--network <name>` joins existing and bypasses managed guardrails |
@@ -87,6 +89,27 @@ Stores the OAuth token in a named Docker volume that survives container restarts
 
 **When to use:** Avoid re-authenticating every session.
 **Risk:** A compromised container could steal the token from the shared volume. Run `agent cleanup --auth` to revoke.
+
+### `--reuse-gh-auth`
+
+Stores GitHub CLI auth in a named Docker volume (`agent-gh-auth`) that survives container restarts.
+
+**When to use:** You want `gh auth login` once and reuse it across sessions.
+**Risk:** A compromised container could steal the GitHub token from the shared volume. Run `agent cleanup --auth` to revoke.
+
+### `--docker`
+
+Starts a dedicated privileged Docker-in-Docker sidecar for the session and points the agent container at its socket.
+
+**When to use:** The agent needs `docker build`, `docker run`, or Compose, but you do not want to hand it the VM daemon directly.
+**Risk:** Wider container attack surface than the default session. The sidecar is still isolated to the session and removed on exit.
+
+### `--docker-socket`
+
+Mounts `/var/run/docker.sock` from the hardened VM directly into the agent container.
+
+**When to use:** You explicitly want the agent to control the VM Docker daemon.
+**Risk:** Broadest Docker access. The agent can inspect, stop, or replace other containers in the VM.
 
 ### `--network <name>`
 
@@ -136,7 +159,7 @@ graph TD
     subgraph vols["Docker volumes (ephemeral by default)"]
         workspace["/workspace — cloned repos"]
         auth[".claude / .codex — OAuth token"]
-        caches[".npm, .cache/pip, go, .terraform.d"]
+        caches[".npm, .cache/pip, go, .terraform.d, .docker"]
     end
 
     style ro fill:#f5f5f5,stroke:#999
@@ -144,7 +167,7 @@ graph TD
     style vols fill:#e3f2fd,stroke:#1565c0
 ```
 
-All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes (from `--reuse-auth`) persist until `agent cleanup --auth`.
+All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes from `--reuse-auth` and `--reuse-gh-auth` persist until `agent cleanup --auth`.
 
 ## Git identity
 

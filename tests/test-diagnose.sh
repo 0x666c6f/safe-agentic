@@ -43,6 +43,9 @@ case "$cmd" in
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
       exit 0
     fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [ "${3:-}" = "test -S /var/run/docker.sock" ]; then
+      exit 0
+    fi
     ;;
   *)
     echo "unexpected orb command: $cmd" >&2
@@ -75,6 +78,7 @@ assert_contains "$output" "orb installed" "orb check"
 assert_contains "$output" "VM 'safe-agentic' exists" "vm check"
 assert_contains "$output" "Docker reachable inside VM" "docker check"
 assert_contains "$output" "Image 'safe-agentic:latest' present" "image check"
+assert_contains "$output" "VM Docker socket visible: /var/run/docker.sock" "docker socket check"
 assert_contains "$output" "Defaults file loaded:" "defaults check"
 assert_contains "$output" "VM SSH agent socket visible:" "ssh check"
 

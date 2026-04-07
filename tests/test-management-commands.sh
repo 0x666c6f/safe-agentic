@@ -41,6 +41,15 @@ case "$cmd" in
   run)
     [ "${1:-}" = "-m" ] && shift 2
     printf 'run|%s\n' "$*" >>"$log_file"
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--filter" ] && [ "${4:-}" = "name=^agent-" ] && [ "${5:-}" = "--format" ]; then
+      printf 'NAMES\tAGENT\tREPO\tSSH\tAUTH\tGH\tDOCKER\tNETWORK\tSTATUS\n'
+      printf 'agent-claude-listy\tclaude\tacme/repo\toff\tephemeral\tshared\tdind\tmanaged\tUp 5 minutes\n'
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--latest" ] && [ "${4:-}" = "--filter" ] && [ "${5:-}" = "name=^agent-" ] && [ "${6:-}" = "--format" ]; then
+      printf 'agent-codex-latest-task\n'
+      exit 0
+    fi
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
       if [ "${TEST_HARDENING_FAIL:-0}" = "1" ] && [ ! -f "$drift_state" ]; then
         exit 1
@@ -60,6 +69,10 @@ case "$cmd" in
       exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "network" ] && [ "${3:-}" = "inspect" ] && [ "${4:-}" = "--format" ] && [ "${6:-}" = "agent-codex-latest-task-net" ]; then
+      echo "container-network"
       exit 0
     fi
     ;;
@@ -114,9 +127,11 @@ assert_not_contains() {
 }
 
 # --- list uses filtered docker ps output ---
-TEST_VM_EXISTS=1 run_agent list >/dev/null 2>&1
+list_output="$(TEST_VM_EXISTS=1 run_agent list)"
 list_log="$(cat "$ORB_LOG")"
 assert_contains "$list_log" "run|docker ps --filter name=^agent- --format table {{.Names}}" "list docker ps filter"
+assert_contains "$list_output" $'NAMES\tAGENT\tREPO\tSSH\tAUTH\tGH\tDOCKER\tNETWORK\tSTATUS' "list header includes new columns"
+assert_contains "$list_output" $'agent-claude-listy\tclaude\tacme/repo\toff\tephemeral\tshared\tdind\tmanaged\tUp 5 minutes' "list row includes gh auth and docker labels"
 
 # --- vm subcommands map to orb controls ---
 TEST_VM_EXISTS=1 run_agent vm ssh >/dev/null 2>&1
@@ -157,6 +172,19 @@ assert_contains "$drift_log" "run|bash -lc " "spawn runs hardening verify"
 assert_contains "$drift_log" 'run|env DEST=/tmp/setup.sh bash -c cat > "$DEST"' "spawn recopies setup script on drift"
 assert_contains "$drift_log" "run|bash /tmp/setup.sh" "spawn reapplies hardening on drift"
 assert_contains "$drift_log" "run|docker image inspect safe-agentic:latest" "spawn requires local image"
+
+# --- attach --latest resolves latest running container ---
+TEST_VM_EXISTS=1 run_agent attach --latest >/dev/null 2>&1
+attach_latest_log="$(cat "$ORB_LOG")"
+assert_contains "$attach_latest_log" "run|docker ps --latest --filter name=^agent- --format {{.Names}}" "attach latest resolves latest container"
+assert_contains "$attach_latest_log" "run|docker exec -it agent-codex-latest-task bash -l" "attach latest execs latest container"
+
+# --- stop --latest resolves latest running container and its network ---
+TEST_VM_EXISTS=1 run_agent stop --latest >/dev/null 2>&1
+stop_latest_log="$(cat "$ORB_LOG")"
+assert_contains "$stop_latest_log" "run|docker ps --latest --filter name=^agent- --format {{.Names}}" "stop latest resolves latest container"
+assert_contains "$stop_latest_log" "run|docker stop agent-codex-latest-task" "stop latest stops latest container"
+assert_contains "$stop_latest_log" "run|docker network rm agent-codex-latest-task-net" "stop latest removes latest network"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -39,7 +39,7 @@ assert_absent 'wget.*\|\s*(ba)?sh'    "no wget pipe to shell"
 # by a sha256sum or gpg verification in the same RUN block.
 # We check that every ARG with a version also has corresponding SHA256 ARGs
 # (except AWSCLI which uses GPG signature verification).
-for tool in GO HELM EZA ZOXIDE YQ DELTA; do
+for tool in GO HELM EZA ZOXIDE YQ DELTA BUN; do
   assert_present "ARG ${tool}_SHA256_AMD64=" "${tool} has amd64 checksum"
   assert_present "ARG ${tool}_SHA256_ARM64=" "${tool} has arm64 checksum"
 done
@@ -80,6 +80,14 @@ assert_present 'COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/rep
 # --- CLI bundle is outside tmpfs-backed ~/.local ---
 assert_present '/opt/agent-cli' "CLI bundle installed outside ~/.local"
 assert_absent '/home/agent/\.local/agent-cli' "no CLI bundle under tmpfs-backed ~/.local"
+
+# --- Docker + package manager tooling present ---
+assert_present 'docker-ce-cli' "docker cli installed"
+assert_present 'docker-ce' "docker daemon installed"
+assert_present 'docker-buildx-plugin' "docker buildx installed"
+assert_present 'corepack enable pnpm' "pnpm enabled via corepack"
+assert_present 'corepack prepare "pnpm@\$\{PNPM_VERSION\}" --activate' "pnpm pinned"
+assert_present 'install -m 0755 "/tmp/bun-linux-' "bun binary installed"
 
 # --- pipefail is set for SHELL ---
 assert_present 'SHELL.*pipefail'       "SHELL has pipefail"

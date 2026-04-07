@@ -27,6 +27,12 @@ case "$cmd" in
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *SSH_AUTH_SOCK* ]]; then
       echo "/tmp/fake-ssh.sock"; exit 0
     fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *'test -S /var/run/docker.sock'*'printf "%s\n" /var/run/docker.sock'* ]]; then
+      echo "/var/run/docker.sock"; exit 0
+    fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == "stat -c %g /var/run/docker.sock" ]]; then
+      echo "998"; exit 0
+    fi
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
       : >"$verify_state"
       exit 0
@@ -80,7 +86,7 @@ run_fails() {
 
 assert_output_contains() {
   local needle="$1" label="$2"
-  if grep -q "$needle" "$OUT_LOG" "$ERR_LOG" 2>/dev/null; then
+  if grep -q -- "$needle" "$OUT_LOG" "$ERR_LOG" 2>/dev/null; then
     ((++pass))
   else
     echo "FAIL: $label: '$needle' not in output" >&2
@@ -133,6 +139,8 @@ assert_output_contains "agent help update" "update usage pointer"
 
 run_ok "help spawn topic" bash "$REPO_DIR/bin/agent" help spawn
 assert_output_contains "Usage: agent spawn" "spawn help topic"
+assert_output_contains "--reuse-gh-auth" "spawn help shows gh auth flag"
+assert_output_contains "--docker-socket" "spawn help shows docker socket flag"
 
 # =============================================================================
 # agent-codex alias: correct agent type and SSH detection
@@ -183,9 +191,20 @@ assert_contains "$alias_run" "GIT_AUTHOR_NAME=Alias User" "alias forwards identi
 assert_output_contains "agent spawn codex --name codex-task --reuse-auth" "alias passthrough command echo"
 assert_output_contains "alias@example.com" "alias identity echo"
 
+: >"$ORB_LOG"
+run_ok "codex alias docker passthrough" bash "$REPO_DIR/bin/agent-codex" --reuse-gh-auth --docker-socket https://github.com/acme/repo.git
+alias_docker_run="$(last_docker_run)"
+assert_contains "$alias_docker_run" "src=agent-gh-auth,dst=/home/agent/.config/gh" "alias forwards gh auth reuse"
+assert_contains "$alias_docker_run" "DOCKER_HOST=unix:///run/docker-host.sock" "alias forwards docker socket"
+assert_output_contains "agent spawn codex --reuse-gh-auth --docker-socket" "alias docker command echo"
+
 # =============================================================================
 # Alias with no args
 # =============================================================================
+run_ok "claude alias help" bash "$REPO_DIR/bin/agent-claude" --help
+assert_output_contains "--reuse-gh-auth" "alias help shows gh auth flag"
+assert_output_contains "--docker" "alias help shows docker flag"
+
 run_fails "claude alias no args" bash "$REPO_DIR/bin/agent-claude"
 run_fails "codex alias no args"  bash "$REPO_DIR/bin/agent-codex"
 

@@ -33,11 +33,30 @@ case "$cmd" in
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *SSH_AUTH_SOCK* ]]; then
       echo "/tmp/fake-ssh.sock"; exit 0
     fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *'test -S /var/run/docker.sock'*'printf "%s\n" /var/run/docker.sock'* ]]; then
+      echo "/var/run/docker.sock"; exit 0
+    fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == "stat -c %g /var/run/docker.sock" ]]; then
+      echo "998"; exit 0
+    fi
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
       : >"$verify_state"
       exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "volume" ]; then
+      case "${3:-}" in
+        inspect) exit 1 ;;
+        create|rm) exit 0 ;;
+      esac
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ] && [ "${4:-}" = "docker" ] && [ "${5:-}" = "--host" ] && [[ "${6:-}" == *safe-agentic-docker/docker.sock ]] && [ "${7:-}" = "info" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "logs" ]; then
+      echo "dockerd ok"
       exit 0
     fi
     # Handle docker network inspect — managed networks pass, unknown fail
@@ -197,6 +216,8 @@ SAFE_AGENTIC_DEFAULT_MEMORY=12g
 SAFE_AGENTIC_DEFAULT_CPUS=6
 SAFE_AGENTIC_DEFAULT_NETWORK=custom-net
 SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=true
+SAFE_AGENTIC_DEFAULT_DOCKER=true
 SAFE_AGENTIC_DEFAULT_IDENTITY="Default User <default@example.com>"
 EOF
 
@@ -206,7 +227,11 @@ assert_contains "$defaults_run" "--memory 12g" "defaults memory"
 assert_contains "$defaults_run" "--cpus 6" "defaults cpus"
 assert_contains "$defaults_run" "--network custom-net" "defaults network"
 assert_contains "$defaults_run" "src=agent-claude-auth,dst=/home/agent/.claude" "defaults reuse-auth"
+assert_contains "$defaults_run" "src=agent-gh-auth,dst=/home/agent/.config/gh" "defaults gh auth"
+assert_contains "$defaults_run" "DOCKER_HOST=unix:///run/safe-agentic-docker/docker.sock" "defaults docker host"
+assert_contains "$defaults_run" "src=agent-claude-defaults-docker-sock,dst=/run/safe-agentic-docker" "defaults docker socket volume"
 assert_contains "$defaults_run" "GIT_AUTHOR_NAME=Default User" "defaults identity"
+assert_contains "$(cat "$ORB_LOG")" "docker run -d --name safe-agentic-docker-agent-claude-defaults" "defaults docker sidecar"
 
 BAD_HOME="$TMP_DIR/bad-home"
 BAD_MARKER="$TMP_DIR/defaults-ran"
@@ -265,6 +290,32 @@ assert_contains "$reauth_run" "src=agent-claude-auth,dst=/home/agent/.claude"  "
 run_agent "$REPO_DIR/bin/agent" spawn codex --reuse-auth --name recodex --repo https://github.com/a/b.git >/dev/null 2>&1
 recodex_run="$(last_docker_run)"
 assert_contains "$recodex_run" "src=agent-codex-auth,dst=/home/agent/.codex"  "reuse-auth codex volume"
+
+run_agent "$REPO_DIR/bin/agent" spawn claude --reuse-gh-auth --name regh --repo https://github.com/a/b.git >/dev/null 2>&1
+regh_run="$(last_docker_run)"
+assert_contains "$regh_run" "GH_CONFIG_DIR=/home/agent/.config/gh" "reuse-gh-auth config path"
+assert_contains "$regh_run" "src=agent-gh-auth,dst=/home/agent/.config/gh" "reuse-gh-auth named volume"
+
+# =============================================================================
+# Test: Docker support can use DinD sidecar or host socket
+# =============================================================================
+run_agent "$REPO_DIR/bin/agent" spawn claude --docker --name dind --repo https://github.com/a/b.git >/dev/null 2>&1
+dind_run="$(last_docker_run)"
+dind_log="$(cat "$ORB_LOG")"
+assert_contains "$dind_run" "DOCKER_HOST=unix:///run/safe-agentic-docker/docker.sock" "dind docker host"
+assert_contains "$dind_run" "src=agent-claude-dind-docker-sock,dst=/run/safe-agentic-docker" "dind socket mount"
+assert_contains "$dind_run" "--mount type=volume,dst=/home/agent/.docker" "dind docker cli state"
+assert_contains "$dind_log" "docker run -d --name safe-agentic-docker-agent-claude-dind" "dind sidecar start"
+assert_contains "$dind_log" "SAFE_AGENTIC_INTERNAL_DOCKERD=1" "dind sidecar env"
+assert_contains "$dind_log" "docker exec safe-agentic-docker-agent-claude-dind docker --host unix:///run/safe-agentic-docker/docker.sock info" "dind readiness check"
+
+run_agent "$REPO_DIR/bin/agent" spawn claude --docker-socket --name dockersock --repo https://github.com/a/b.git >/dev/null 2>&1
+dockersock_run="$(last_docker_run)"
+dockersock_log="$(cat "$ORB_LOG")"
+assert_contains "$dockersock_run" "DOCKER_HOST=unix:///run/docker-host.sock" "docker-socket host env"
+assert_contains "$dockersock_run" "-v /var/run/docker.sock:/run/docker-host.sock" "docker-socket bind mount"
+assert_contains "$dockersock_run" "--group-add 998" "docker-socket group add"
+assert_not_contains "$dockersock_log" "safe-agentic-docker-agent-claude-dockersock" "docker-socket skips dind sidecar"
 
 # =============================================================================
 # Test: Custom resource limits
@@ -356,6 +407,31 @@ dry_log="$(cat "$ORB_LOG")"
 assert_not_contains "$dry_log" "docker run " "dry-run skips docker run"
 assert_not_contains "$dry_log" "docker network create" "dry-run skips network create"
 assert_contains "$(cat "$ERR_LOG")" "Would run:" "dry-run prints docker command"
+
+# =============================================================================
+# Test: Dry run with --docker also previews sidecar without starting it
+# =============================================================================
+: >"$ORB_LOG"
+PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" \
+  bash "$REPO_DIR/bin/agent" spawn claude --dry-run --docker --name preview-dind --repo https://github.com/a/b.git >"$ERR_LOG" 2>&1
+dry_docker_log="$(cat "$ORB_LOG")"
+dry_docker_output="$(cat "$ERR_LOG")"
+assert_not_contains "$dry_docker_log" "docker run -d --name safe-agentic-docker" "dry-run docker skips sidecar start"
+assert_not_contains "$dry_docker_log" "docker network create" "dry-run docker skips network create"
+assert_contains "$dry_docker_output" "Would start Docker sidecar:" "dry-run docker previews sidecar"
+assert_contains "$dry_docker_output" "safe-agentic-docker-agent-claude-preview-dind" "dry-run docker sidecar name"
+
+# =============================================================================
+# Test: Shell supports Docker + persisted gh auth
+# =============================================================================
+run_agent "$REPO_DIR/bin/agent" shell --docker --reuse-gh-auth >/dev/null 2>&1
+shell_docker_run="$(last_docker_run)"
+shell_docker_log="$(cat "$ORB_LOG")"
+assert_not_contains "$shell_docker_run" "AGENT_TYPE=" "shell docker no agent type"
+assert_contains "$shell_docker_run" "src=agent-gh-auth,dst=/home/agent/.config/gh" "shell docker gh auth reuse"
+assert_contains "$shell_docker_run" "DOCKER_HOST=unix:///run/safe-agentic-docker/docker.sock" "shell docker host"
+assert_contains "$shell_docker_run" "--mount type=volume,dst=/home/agent/.docker" "shell docker cli state"
+assert_contains "$shell_docker_log" "docker run -d --name safe-agentic-docker-agent-shell" "shell docker sidecar start"
 
 # =============================================================================
 # Test: Image name is the last argument (after all flags)

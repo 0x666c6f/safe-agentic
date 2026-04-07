@@ -22,6 +22,9 @@ Pass-through spawn options:
   --name NAME
   --ssh
   --reuse-auth
+  --reuse-gh-auth
+  --docker
+  --docker-socket
   --network NAME
   --memory SIZE
   --cpus N
@@ -66,7 +69,7 @@ while [ $# -gt 0 ]; do
       args+=("$1")
       shift
       ;;
-    --reuse-auth|--dry-run)
+    --reuse-auth|--reuse-gh-auth|--docker|--docker-socket|--dry-run)
       args+=("$1")
       shift
       ;;

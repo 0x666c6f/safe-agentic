@@ -11,9 +11,11 @@ agent diagnose
 ```
 
 - `agent-claude` / `agent-codex` auto-enable `--ssh` for `git@` and `ssh://` repos
-- add `--reuse-auth` to keep OAuth between sessions
+- add `--reuse-auth` to keep Claude/Codex OAuth between sessions
+- add `--reuse-gh-auth` to keep `gh auth login` state between sessions
+- add `--docker` for Docker-in-Docker, or `--docker-socket` to mount the VM daemon directly
 - add `--identity 'You <you@example.com>'` to avoid `Agent <agent@localhost>` commits
-- put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, and git identity
+- put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, Docker mode, shared auth, and git identity
   - format: simple `KEY=value` lines only; no shell snippets
 
 ## Architecture
@@ -59,6 +61,9 @@ graph TB
 **Opt-in flags that widen the attack surface:**
 - `--ssh` — Forwards SSH agent into container. Required for `git@` repos. A compromised agent could use SSH keys for other operations.
 - `--reuse-auth` — Shares OAuth token volume across sessions. Compromised container could steal the token.
+- `--reuse-gh-auth` — Shares GitHub CLI auth volume across sessions. Compromised container could steal the token.
+- `--docker` — Starts a privileged Docker-in-Docker sidecar for the session. Needed only when the agent must build or run containers itself.
+- `--docker-socket` — Mounts the VM Docker socket directly. Broadest Docker access; the agent can control the VM daemon.
 - `--network <name>` — Joins an existing Docker network in the VM and bypasses the default managed-network egress guardrails. Use only for deliberately shared or isolated networks you created.
 
 **Known limitations:**
@@ -112,6 +117,13 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 
 # Codex with persistent auth (skip OAuth next time)
 agent spawn codex --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
+
+# Reuse GitHub CLI auth too
+agent spawn codex --ssh --reuse-auth --reuse-gh-auth --repo git@github.com:myorg/myrepo.git
+
+# Docker support: DinD by default, host socket only when you ask for it
+agent shell --docker --repo https://github.com/myorg/myrepo.git
+agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
 
 # Named session
 agent spawn claude --ssh --repo git@github.com:myorg/api.git --name api-refactor
@@ -178,13 +190,13 @@ agent vm start              # Start the VM (re-applies hardening)
 - Codex (`codex`)
 
 ### SRE/DevOps
-terraform, kubectl, helm, aws-cli, vault, k9s
+terraform, kubectl, helm, aws-cli, vault, docker, docker compose
 
 ### Modern CLI
 ripgrep (`rg`), fd, bat, eza, zoxide (`z`), fzf, jq, yq, delta, gh
 
 ### Runtimes
-Node.js 22, Python 3.12, Go 1.23
+Node.js 22, `pnpm`, Bun, Python 3.12, Go 1.23
 
 ## Security defaults
 
@@ -192,12 +204,14 @@ Node.js 22, Python 3.12, Go 1.23
 |---------|---------|----------|
 | SSH agent | OFF | `--ssh` |
 | Auth persistence | Ephemeral per-session volume | `--reuse-auth` |
+| GitHub CLI auth | Ephemeral per-session volume | `--reuse-gh-auth` |
+| Docker access | OFF | `--docker` (DinD) / `--docker-socket` |
 | Root filesystem | Read-only | — |
 | Capabilities | Dropped (`ALL`) + `no-new-privileges` | — |
 | Network | Dedicated per-container bridge with local/private egress blocked; TCP 22/80/443 only | `--network <name>` |
 | Resource limits | `--memory 8g --cpus 4 --pids-limit 512` | explicit flags |
 | GitHub host keys | Baked & pinned (StrictHostKeyChecking yes) | — |
-| Workspace/auth/cache volumes | Ephemeral | `--reuse-auth` for auth only |
+| Workspace/auth/cache volumes | Ephemeral | `--reuse-auth` / `--reuse-gh-auth` for auth only |
 | Sudo | Removed | — |
 
 ## How auth works
@@ -208,6 +222,13 @@ On first `agent spawn`, the CLI shows an OAuth URL. Open it in your macOS browse
 
 - **Default**: OAuth token is stored in an anonymous per-session volume. You log in each time. Container exit discards the token.
 - **`--reuse-auth`**: Token persists in a shared volume (`agent-claude-auth` / `agent-codex-auth`). Log in once, reuse across sessions.
+
+### GitHub CLI (`gh`)
+
+`gh` is installed in the image.
+
+- **Default**: `gh auth login` state lives in an anonymous per-session volume at `/home/agent/.config/gh`.
+- **`--reuse-gh-auth`**: GitHub CLI auth persists in `agent-gh-auth`. Reuse across sessions; remove with `agent cleanup --auth`.
 
 ### Git (SSH via 1Password)
 
@@ -247,10 +268,21 @@ SAFE_AGENTIC_DEFAULT_MEMORY=16g
 SAFE_AGENTIC_DEFAULT_CPUS=8
 SAFE_AGENTIC_DEFAULT_NETWORK=agent-isolated
 SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=true
+SAFE_AGENTIC_DEFAULT_DOCKER=true
 SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
 ```
 
 Use simple `KEY=value` assignments only. `defaults.sh` is parsed as config, not executed as shell.
+
+### Docker inside agents
+
+`docker` and Compose are installed in the image, but daemon access stays off unless you opt in:
+
+- `--docker`: starts a per-session DinD sidecar; safer default when the agent needs to build or run containers
+- `--docker-socket`: mounts `/var/run/docker.sock` from the VM directly; use only when the agent must control the VM daemon itself
+
+If you want Docker on by default, set `SAFE_AGENTIC_DEFAULT_DOCKER=true` in `defaults.sh`.
 
 ### Launch behavior
 

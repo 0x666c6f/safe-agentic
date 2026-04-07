@@ -76,7 +76,7 @@ jobs:
           docker run --rm --entrypoint bash safe-agentic:ci -lc '
             id | grep -q "uid=1000(agent) gid=1000(agent)"
             id | grep -q "groups=1000(agent)"
-            command -v claude codex aws helm jq rg >/dev/null
+            command -v claude codex aws helm jq rg gh terraform docker pnpm bun >/dev/null
             git --version >/dev/null
             ! command -v sudo >/dev/null 2>&1
             test -f /home/agent/.ssh.baked/known_hosts

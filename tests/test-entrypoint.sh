@@ -41,6 +41,10 @@ assert_present 'repo_clone_path "\$repo_url"'            "repo clone path helper
 assert_present 'Refusing repo URL with unsafe clone path' "unsafe clone path rejection"
 assert_present 'clone_dir="/workspace/\$clone_path"'     "clone under /workspace only"
 
+# --- Internal Docker daemon mode exists for opt-in DinD sessions ---
+assert_present 'SAFE_AGENTIC_INTERNAL_DOCKERD'           "internal dockerd mode"
+assert_present 'exec dockerd --group agent --host'       "internal dockerd exec"
+
 # --- Claude uses --dangerously-skip-permissions (container IS sandbox) ---
 assert_present 'exec claude --dangerously-skip-permissions'  "claude skip-permissions"
 

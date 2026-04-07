@@ -36,6 +36,10 @@ ARG DELTA_SHA256_AMD64=ea4f0222950ee750a3d38dd80d03bce4cee07a3f63928fc47548383bc
 ARG DELTA_SHA256_ARM64=0edc36cf514f1bd84becac3e94ee8ae9f8818c6a1f99f7b2ee67b362afa253d3
 
 ARG AWSCLI_VERSION=2.34.25
+ARG BUN_VERSION=1.2.23
+ARG BUN_SHA256_AMD64=cf0ed0a920799d576ffde4e0cae66d732bf23c2530407f26f59c7831dffe1f0e
+ARG BUN_SHA256_ARM64=6a7a98c546d084a845deda62eb2a5b94a6a14a63ea81cf9186d46bf55bf910a9
+ARG PNPM_VERSION=10.33.0
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -78,9 +82,18 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     | gpg --dearmor -o /usr/share/keyrings/githubcli.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
     > /etc/apt/sources.list.d/github-cli.list \
+ && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
     bat \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-ce \
+    docker-ce-cli \
+    docker-compose-plugin \
     gh \
     kubectl \
     nodejs \
@@ -205,6 +218,22 @@ RUN ARCH=$(dpkg --print-architecture) \
  && dpkg -i /tmp/delta.deb \
  && rm -f /tmp/delta.deb
 
+RUN ARCH=$(dpkg --print-architecture) \
+ && case "$ARCH" in \
+      amd64) BUN_ARCH=x64; BUN_SHA256="$BUN_SHA256_AMD64" ;; \
+      arm64) BUN_ARCH=aarch64; BUN_SHA256="$BUN_SHA256_ARM64" ;; \
+      *) echo "Unsupported Bun arch: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSLo /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BUN_ARCH}.zip" \
+ && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
+ && unzip -q /tmp/bun.zip -d /tmp \
+ && install -m 0755 "/tmp/bun-linux-${BUN_ARCH}/bun" /usr/local/bin/bun \
+ && rm -rf /tmp/bun.zip "/tmp/bun-linux-${BUN_ARCH}"
+
+RUN npm install --global corepack@latest \
+ && corepack enable pnpm \
+ && corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
 RUN if id -u agent >/dev/null 2>&1; then \
       :; \
     elif getent passwd 1000 >/dev/null; then \
@@ -217,6 +246,8 @@ RUN if id -u agent >/dev/null 2>&1; then \
       useradd -m -s /bin/bash -u 1000 agent; \
     fi \
  && usermod -g agent -G "" agent \
+ && printf 'agent:100000:65536\n' >> /etc/subuid \
+ && printf 'agent:100000:65536\n' >> /etc/subgid \
  && mkdir -p /workspace /opt/agent-cli \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 

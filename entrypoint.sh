@@ -13,6 +13,15 @@ else
   source "$ENTRYPOINT_DIR/bin/repo-url.sh"
 fi
 
+if [ "${SAFE_AGENTIC_INTERNAL_DOCKERD:-}" = "1" ]; then
+  SOCKET_PATH="${SAFE_AGENTIC_DOCKER_SOCKET:-/run/safe-agentic-docker/docker.sock}"
+  DATA_ROOT="${SAFE_AGENTIC_DOCKER_DATA_ROOT:-/var/lib/docker}"
+
+  echo "[entrypoint] Launching internal Docker daemon..."
+  mkdir -p "$(dirname "$SOCKET_PATH")" "$DATA_ROOT"
+  exec dockerd --group agent --host "unix://$SOCKET_PATH" --data-root "$DATA_ROOT"
+fi
+
 # ---------------------------------------------------------------------------
 # Runtime config (written to tmpfs — rootfs is read-only)
 # ---------------------------------------------------------------------------

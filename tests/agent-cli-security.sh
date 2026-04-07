@@ -106,6 +106,9 @@ assert_contains "$spawn_run" "--memory 8g"
 assert_contains "$spawn_run" "--cpus 4"
 assert_not_contains "$spawn_run" "--cap-add"
 assert_not_contains "$spawn_run" "src=agent-claude-auth"
+assert_not_contains "$spawn_run" "DOCKER_HOST="
+assert_not_contains "$spawn_run" "/home/agent/.docker"
+assert_not_contains "$spawn_run" "src=agent-gh-auth"
 assert_not_contains "$spawn_run" "volume-nocopy"
 
 if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$REPO_DIR/bin/agent" spawn claude -- --privileged >"$ERR_LOG" 2>&1; then

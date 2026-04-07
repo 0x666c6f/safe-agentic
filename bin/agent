@@ -40,6 +40,7 @@ vm_copy_from_host() {
 }
 
 source "$REPO_DIR/bin/agent-lib.sh"
+source "$REPO_DIR/bin/docker-runtime.sh"
 
 load_user_defaults
 apply_default_identity
@@ -49,10 +50,16 @@ DEFAULT_MEMORY="${SAFE_AGENTIC_DEFAULT_MEMORY:-8g}"
 DEFAULT_PIDS_LIMIT="${SAFE_AGENTIC_DEFAULT_PIDS_LIMIT:-512}"
 DEFAULT_NETWORK="${SAFE_AGENTIC_DEFAULT_NETWORK:-}"
 DEFAULT_REUSE_AUTH=false
+DEFAULT_REUSE_GH_AUTH=false
 DEFAULT_SSH=false
+DEFAULT_DOCKER=false
+DEFAULT_DOCKER_SOCKET=false
 
 bool_is_true "${SAFE_AGENTIC_DEFAULT_REUSE_AUTH:-}" && DEFAULT_REUSE_AUTH=true
+bool_is_true "${SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH:-}" && DEFAULT_REUSE_GH_AUTH=true
 bool_is_true "${SAFE_AGENTIC_DEFAULT_SSH:-}" && DEFAULT_SSH=true
+bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER:-}" && DEFAULT_DOCKER=true
+bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET:-}" && DEFAULT_DOCKER_SOCKET=true
 
 die_with_help() {
   local topic="$1"
@@ -112,6 +119,9 @@ Options:
   --name NAME
   --ssh
   --reuse-auth
+  --reuse-gh-auth
+  --docker
+  --docker-socket
   --network NAME
   --memory SIZE
   --cpus N
@@ -124,6 +134,8 @@ Notes:
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
   - SSH repos require --ssh; aliases auto-enable it
+  - --docker starts an internal Docker daemon sidecar
+  - --docker-socket mounts the VM Docker socket directly (dangerous)
 EOF
 }
 
@@ -134,6 +146,9 @@ Usage: agent shell [options]
 Options:
   --repo URL
   --ssh
+  --reuse-gh-auth
+  --docker
+  --docker-socket
   --network NAME
   --memory SIZE
   --cpus N
@@ -199,6 +214,7 @@ Checks:
   - orb installed and reachable
   - VM exists
   - Docker works in VM
+  - VM Docker socket visible
   - hardening still applied
   - image present
   - VM SSH agent socket visible
@@ -241,6 +257,9 @@ show_dry_run() {
   else
     info "Would use network: $network_name"
   fi
+  if [ "${DOCKER_RUNTIME_KIND:-off}" = "dind" ]; then
+    info "Would start Docker sidecar: $(render_command orb run -m "$VM_NAME" docker run -d --name "$DOCKER_RUNTIME_CONTAINER" --hostname "$DOCKER_RUNTIME_CONTAINER" --pull=never --privileged --user root --network "$network_name" --label "app=$IMAGE_NAME" --label "safe-agentic.type=docker-runtime" --label "safe-agentic.parent=$ACTIVE_CONTAINER_NAME" --mount "type=volume,src=$DOCKER_RUNTIME_SOCKET_VOLUME,dst=$DOCKER_INTERNAL_SOCKET_DIR" --mount "type=volume,src=$DOCKER_RUNTIME_DATA_VOLUME,dst=/var/lib/docker" --tmpfs /tmp:rw,nosuid,size=512m -e SAFE_AGENTIC_INTERNAL_DOCKERD=1 -e "SAFE_AGENTIC_DOCKER_SOCKET=$DOCKER_INTERNAL_SOCKET_PATH" -e SAFE_AGENTIC_DOCKER_DATA_ROOT=/var/lib/docker "$IMAGE_NAME:$IMAGE_TAG")"
+  fi
   info "Would run: $(render_command orb run -m "$VM_NAME" "${docker_cmd[@]}")"
 }
 
@@ -251,6 +270,9 @@ cmd_spawn() {
   local name=""
   local enable_ssh="$DEFAULT_SSH"
   local reuse_auth="$DEFAULT_REUSE_AUTH"
+  local reuse_gh_auth="$DEFAULT_REUSE_GH_AUTH"
+  local enable_docker="$DEFAULT_DOCKER"
+  local use_docker_socket="$DEFAULT_DOCKER_SOCKET"
   local custom_network_name="$DEFAULT_NETWORK"
   local memory="$DEFAULT_MEMORY"
   local cpus="$DEFAULT_CPUS"
@@ -258,7 +280,7 @@ cmd_spawn() {
   local managed_network=true
   local network_name=""
   local dry_run=false
-  local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name
+  local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
 
@@ -285,6 +307,19 @@ cmd_spawn() {
         ;;
       --reuse-auth)
         reuse_auth=true
+        shift
+        ;;
+      --reuse-gh-auth)
+        reuse_gh_auth=true
+        shift
+        ;;
+      --docker)
+        enable_docker=true
+        shift
+        ;;
+      --docker-socket)
+        enable_docker=true
+        use_docker_socket=true
         shift
         ;;
       --network)
@@ -330,6 +365,7 @@ cmd_spawn() {
   [ -n "$agent_type" ] || die_with_help "$topic" "Agent type required."
   [ -n "$name" ] && validate_name_component "$name" "Container name"
   validate_pids_limit "$pids_limit"
+  $use_docker_socket && enable_docker=true
   if [ ${#repos[@]} -gt 0 ]; then
     ensure_ssh_for_repos "$enable_ssh" "${repos[@]}"
   else
@@ -390,6 +426,36 @@ cmd_spawn() {
     docker_cmd+=(--label "safe-agentic.auth=ephemeral")
   fi
 
+  docker_cmd+=(-e "GH_CONFIG_DIR=/home/agent/.config/gh")
+  if $reuse_gh_auth; then
+    if auth_volume_exists "agent-gh-auth"; then
+      info "GitHub CLI auth: shared volume reused (agent-gh-auth)"
+    else
+      info "GitHub CLI auth: shared volume will be created (agent-gh-auth)"
+    fi
+    append_named_volume "agent-gh-auth" "/home/agent/.config/gh"
+    gh_auth_label="shared"
+  else
+    info "GitHub CLI auth: per-session (ephemeral)"
+    gh_auth_label="ephemeral"
+  fi
+  docker_cmd+=(--label "safe-agentic.gh-auth=$gh_auth_label")
+
+  reset_docker_runtime_state
+  docker_label="off"
+  if $enable_docker; then
+    if $use_docker_socket; then
+      info "Docker: VM daemon socket mounted directly (dangerous)"
+      append_host_docker_socket_access
+      docker_label="host-socket"
+    else
+      info "Docker: internal daemon sidecar (DinD)"
+      append_internal_docker_access "$container_name"
+      docker_label="dind"
+    fi
+  fi
+  docker_cmd+=(--label "safe-agentic.docker=$docker_label")
+
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
 
   if $dry_run; then
@@ -397,6 +463,9 @@ cmd_spawn() {
     return 0
   fi
 
+  if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
+    start_internal_docker_runtime "$container_name" "$network_name"
+  fi
   run_container "$managed_network" "$network_name"
 }
 
@@ -404,6 +473,9 @@ cmd_shell() {
   local topic="shell"
   local -a repos=()
   local enable_ssh="$DEFAULT_SSH"
+  local reuse_gh_auth="$DEFAULT_REUSE_GH_AUTH"
+  local enable_docker="$DEFAULT_DOCKER"
+  local use_docker_socket="$DEFAULT_DOCKER_SOCKET"
   local custom_network_name="$DEFAULT_NETWORK"
   local memory="$DEFAULT_MEMORY"
   local cpus="$DEFAULT_CPUS"
@@ -411,7 +483,7 @@ cmd_shell() {
   local managed_network=true
   local network_name=""
   local dry_run=false
-  local timestamp container_name repos_joined="" repo_display network_mode_label
+  local timestamp container_name repos_joined="" repo_display network_mode_label gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
 
@@ -424,6 +496,19 @@ cmd_shell() {
         ;;
       --ssh)
         enable_ssh=true
+        shift
+        ;;
+      --reuse-gh-auth)
+        reuse_gh_auth=true
+        shift
+        ;;
+      --docker)
+        enable_docker=true
+        shift
+        ;;
+      --docker-socket)
+        enable_docker=true
+        use_docker_socket=true
         shift
         ;;
       --network)
@@ -467,6 +552,7 @@ cmd_shell() {
   done
 
   validate_pids_limit "$pids_limit"
+  $use_docker_socket && enable_docker=true
   if [ ${#repos[@]} -gt 0 ]; then
     ensure_ssh_for_repos "$enable_ssh" "${repos[@]}"
   else
@@ -511,6 +597,35 @@ cmd_shell() {
   fi
 
   build_container_runtime "$container_name" "" "$repos_joined" "$enable_ssh" "$network_name" "$memory" "$cpus" "$pids_limit" "$repo_display" "$network_mode_label"
+  docker_cmd+=(-e "GH_CONFIG_DIR=/home/agent/.config/gh")
+  if $reuse_gh_auth; then
+    if auth_volume_exists "agent-gh-auth"; then
+      info "GitHub CLI auth: shared volume reused (agent-gh-auth)"
+    else
+      info "GitHub CLI auth: shared volume will be created (agent-gh-auth)"
+    fi
+    append_named_volume "agent-gh-auth" "/home/agent/.config/gh"
+    gh_auth_label="shared"
+  else
+    info "GitHub CLI auth: per-session (ephemeral)"
+    gh_auth_label="ephemeral"
+  fi
+  docker_cmd+=(--label "safe-agentic.gh-auth=$gh_auth_label")
+
+  reset_docker_runtime_state
+  docker_label="off"
+  if $enable_docker; then
+    if $use_docker_socket; then
+      info "Docker: VM daemon socket mounted directly (dangerous)"
+      append_host_docker_socket_access
+      docker_label="host-socket"
+    else
+      info "Docker: internal daemon sidecar (DinD)"
+      append_internal_docker_access "$container_name"
+      docker_label="dind"
+    fi
+  fi
+  docker_cmd+=(--label "safe-agentic.docker=$docker_label")
   docker_cmd+=(--label "safe-agentic.auth=none")
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
 
@@ -519,6 +634,9 @@ cmd_shell() {
     return 0
   fi
 
+  if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
+    start_internal_docker_runtime "$container_name" "$network_name"
+  fi
   run_container "$managed_network" "$network_name"
 }
 
@@ -526,7 +644,7 @@ cmd_list() {
   require_vm
   vm_exec docker ps \
     --filter "name=^${CONTAINER_PREFIX}-" \
-    --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
+    --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.gh-auth"}}\t{{.Label "safe-agentic.docker"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
 }
 
 resolve_target_container() {
@@ -622,7 +740,9 @@ cmd_stop() {
     if [ -n "$ids" ]; then
       vm_exec docker stop $ids >/dev/null
       while IFS= read -r container_name; do
-        [ -n "$container_name" ] && remove_managed_network "$(network_name_for_container "$container_name")"
+        [ -n "$container_name" ] || continue
+        remove_docker_runtime_for_container "$container_name"
+        remove_managed_network "$(network_name_for_container "$container_name")"
       done <<< "$names"
       ok "All agent containers stopped."
     else
@@ -636,6 +756,7 @@ cmd_stop() {
 
   info "Stopping $name..."
   vm_exec docker stop "$name" >/dev/null
+  remove_docker_runtime_for_container "$name"
   remove_managed_network "$(network_name_for_container "$name")"
   ok "$name stopped."
 }
@@ -674,6 +795,8 @@ cmd_cleanup() {
     vm_exec docker rm $stopped >/dev/null
   fi
 
+  cleanup_all_docker_runtimes
+
   managed_networks=$(vm_exec docker network ls -q \
     --filter "label=app=$IMAGE_NAME" \
     --filter "label=safe-agentic.type=container-network" 2>/dev/null || echo "")
@@ -682,7 +805,7 @@ cmd_cleanup() {
   fi
 
   if $remove_auth; then
-    auth_vols=$(vm_exec docker volume ls -q 2>/dev/null | grep -E '^agent-(claude|codex)-auth$' || echo "")
+    auth_vols=$(vm_exec docker volume ls -q 2>/dev/null | grep -E '^agent-(claude|codex|gh)-auth$' || echo "")
     if [ -n "$auth_vols" ]; then
       vm_exec docker volume rm $auth_vols >/dev/null 2>&1 || true
     fi
@@ -805,6 +928,12 @@ cmd_diagnose() {
     diag_ok "Image '$IMAGE_NAME:$IMAGE_TAG' present"
   else
     diag_fail "Image '$IMAGE_NAME:$IMAGE_TAG' missing. Run 'agent update'."
+  fi
+
+  if vm_exec bash -c 'test -S /var/run/docker.sock'; then
+    diag_ok "VM Docker socket visible: /var/run/docker.sock"
+  else
+    diag_fail "VM Docker socket missing at /var/run/docker.sock."
   fi
 
   ssh_sock=$(vm_exec bash -c 'echo "${SSH_AUTH_SOCK:-}"' 2>/dev/null || true)

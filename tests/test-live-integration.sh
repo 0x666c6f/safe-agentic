@@ -65,6 +65,7 @@ prepare_live_agent_cli() {
 
   mkdir -p "$LIVE_AGENT_BIN"
   cp "$REPO_DIR/bin/agent-lib.sh" "$LIVE_AGENT_BIN/agent-lib.sh"
+  cp "$REPO_DIR/bin/docker-runtime.sh" "$LIVE_AGENT_BIN/docker-runtime.sh"
   cp "$REPO_DIR/bin/repo-url.sh" "$LIVE_AGENT_BIN/repo-url.sh"
   sed "s/^IMAGE_TAG=.*/IMAGE_TAG=\"$image_tag\"/" "$REPO_DIR/bin/agent" >"$LIVE_AGENT_BIN/agent"
   chmod +x "$LIVE_AGENT_BIN/agent"
@@ -167,7 +168,7 @@ assert_ok "osascript unavailable in VM" orb run -m "$VM_NAME" bash -lc '! comman
 
 image_smoke="$(orb run -m "$VM_NAME" docker run --rm --entrypoint bash "$IMAGE_NAME" -lc \
   'id;
-   command -v claude codex aws helm eza zoxide yq delta node npm >/dev/null;
+   command -v claude codex aws helm eza zoxide yq delta node npm pnpm bun terraform docker gh >/dev/null;
    test -f /home/agent/.ssh.baked/known_hosts;
    test -f /home/agent/.ssh.baked/config')"
 assert_contains "$image_smoke" "uid=1000(agent) gid=1000(agent)" "image runs as agent user"
