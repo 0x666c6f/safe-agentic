@@ -156,7 +156,7 @@ git clone/push inside container
 
 ### Build context safety
 
-`agent update` uses `git archive` to send only git-tracked files to the VM. Local `.env`, untracked files, and secrets are never copied.
+`agent update` sends only git-tracked files that exist on disk to the VM. Untracked files (including `.env` or scratch files) are excluded from the build context.
 
 ## Per-agent isolation
 

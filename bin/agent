@@ -308,13 +308,13 @@ cmd_update() {
   require_cmd git
   require_vm
 
-  info "Pushing build context to VM (tracked + staged files only)..."
-  # Use git ls-files to collect tracked/staged files from the working tree.
-  # This works before the first commit (no HEAD needed) and always reflects
-  # the current on-disk state, including uncommitted edits.
+  info "Pushing build context to VM (tracked files only)..."
+  # List only tracked/staged files (-c), NOT untracked (-o).
+  # Filter to files that still exist on disk (handles deleted-but-tracked).
   local tarball
   tarball=$(mktemp /tmp/safe-agentic-ctx-XXXXXX.tar.gz)
-  git -C "$REPO_DIR" ls-files -co --exclude-standard -z \
+  git -C "$REPO_DIR" ls-files -c -z \
+    | ( cd "$REPO_DIR" && xargs -0 -I{} sh -c 'test -e "$1" && printf "%s\0" "$1"' _ {} ) \
     | tar -C "$REPO_DIR" --null -T - -czf "$tarball"
   orb push -m "$VM_NAME" "$tarball" /tmp/safe-agentic-ctx.tar.gz
   vm_exec bash -c "rm -rf /tmp/safe-agentic && mkdir -p /tmp/safe-agentic && tar -xzf /tmp/safe-agentic-ctx.tar.gz -C /tmp/safe-agentic"
