@@ -13,21 +13,27 @@ macOS Host (bin/agent CLI)
   └── OrbStack VM "safe-agentic" (Ubuntu 24.04, hardened)
        └── Docker containers (ephemeral, per-agent)
             ├── Read-only rootfs + tmpfs scratch
-            ├── Per-session OAuth + per-agent caches
+            ├── cap-drop ALL + no-new-privileges
+            ├── Per-session OAuth + ephemeral cache volumes
+            ├── Dedicated bridge network per container
             └── SSH agent OFF unless --ssh
 ```
 
-Three isolation boundaries: macOS ↔ VM (OrbStack + hardening), VM ↔ container (Docker), container ↔ container (separate volumes/namespaces).
+Three isolation boundaries: macOS ↔ VM (OrbStack + hardening + userns-remap), VM ↔ container (Docker), container ↔ container (separate volumes/networks/namespaces).
+
+Full diagrams in `docs/architecture.md`.
 
 ## Key Files & Relationships
 
-- **`bin/agent`** — Host-side CLI dispatcher. All commands (`spawn`, `setup`, `update`, etc.) are `cmd_*` functions. Uses bash arrays for docker commands (prevents shell-splitting injection). Talks to VM via `orb run -m safe-agentic`.
-- **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that add `--ssh` by default and delegate to `bin/agent spawn`.
-- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`), installs Docker CE. Re-run on every `agent vm start` because OrbStack may restore mounts.
-- **`Dockerfile`** — 6 layers ordered by change frequency: system packages → runtimes (Node 22, Python 3.12, Go 1.23) → SRE tools → modern CLI → AI CLIs (cache-bust ARG) → user setup. No sudo. GitHub SSH host keys baked in. Configs stored in `.ssh.baked/` and `.config.baked/` (read-only rootfs; entrypoint copies to tmpfs).
-- **`entrypoint.sh`** — Container init: copies baked configs to writable tmpfs, configures git, clones repos into `/workspace/<org>/<repo>`, launches agent or shell based on `AGENT_TYPE` env var.
-- **`config/bashrc`, `config/starship.toml`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
-- **`op-env.sh`** — Template for optional 1Password secret injection (AWS creds, etc.). Not used for base OAuth flow.
+- **`bin/agent`** — Host-side CLI dispatcher. All commands (`spawn`, `setup`, `update`, etc.) are `cmd_*` functions. Sources `bin/agent-lib.sh` for container/network helpers. Talks to VM via `orb run -m safe-agentic`.
+- **`bin/agent-lib.sh`** — Shared functions: input validation (`validate_name_component`, `validate_network_name`), network lifecycle (`create_managed_network`, `remove_managed_network`), container runtime construction (`build_container_runtime`, `append_runtime_hardening`), volume helpers. Docker commands built as bash arrays to prevent injection.
+- **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that auto-detect SSH URLs (`git@`, `ssh://`) and delegate to `bin/agent spawn`.
+- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`. Re-run on every `agent vm start`.
+- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). No `curl | bash`. Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. AI CLIs installed via `npm ci` with lockfile. Non-root `agent` user, no sudo, no supplemental groups.
+- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent or shell.
+- **`config/bashrc`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
+- **`package.json`, `package-lock.json`** — Pins Claude Code and Codex CLI versions for reproducible `npm ci` installs.
+- **`op-env.sh`** — Template for optional 1Password secret injection. Not used for base OAuth flow.
 
 ## Commands
 
@@ -39,15 +45,15 @@ agent setup
 agent spawn claude --ssh --repo git@github.com:org/repo.git
 agent spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
 
-# Quick aliases (include --ssh)
+# Quick aliases (auto-detect SSH from URL)
 agent-claude git@github.com:org/repo.git
-agent-codex git@github.com:org/repo.git
+agent-codex https://github.com/org/repo.git
 
 # Management
 agent list
 agent attach <name>
 agent stop <name|--all>
-agent cleanup                  # removes containers + per-agent volumes
+agent cleanup                  # removes containers + shared auth + managed networks
 
 # Image rebuild
 agent update                   # cached build
@@ -58,6 +64,12 @@ agent update --full            # no cache
 agent vm ssh                   # debug the VM
 agent vm start                 # start + re-harden
 agent vm stop
+
+# Resource tuning
+agent spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
+
+# Untrusted repos (no SSH, no internet)
+agent spawn claude --repo https://... --network agent-isolated
 ```
 
 ## Security Model
@@ -65,28 +77,74 @@ agent vm stop
 | Default | Override |
 |---------|----------|
 | SSH agent OFF | `--ssh` |
-| Per-session auth (discarded on cleanup) | `--reuse-auth` |
-| Read-only rootfs | `-- --read-write` |
-| Capabilities dropped (ALL except SETUID/SETGID) | `-- --cap-add=...` |
+| Per-session auth (ephemeral volume) | `--reuse-auth` |
+| Read-only rootfs | — |
+| cap-drop ALL + no-new-privileges | — |
+| Dedicated bridge network per container | `--network <name>` |
+| Memory 8g, CPU 4, PIDs 512 | `--memory`, `--cpus`, `--pids-limit` |
 | GitHub SSH host keys baked + StrictHostKeyChecking yes | — |
-| Per-agent cache volumes | — |
-| No sudo | — |
+| Docker userns-remap in VM | — |
+| No sudo, no supplemental groups | — |
+| Git identity from host env vars | — |
 
-Extra docker flags go after `--` and are inserted **before** the image name (they're docker run flags, not entrypoint args).
+Unsafe Docker flags (`--privileged`, `host` network, `--` passthrough) are blocked. The `--network` flag validates against `host`, `bridge`, and `container:*` modes.
+
+## Testing
+
+```bash
+# Run all tests (14 suites, 200+ assertions)
+bash tests/run-all.sh
+
+# Run a single suite
+bash tests/test-docker-cmd.sh
+
+# Syntax check only
+bash tests/test-syntax.sh
+```
+
+Test files in `tests/`:
+- `test-syntax.sh` — `bash -n` on all scripts
+- `test-validation.sh` — name and network input validation
+- `test-repo-clone-path.sh` — URL parsing, traversal, injection
+- `test-docker-cmd.sh` — security flags, volumes, SSH, git identity
+- `test-dockerfile.sh` — checksums, no curl|bash, non-root user
+- `test-entrypoint.sh` — git config, clone validation, agent launch
+- `test-vm-setup.sh` — mount blocking, userns-remap, fstab
+- `test-cli-dispatch.sh` — help, errors, aliases, multi-repo
+- `test-agent-lifecycle.sh` — attach, stop, cleanup, custom networks
+- `test-update.sh` — tracked-only build context, --quick/--full
+- `test-live-integration.sh` — real VM/Docker smoke tests (optional, skip-aware)
+- `agent-cli-security.sh` — end-to-end security regressions
+
+Tests use a fake `orb` binary to capture docker commands without a real VM.
 
 ## Conventions
 
 - All bash scripts use `set -euo pipefail`.
 - Docker commands built as bash arrays (`local -a docker_cmd=(...)`) to prevent injection.
 - VM operations go through `vm_exec()` / `orb run -m "$VM_NAME"`.
-- Dockerfile layers are architecture-aware (`dpkg --print-architecture` + conditionals for arm64/x86_64).
-- Read-only rootfs pattern: bake configs into `.foo.baked/`, entrypoint copies to tmpfs-mounted `.foo/` at runtime.
-- Idempotent operations: check state before applying (e.g., `mountpoint -q`, `command -v`, `groups | grep -q`).
-- Repo clone paths use `org/repo` (extracted from git URL via sed) to avoid basename collisions.
-- Build context uses `git ls-files -c` filtered by `test -e` — only tracked files that exist on disk. No untracked files, no deleted-but-tracked files.
+- Dockerfile uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]` and verifies all downloads (SHA256 or GPG).
+- Read-only rootfs pattern: bake configs into `.ssh.baked/`, entrypoint copies to tmpfs at runtime.
+- Repo clone paths validated by `repo_clone_path()`: rejects traversal, dot-prefixed names, special characters; only `https://` and `ssh://` URL schemes plus scp-style `git@host:org/repo`.
+- Build context uses `git ls-files -c` filtered by `test -e` — only tracked files that exist on disk.
+- Input validation: container names via `validate_name_component`, network names via `validate_network_name` (blocks `host`, `bridge`, `container:*`).
+
+## Documentation
+
+- `docs/architecture.md` — Mermaid diagrams: system overview, isolation boundaries, component map, sequence flows (setup, spawn, SSH auth, OAuth, lifecycle, build)
+- `docs/quickstart.md` — 5-step getting started
+- `docs/usage.md` — full command reference with workflows
+- `docs/security.md` — threat model, supply chain, filesystem layout
+
+## Skills
+
+Agent skills in `.claude/skills/` and `.codex/skills/`:
+- `agent-spawn` — spawn a sandboxed agent
+- `agent-manage` — list/attach/stop/cleanup
+- `agent-setup` — first-time setup, rebuild, troubleshooting
 
 ## Known Limitations
 
-- OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart.
+- OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `agent vm start`.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
-- Some build dependencies use mutable upstream sources (`curl | bash`, GitHub `/latest`).
+- Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.
