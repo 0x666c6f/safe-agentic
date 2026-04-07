@@ -7,6 +7,7 @@
 `entrypoint.sh` is the container entrypoint: git setup, repo cloning, agent launch.
 `Dockerfile` defines the agent image and bundled tools.
 `config/` contains shell and prompt config copied into the container.
+`.claude/skills/` and `.codex/skills/` contain repo-local Claude/Codex skill bundles; keep equivalent skills aligned when adding or changing them.
 Root docs live in `README.md`; keep operational/security behavior documented there when changing isolation or auth flows.
 
 ## Build, Test, and Development Commands
@@ -27,6 +28,7 @@ Verification commands:
 bash -n bin/agent entrypoint.sh vm/setup.sh   # shell syntax check
 agent shell --repo git@github.com:org/repo.git
 agent cleanup
+codex skills validate .codex/skills/<skill-name>
 ```
 
 ## Coding Style & Naming Conventions
@@ -43,6 +45,7 @@ No formal test framework yet. Minimum bar:
 
 - run `bash -n` on changed scripts
 - smoke-test affected flows (`agent setup`, `agent spawn`, `agent shell`, cleanup path)
+- validate touched `.codex/skills/*` with `quick_validate.py`; keep matching `.claude/skills/*/SKILL.md` and `.codex/skills/*/SKILL.md` in sync
 - verify README/usage text when CLI flags or behavior change
 
 If fixing a bug, add the smallest regression check that fits; for shell changes, that can be a reproducible command sequence documented in the PR.

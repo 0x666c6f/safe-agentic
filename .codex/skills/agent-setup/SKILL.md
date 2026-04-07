@@ -34,7 +34,7 @@ For SSH repos, enable 1Password SSH agent:
 
 The user needs `safe-agentic/bin` in their PATH:
 ```bash
-export PATH="$PATH:$HOME/perso/safe-agentic/bin"
+export PATH="$PATH:/path/to/safe-agentic/bin"
 ```
 
 ## Rebuild the image

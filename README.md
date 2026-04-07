@@ -70,7 +70,7 @@ agent spawn claude --repo <untrusted-repo> --network agent-isolated
    - SSH key for GitHub configured in 1Password
 3. **PATH**: Add `safe-agentic/bin` to your shell:
    ```bash
-   export PATH="$PATH:$HOME/perso/safe-agentic/bin"
+   export PATH="$PATH:/path/to/safe-agentic/bin"
    ```
 
 ## Setup

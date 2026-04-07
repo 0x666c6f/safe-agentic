@@ -15,7 +15,7 @@ Enable 1Password SSH agent (optional, needed for private repos):
 
 ```bash
 # Add to ~/.zshrc or ~/.bashrc
-export PATH="$PATH:$HOME/perso/safe-agentic/bin"
+export PATH="$PATH:/path/to/safe-agentic/bin"
 ```
 
 ## 3. One-time setup
