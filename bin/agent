@@ -69,14 +69,16 @@ cmd_setup() {
   # Build Docker image inside VM
   cmd_update
 
-  ok "Setup complete. Run 'agent spawn claude --repo <url>' to start."
+  ok "Setup complete. Run 'agent spawn claude --ssh --repo <url>' to start."
 }
 
 cmd_spawn() {
   local agent_type=""
-  local repos=()
+  local -a repos=()
   local name=""
-  local extra_args=()
+  local enable_ssh=false
+  local reuse_auth=false
+  local -a extra_args=()
   local parsing_extra=false
 
   while [ $# -gt 0 ]; do
@@ -90,14 +92,18 @@ cmd_spawn() {
         shift; repos+=("$1"); shift ;;
       --name)
         shift; name="$1"; shift ;;
+      --ssh)
+        enable_ssh=true; shift ;;
+      --reuse-auth)
+        reuse_auth=true; shift ;;
       --)
         parsing_extra=true; shift ;;
       *)
-        die "Unknown argument: $1. Usage: agent spawn <claude|codex> [--repo URL...] [--name NAME] [-- extra args]" ;;
+        die "Unknown argument: $1. Usage: agent spawn <claude|codex> [--repo URL...] [--name NAME] [--ssh] [--reuse-auth] [-- docker flags]" ;;
     esac
   done
 
-  [ -z "$agent_type" ] && die "Agent type required. Usage: agent spawn <claude|codex> [--repo URL...]"
+  [ -z "$agent_type" ] && die "Agent type required. Usage: agent spawn <claude|codex> [--repo URL...] [--ssh]"
 
   require_cmd orb
   require_vm
@@ -116,61 +122,101 @@ cmd_spawn() {
   info "Spawning $agent_type agent: $container_name"
   [ -n "$repos_joined" ] && info "Repos: $repos_joined"
 
-  # Resolve SSH_AUTH_SOCK inside the VM
-  local vm_ssh_sock
-  vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
-
-  # Build docker run command
-  local docker_cmd="docker run -it --rm"
-  docker_cmd+=" --name $container_name"
-  docker_cmd+=" --hostname $container_name"
-  docker_cmd+=" -e AGENT_TYPE=$agent_type"
+  # Build docker run command as an array (prevents shell-splitting injection)
+  local -a docker_cmd=(docker run -it --rm)
+  docker_cmd+=(--name "$container_name")
+  docker_cmd+=(--hostname "$container_name")
+  docker_cmd+=(-e "AGENT_TYPE=$agent_type")
 
   if [ -n "$repos_joined" ]; then
-    docker_cmd+=" -e REPOS=$repos_joined"
+    docker_cmd+=(-e "REPOS=$repos_joined")
   fi
 
-  # SSH agent forwarding (from VM's forwarded socket into container)
-  if [ -n "$vm_ssh_sock" ]; then
-    docker_cmd+=" -v $vm_ssh_sock:/run/ssh-agent.sock:ro"
-    docker_cmd+=" -e SSH_AUTH_SOCK=/run/ssh-agent.sock"
+  # --- Security defaults ---
+
+  # Drop all capabilities, add back only SETUID/SETGID (for apt if needed)
+  docker_cmd+=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID)
+  # Read-only root filesystem
+  docker_cmd+=(--read-only)
+  # Writable tmpfs for scratch dirs
+  docker_cmd+=(--tmpfs /tmp:rw,noexec,nosuid,size=512m)
+  docker_cmd+=(--tmpfs /var/tmp:rw,noexec,nosuid,size=256m)
+  docker_cmd+=(--tmpfs /run:rw,noexec,nosuid,size=16m)
+  # Writable workspace for cloned repos
+  docker_cmd+=(-v "${container_name}-workspace:/workspace")
+  # Writable home areas not covered by cache mounts
+  docker_cmd+=(--tmpfs "/home/agent/.config:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
+  docker_cmd+=(--tmpfs "/home/agent/.ssh:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
+  docker_cmd+=(--tmpfs "/home/agent/.gitconfig:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
+  docker_cmd+=(--tmpfs "/home/agent/.local:rw,noexec,nosuid,uid=1000,gid=1000,size=64m")
+
+  # --- SSH agent: opt-in only ---
+  if $enable_ssh; then
+    local vm_ssh_sock
+    vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
+    if [ -n "$vm_ssh_sock" ]; then
+      docker_cmd+=(-v "$vm_ssh_sock:/run/ssh-agent.sock:ro")
+      docker_cmd+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
+      info "SSH agent forwarding: enabled"
+    else
+      warn "No SSH_AUTH_SOCK in VM. Git SSH operations may not work."
+    fi
   else
-    warn "No SSH_AUTH_SOCK in VM. Git SSH operations may not work."
+    if [ -n "$repos_joined" ] && echo "$repos_joined" | grep -q "git@"; then
+      warn "SSH repos detected but --ssh not passed. Clone will fail without SSH agent."
+      warn "Re-run with --ssh to enable SSH agent forwarding."
+    fi
   fi
 
-  # OAuth auth volume — only mount the one matching this agent type
-  case "$agent_type" in
-    claude) docker_cmd+=" -v agent-claude-auth:/home/agent/.claude" ;;
-    codex)  docker_cmd+=" -v agent-codex-auth:/home/agent/.codex" ;;
-  esac
+  # --- Auth volumes ---
+  if $reuse_auth; then
+    # Shared auth volume — persists across sessions (opt-in)
+    case "$agent_type" in
+      claude) docker_cmd+=(-v "agent-claude-auth:/home/agent/.claude") ;;
+      codex)  docker_cmd+=(-v "agent-codex-auth:/home/agent/.codex") ;;
+    esac
+    info "Auth: reusing shared session"
+  else
+    # Per-session auth volume — isolated, discarded on cleanup (default)
+    case "$agent_type" in
+      claude) docker_cmd+=(-v "${container_name}-claude-auth:/home/agent/.claude") ;;
+      codex)  docker_cmd+=(-v "${container_name}-codex-auth:/home/agent/.codex") ;;
+    esac
+    info "Auth: per-session (use --reuse-auth to persist)"
+  fi
 
   # Per-agent cache volumes (isolated — prevents cross-agent cache poisoning)
-  docker_cmd+=" -v ${container_name}-npm-cache:/home/agent/.npm"
-  docker_cmd+=" -v ${container_name}-pip-cache:/home/agent/.cache/pip"
-  docker_cmd+=" -v ${container_name}-go-cache:/home/agent/go"
-  docker_cmd+=" -v ${container_name}-terraform-cache:/home/agent/.terraform.d/plugin-cache"
+  docker_cmd+=(-v "${container_name}-npm-cache:/home/agent/.npm")
+  docker_cmd+=(-v "${container_name}-pip-cache:/home/agent/.cache/pip")
+  docker_cmd+=(-v "${container_name}-go-cache:/home/agent/go")
+  docker_cmd+=(-v "${container_name}-terraform-cache:/home/agent/.terraform.d/plugin-cache")
 
   # Extra docker run flags (e.g., --network agent-isolated) go BEFORE the image name
   if [ ${#extra_args[@]} -gt 0 ]; then
-    for arg in "${extra_args[@]}"; do
-      docker_cmd+=" $arg"
-    done
+    docker_cmd+=("${extra_args[@]}")
   fi
 
-  docker_cmd+=" $IMAGE_NAME:$IMAGE_TAG"
+  docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
 
   # Launch container inside VM
-  # On first run, the agent CLI will show an OAuth URL — open it in your macOS browser
-  orb run -m "$VM_NAME" $docker_cmd
+  orb run -m "$VM_NAME" "${docker_cmd[@]}"
 }
 
 cmd_shell() {
-  local repos=()
+  local -a repos=()
+  local enable_ssh=false
+  local -a extra_args=()
+  local parsing_extra=false
 
   while [ $# -gt 0 ]; do
+    if $parsing_extra; then
+      extra_args+=("$1"); shift; continue
+    fi
     case "$1" in
       --repo) shift; repos+=("$1"); shift ;;
-      *) die "Unknown argument: $1. Usage: agent shell [--repo URL...]" ;;
+      --ssh) enable_ssh=true; shift ;;
+      --) parsing_extra=true; shift ;;
+      *) die "Unknown argument: $1. Usage: agent shell [--repo URL...] [--ssh] [-- docker flags]" ;;
     esac
   done
 
@@ -187,30 +233,51 @@ cmd_shell() {
 
   info "Starting interactive shell: $container_name"
 
-  local vm_ssh_sock
-  vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
-
-  local docker_cmd="docker run -it --rm"
-  docker_cmd+=" --name $container_name"
-  docker_cmd+=" --hostname $container_name"
+  # Build docker run command as array
+  local -a docker_cmd=(docker run -it --rm)
+  docker_cmd+=(--name "$container_name")
+  docker_cmd+=(--hostname "$container_name")
 
   if [ -n "$repos_joined" ]; then
-    docker_cmd+=" -e REPOS=$repos_joined"
+    docker_cmd+=(-e "REPOS=$repos_joined")
   fi
 
-  if [ -n "$vm_ssh_sock" ]; then
-    docker_cmd+=" -v $vm_ssh_sock:/run/ssh-agent.sock:ro"
-    docker_cmd+=" -e SSH_AUTH_SOCK=/run/ssh-agent.sock"
+  # Security defaults
+  docker_cmd+=(--cap-drop=ALL --cap-add=SETUID --cap-add=SETGID)
+  docker_cmd+=(--read-only)
+  docker_cmd+=(--tmpfs /tmp:rw,noexec,nosuid,size=512m)
+  docker_cmd+=(--tmpfs /var/tmp:rw,noexec,nosuid,size=256m)
+  docker_cmd+=(--tmpfs /run:rw,noexec,nosuid,size=16m)
+  docker_cmd+=(-v "${container_name}-workspace:/workspace")
+  docker_cmd+=(--tmpfs "/home/agent/.config:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
+  docker_cmd+=(--tmpfs "/home/agent/.ssh:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
+  docker_cmd+=(--tmpfs "/home/agent/.gitconfig:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
+  docker_cmd+=(--tmpfs "/home/agent/.local:rw,noexec,nosuid,uid=1000,gid=1000,size=64m")
+
+  # SSH agent: opt-in only
+  if $enable_ssh; then
+    local vm_ssh_sock
+    vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
+    if [ -n "$vm_ssh_sock" ]; then
+      docker_cmd+=(-v "$vm_ssh_sock:/run/ssh-agent.sock:ro")
+      docker_cmd+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
+    fi
   fi
 
   # No auth volumes for plain shell — no agent credentials exposed
-  docker_cmd+=" -v ${container_name}-npm-cache:/home/agent/.npm"
-  docker_cmd+=" -v ${container_name}-pip-cache:/home/agent/.cache/pip"
-  docker_cmd+=" -v ${container_name}-go-cache:/home/agent/go"
-  docker_cmd+=" -v ${container_name}-terraform-cache:/home/agent/.terraform.d/plugin-cache"
-  docker_cmd+=" $IMAGE_NAME:$IMAGE_TAG"
+  docker_cmd+=(-v "${container_name}-npm-cache:/home/agent/.npm")
+  docker_cmd+=(-v "${container_name}-pip-cache:/home/agent/.cache/pip")
+  docker_cmd+=(-v "${container_name}-go-cache:/home/agent/go")
+  docker_cmd+=(-v "${container_name}-terraform-cache:/home/agent/.terraform.d/plugin-cache")
 
-  orb run -m "$VM_NAME" $docker_cmd
+  # Extra docker run flags
+  if [ ${#extra_args[@]} -gt 0 ]; then
+    docker_cmd+=("${extra_args[@]}")
+  fi
+
+  docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
+
+  orb run -m "$VM_NAME" "${docker_cmd[@]}"
 }
 
 cmd_list() {
@@ -278,10 +345,10 @@ cmd_cleanup() {
     vm_exec docker rm $stopped
   fi
 
-  # Remove per-agent cache volumes (agent-*-npm-cache, etc.)
+  # Remove per-agent volumes (caches, auth, workspace)
   local orphan_vols
   orphan_vols=$(vm_exec docker volume ls -q --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null \
-    | grep -E '-(npm|pip|go|terraform)-cache$' || echo "")
+    | grep -E '-(npm|pip|go|terraform)-cache$|-(claude|codex)-auth$|-workspace$' || echo "")
   if [ -n "$orphan_vols" ]; then
     vm_exec docker volume rm $orphan_vols 2>/dev/null || true
   fi
@@ -320,18 +387,18 @@ cmd_update() {
   vm_exec bash -c "rm -rf /tmp/safe-agentic && mkdir -p /tmp/safe-agentic && tar -xzf /tmp/safe-agentic-ctx.tar.gz -C /tmp/safe-agentic"
   rm -f "$tarball"
 
-  local build_args=""
+  local -a build_args=()
   if $quick; then
     info "Quick update: rebuilding AI CLI layer only..."
-    build_args="--build-arg CLI_CACHE_BUST=$(date +%s)"
+    build_args+=(--build-arg "CLI_CACHE_BUST=$(date +%s)")
   elif $full; then
     info "Full rebuild: no cache..."
-    build_args="--no-cache"
+    build_args+=(--no-cache)
   else
     info "Building Docker image..."
   fi
 
-  vm_exec docker build $build_args -t "$IMAGE_NAME:$IMAGE_TAG" /tmp/safe-agentic/
+  vm_exec docker build "${build_args[@]}" -t "$IMAGE_NAME:$IMAGE_TAG" /tmp/safe-agentic/
 
   ok "Image $IMAGE_NAME:$IMAGE_TAG built successfully."
 }
@@ -362,19 +429,23 @@ cmd_vm() {
 
 cmd_help() {
   cat <<EOF
-${CYAN}safe-agentic${NC} — Isolated AI agent environment
+${CYAN}safe-agentic${NC} — Isolated AI agent environment (safe by default)
 
 ${GREEN}Setup:${NC}
   agent setup                  Create OrbStack VM, install Docker, build image
 
 ${GREEN}Agent management:${NC}
-  agent spawn <claude|codex> [--repo URL...] [--name NAME] [-- extra args]
-                               Spawn an isolated agent container
-  agent shell [--repo URL...]  Start interactive shell (no agent)
+  agent spawn <claude|codex> [options] [-- docker flags]
+    --repo URL                 Repo(s) to clone (repeatable)
+    --name NAME                Container name suffix
+    --ssh                      Enable SSH agent forwarding (off by default)
+    --reuse-auth               Reuse shared auth volume (per-session by default)
+  agent shell [--repo URL...] [--ssh]
+                               Interactive shell (no agent, no auth volumes)
   agent list                   List running agent containers
-  agent attach <name>          Attach second shell to running agent
-  agent stop <name|--all>      Stop agent container(s)
-  agent cleanup                Stop all + remove containers + prune images
+  agent attach <name>          Second shell into running agent
+  agent stop <name|--all>      Stop container(s)
+  agent cleanup                Stop all + remove containers + volumes
 
 ${GREEN}Maintenance:${NC}
   agent update [--quick|--full]  Rebuild Docker image (--quick: AI CLIs only)
@@ -385,19 +456,26 @@ ${GREEN}VM management:${NC}
   agent vm start               Start the VM (re-applies hardening)
 
 ${GREEN}Quick aliases:${NC}
-  agent-claude <repo-url>      Shorthand for: agent spawn claude --repo <url>
-  agent-codex <repo-url>       Shorthand for: agent spawn codex --repo <url>
+  agent-claude <repo-url>      agent spawn claude --ssh --repo <url>
+  agent-codex <repo-url>       agent spawn codex --ssh --repo <url>
+
+${GREEN}Security defaults:${NC}
+  - SSH agent forwarding OFF unless --ssh
+  - Per-session auth (login each time) unless --reuse-auth
+  - Read-only rootfs, dropped capabilities, tmpfs scratch dirs
+  - Per-agent cache volumes (no cross-agent contamination)
 
 ${GREEN}Auth:${NC}
   On first spawn, Claude/Codex will show an OAuth URL.
   Open it in your macOS browser to authenticate.
-  Login persists across containers (stored in Docker volumes).
+  Use --reuse-auth to persist login across sessions.
 
 ${GREEN}Examples:${NC}
   agent setup
-  agent spawn claude --repo git@github.com:myorg/myrepo.git
-  agent spawn codex --repo git@github.com:myorg/api.git --name api-fix
-  agent spawn claude --repo git@github.com:myorg/a.git --repo git@github.com:myorg/b.git
+  agent spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+  agent spawn claude --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
+  agent spawn codex --ssh --repo git@github.com:myorg/api.git --name api-fix
+  agent spawn claude --repo git@github.com:myorg/a.git -- --network agent-isolated
   agent list
   agent attach claude-api-fix
   agent stop --all

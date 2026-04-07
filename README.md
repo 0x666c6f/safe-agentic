@@ -1,12 +1,12 @@
 # safe-agentic
 
-Isolated environment for running AI coding agents (Claude Code, Codex) safely. Two layers of isolation: an OrbStack VM running Docker, with ephemeral per-agent containers inside.
+Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is per-session, containers are read-only with dropped capabilities.
 
 ## Architecture
 
 ```
 macOS Host
-  ├── 1Password (SSH keys for git)
+  ├── 1Password (SSH keys for git — only forwarded with --ssh)
   ├── OrbStack
   ├── bin/agent CLI (in your PATH)
   │
@@ -14,39 +14,44 @@ macOS Host
        ├── macOS filesystem access blocked (tmpfs over /Users, /mnt/mac)
        ├── macOS integration commands removed (open, osascript, code)
        ├── Docker daemon
-       ├── Auth volumes (OAuth tokens for Claude/Codex — shared)
-       ├── SSH agent (forwarded from macOS → 1Password)
        │
-       └── Ephemeral per-agent containers (isolated from each other)
-            ├── agent-claude-task1  (own cache volumes, cloned repos)
-            ├── agent-codex-task2   (own cache volumes, cloned repos)
-            └── ...
+       └── Ephemeral per-agent containers (hardened, isolated)
+            ├── Read-only rootfs, dropped capabilities
+            ├── Per-session auth (OAuth token per container)
+            ├── Per-agent cache volumes (no cross-contamination)
+            ├── SSH agent: OFF unless --ssh flag
+            └── Pinned GitHub SSH host keys (no TOFU)
 ```
 
 ## Threat model
 
-**Goal:** Protect your macOS host and your repos from unintended agent side-effects. This is a **damage containment** setup, not a security sandbox against actively malicious code.
+**Goal:** Protect your macOS host and repos from unintended agent side-effects. Safe by default — dangerous features require explicit opt-in.
 
 **What this protects against:**
-- Agents modifying files outside their cloned repo
-- Agents accessing your macOS filesystem (hardened: macOS mounts blocked in VM)
-- Agents interfering with each other (per-agent containers + per-agent caches)
-- Credential sprawl (OAuth tokens in volumes, SSH via forwarded agent)
+- Agents modifying files outside their cloned repo (read-only rootfs + per-agent workspace volume)
+- Agents accessing your macOS filesystem (VM hardened: macOS mounts blocked)
+- Agents interfering with each other (per-agent containers, caches, auth)
+- Credential exposure (SSH agent OFF by default, per-session OAuth tokens)
+- SSH MITM (GitHub host keys baked into image, StrictHostKeyChecking yes)
+- Container privilege escalation (capabilities dropped, no sudo)
+
+**Opt-in flags that widen the attack surface:**
+- `--ssh` — Forwards SSH agent into container. Required for `git@` repos. A compromised agent could use SSH keys for other operations.
+- `--reuse-auth` — Shares OAuth token volume across sessions. Compromised container could steal the token.
 
 **Known limitations:**
 - **OrbStack hardening is best-effort.** OrbStack does not yet support per-VM file sharing disable ([#169](https://github.com/orbstack/orbstack/issues/169)). `vm/setup.sh` mounts tmpfs over macOS paths and removes mac commands, but OrbStack may re-enable sharing on VM restart. Re-run `agent setup` after VM restarts, and disable file sharing in OrbStack UI (Settings > Linux) for defense-in-depth.
-- **`--dangerously-skip-permissions` is broad.** Claude Code in this mode can execute any command inside the container. Combined with SSH agent forwarding and network access, a malicious repo could push to other repos or exfiltrate data. This setup assumes you trust the repos you clone. For untrusted repos, add Docker network restrictions (see below).
-- **SSH agent is forwarded.** Any container can use your SSH keys for git operations. 1Password SSH agent may prompt per-use (if configured), but this is not guaranteed.
-- **OAuth volumes are type-scoped.** Claude containers only see `agent-claude-auth`, Codex only sees `agent-codex-auth`, plain shells see neither. But all Claude containers share the same Claude token volume.
+- **`--dangerously-skip-permissions` is broad.** Claude Code in this mode can execute any command inside the container. With `--ssh`, a malicious repo could push to other repos or exfiltrate data over the network.
+- **Build chain uses mutable upstream sources.** Some tools are fetched via `curl | bash` or GitHub `/latest`. Pin versions in Dockerfile for production use.
 
-**For untrusted repos (optional hardening):**
+**For untrusted repos:**
 ```bash
 # Create an isolated Docker network with no internet access (one-time)
 agent vm ssh
 docker network create --internal agent-isolated
 exit
 
-# Extra args after -- are passed as docker run flags (before the image name)
+# Spawn without SSH, on isolated network
 agent spawn claude --repo <untrusted-repo> -- --network agent-isolated
 ```
 
@@ -67,30 +72,33 @@ agent spawn claude --repo <untrusted-repo> -- --network agent-isolated
 agent setup
 ```
 
-This creates the OrbStack VM, hardens it (blocks macOS filesystem access, removes mac integration commands), installs Docker inside, and builds the agent container image.
+Creates OrbStack VM, hardens it, installs Docker, builds the agent image.
 
-**After VM restarts:** Re-run `agent setup` to re-apply hardening (OrbStack may restore mounts on restart).
+**After VM restarts:** Run `agent vm start` (auto re-applies hardening).
 
 ## Usage
 
 ### Spawn an agent
 
 ```bash
-# Claude Code on a repo
-agent spawn claude --repo git@github.com:myorg/myrepo.git
+# Claude Code with SSH (required for git@ repos)
+agent spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 
-# Codex on a repo
-agent spawn codex --repo git@github.com:myorg/myrepo.git
+# Codex with persistent auth (skip OAuth next time)
+agent spawn codex --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 
 # Named session
-agent spawn claude --repo git@github.com:myorg/api.git --name api-refactor
+agent spawn claude --ssh --repo git@github.com:myorg/api.git --name api-refactor
 
 # Multiple repos (cloned as org/repo to avoid name collisions)
-agent spawn claude --repo git@github.com:myorg/api.git --repo git@github.com:other/api.git
+agent spawn claude --ssh --repo git@github.com:myorg/api.git --repo git@github.com:other/api.git
 
-# Quick aliases
+# Quick aliases (include --ssh by default)
 agent-claude git@github.com:myorg/myrepo.git
 agent-codex git@github.com:myorg/myrepo.git
+
+# Untrusted repo — no SSH, isolated network
+agent spawn claude --repo git@github.com:myorg/untrusted.git -- --network agent-isolated
 ```
 
 ### Manage agents
@@ -100,13 +108,13 @@ agent list                  # List running agents
 agent attach <name>         # Open second shell in running agent
 agent stop <name>           # Stop specific agent
 agent stop --all            # Stop all agents
-agent cleanup               # Stop all + remove containers + prune per-agent cache volumes
+agent cleanup               # Stop all + remove containers + volumes
 ```
 
-### Interactive shell (no agent)
+### Interactive shell (no agent, no auth)
 
 ```bash
-agent shell --repo git@github.com:myorg/myrepo.git
+agent shell --ssh --repo git@github.com:myorg/myrepo.git
 ```
 
 ### Maintenance
@@ -122,7 +130,7 @@ agent update --full         # Full rebuild, no cache
 ```bash
 agent vm ssh                # SSH into the VM for debugging
 agent vm stop               # Stop the VM
-agent vm start              # Start the VM
+agent vm start              # Start the VM (re-applies hardening)
 ```
 
 ## Tools included
@@ -140,24 +148,38 @@ ripgrep (`rg`), fd, bat, eza, zoxide (`z`), fzf, jq, yq, delta, gh
 ### Runtimes
 Node.js 22, Python 3.12, Go 1.23
 
+## Security defaults
+
+| Feature | Default | Override |
+|---------|---------|----------|
+| SSH agent | OFF | `--ssh` |
+| Auth persistence | Per-session (isolated) | `--reuse-auth` |
+| Root filesystem | Read-only | `-- --read-write` (via extra docker flags) |
+| Capabilities | Dropped (ALL except SETUID/SETGID) | `-- --cap-add=...` |
+| GitHub host keys | Baked & pinned (StrictHostKeyChecking yes) | — |
+| Cache volumes | Per-agent (isolated) | — |
+| Sudo | Removed | — |
+
 ## How auth works
 
 ### Claude Code / Codex (OAuth)
 
-On first `agent spawn`, the CLI shows an OAuth URL. Open it in your macOS browser to authenticate with your subscription. The OAuth token is persisted in a shared Docker volume (`agent-claude-auth` / `agent-codex-auth`), so you only log in once.
+On first `agent spawn`, the CLI shows an OAuth URL. Open it in your macOS browser to authenticate with your subscription.
+
+- **Default**: OAuth token is stored in a per-session volume. You log in each time. Container exit discards the token.
+- **`--reuse-auth`**: Token persists in a shared volume (`agent-claude-auth` / `agent-codex-auth`). Log in once, reuse across sessions.
 
 ### Git (SSH via 1Password)
 
+Only available when `--ssh` is passed:
 ```
 git clone/push inside container
   → SSH agent socket forwarded: container → VM → macOS → 1Password
   → Uses SSH keys managed by 1Password
 ```
 
+GitHub host keys are baked into the image with `StrictHostKeyChecking yes` — no trust-on-first-use.
+
 ### Build context safety
 
 `agent update` sends only git-tracked files that exist on disk to the VM. Untracked files (including `.env` or scratch files) are excluded from the build context.
-
-## Per-agent isolation
-
-Each agent container gets its own cache volumes (npm, pip, go, terraform). This prevents cache poisoning across agents. The `agent cleanup` command removes these per-agent volumes along with stopped containers.

@@ -12,7 +12,7 @@ ENV LC_ALL=en_US.UTF-8
 # Layer 1: System packages (changes rarely)
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl wget unzip jq sudo openssh-client gnupg \
+    git curl wget unzip jq openssh-client gnupg \
     software-properties-common build-essential ca-certificates \
     python3 python3-pip python3-venv \
     locales apt-transport-https \
@@ -28,7 +28,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Go (latest 1.22+)
+# Go (pinned version)
 ARG GO_VERSION=1.23.4
 RUN ARCH=$(dpkg --print-architecture) \
   && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
@@ -119,16 +119,19 @@ ARG CLI_CACHE_BUST=1
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # =============================================================================
-# Layer 6: User setup
+# Layer 6: User setup (no sudo — principle of least privilege)
 # =============================================================================
 
-# Create non-root agent user
-RUN useradd -m -s /bin/bash -u 1000 agent \
-  && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
+# Create non-root agent user without sudo access.
+# Tools are pre-installed in the image. Use `agent update` to add new tools.
+RUN useradd -m -s /bin/bash -u 1000 agent
 
 # Create workspace and cache directories
 RUN mkdir -p /workspace \
   && chown agent:agent /workspace
+
+# Entrypoint installed as root (before USER switch) so it's in read-only rootfs
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER agent
 WORKDIR /workspace
@@ -144,14 +147,22 @@ RUN mkdir -p \
   /home/agent/.claude \
   /home/agent/.codex
 
-# Copy configs
-COPY --chown=agent:agent config/starship.toml /home/agent/.config/starship.toml
+# Baked configs stored in read-only paths; entrypoint copies to writable tmpfs at runtime.
+# This supports --read-only rootfs.
 COPY --chown=agent:agent config/bashrc /home/agent/.bashrc
+RUN mkdir -p /home/agent/.config.baked
+COPY --chown=agent:agent config/starship.toml /home/agent/.config.baked/starship.toml
 
-# SSH config: don't check host keys for GitHub (we trust the SSH agent)
-RUN echo "Host github.com\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile /home/agent/.ssh/known_hosts" \
-    > /home/agent/.ssh/config \
-  && chmod 600 /home/agent/.ssh/config
+# Bake GitHub SSH host keys — prevents TOFU/MITM on first connect.
+# Source: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+RUN mkdir -p /home/agent/.ssh.baked && { \
+    echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"; \
+    echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="; \
+    echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YCZEN+Mu0uCOIiAFkwj+JlMnZmQpW/xfjNHJt6KDi05czWEG+DiLiKC/t6M1SNpckHI5FmmTBV12KuMSg7DXKIHJTI+AY8VqVG/0cOHsKDMPsGk8mvHjEQ3YfPFW4CeLFe3MYi+OwNfsm86B75bDS6LwPNrVhk/6MQIT79ItA3R/CuPL2KhPNzJuGhiPCaZQvIClz9RVXR5GOPGnkNxBWMmJMXFiHj6GPRSMx3E4hxarUELzuI3tOpzq3FanQw+xzwHM2ujfBjX6y4Ebj3IfEyNUAnUL7gRUk/dKvFC0dqDkDpPfAh/aLNT5bbr7SOJYO/Q5Ck="; \
+  } > /home/agent/.ssh.baked/known_hosts \
+  && printf "Host github.com\n  StrictHostKeyChecking yes\n  UserKnownHostsFile /home/agent/.ssh/known_hosts\n" \
+     > /home/agent/.ssh.baked/config \
+  && chmod 600 /home/agent/.ssh.baked/*
 
 # Go env
 ENV GOPATH=/home/agent/go
@@ -159,9 +170,6 @@ ENV PATH="/home/agent/go/bin:/home/agent/.local/bin:${PATH}"
 
 # Terraform plugin cache
 ENV TF_PLUGIN_CACHE_DIR=/home/agent/.terraform.d/plugin-cache
-
-COPY --chown=agent:agent entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN sudo chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]

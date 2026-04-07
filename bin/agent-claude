@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Quick alias: spawn a Claude Code agent with a repo.
-# Usage: agent-claude <repo-url> [extra-repo-urls...]
+# Quick alias: spawn a Claude Code agent with SSH and a repo.
+# Usage: agent-claude <repo-url> [repo-url...]
 set -euo pipefail
 
 AGENT="$(dirname "$0")/agent"
@@ -10,7 +10,7 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-args=()
+args=(--ssh)
 for url in "$@"; do
   args+=(--repo "$url")
 done

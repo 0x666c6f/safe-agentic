@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
-# Container entrypoint: configure git, clone repos, launch agent or shell.
+# Container entrypoint: set up runtime config on tmpfs, clone repos, launch agent or shell.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Git configuration
+# Runtime config (written to tmpfs — rootfs is read-only)
 # ---------------------------------------------------------------------------
+
+# Copy baked-in SSH config and known_hosts to writable tmpfs mount
+cp /home/agent/.ssh.baked/* /home/agent/.ssh/ 2>/dev/null || true
+chmod 700 /home/agent/.ssh
+chmod 600 /home/agent/.ssh/* 2>/dev/null || true
+
+# Copy baked-in starship config to writable tmpfs mount
+if [ -f /home/agent/.config.baked/starship.toml ]; then
+  mkdir -p /home/agent/.config
+  cp /home/agent/.config.baked/starship.toml /home/agent/.config/starship.toml
+fi
+
+# Git configuration (writes to tmpfs-backed ~/.gitconfig)
 git config --global user.name "AI Agent"
 git config --global user.email "agent@safe-agentic.local"
 git config --global url."git@github.com:".insteadOf "https://github.com/"
