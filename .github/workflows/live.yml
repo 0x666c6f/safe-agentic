@@ -1,0 +1,48 @@
+name: Live OrbStack
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  live-orbstack:
+    name: Live OrbStack Smoke
+    runs-on:
+      - self-hosted
+      - macOS
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add repo bin to PATH
+        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Verify runner prerequisites
+        run: |
+          command -v orb
+          command -v script
+
+      - name: Set up VM and image
+        run: agent setup
+
+      - name: Diagnose environment
+        run: agent diagnose
+
+      - name: Run live integration
+        run: bash tests/test-live-integration.sh
+
+      - name: Run live agent CLIs
+        run: bash tests/test-live-agent-clis.sh
+
+      - name: Cleanup containers and auth
+        if: always()
+        run: agent cleanup --auth
