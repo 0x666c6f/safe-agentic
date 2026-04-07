@@ -73,7 +73,7 @@ done
 step 3 "Verifying VM hardening..."
 HARDENING_OK=true
 for mnt in /Users /mnt/mac; do
-  if [ -d "$mnt" ] && ls "$mnt" 2>/dev/null | grep -q .; then
+  if [ -d "$mnt" ] && find "$mnt" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
     echo "    WARNING: $mnt still has accessible content"
     HARDENING_OK=false
   else
@@ -106,6 +106,7 @@ if ! command -v docker &>/dev/null; then
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
+  # shellcheck disable=SC1091
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
     $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \

@@ -6,7 +6,7 @@ ENTRYPOINT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_URL_LIB="/usr/local/lib/safe-agentic/repo-url.sh"
 
 if [ -f "$REPO_URL_LIB" ]; then
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090,SC1091
   source "$REPO_URL_LIB"
 else
   # shellcheck disable=SC1091

@@ -118,8 +118,7 @@ parse_defaults_line() {
   value=$(parse_defaults_value "$value") \
     || defaults_error "Unsupported value for $key in $DEFAULTS_FILE:$line_no. Use KEY=value or quote the full value."
 
-  printf -v "$key" '%s' "$value"
-  export "$key"
+  export "$key=$value"
 }
 
 validate_name_component() {
@@ -367,12 +366,13 @@ network_name_for_container() {
 }
 
 verify_vm_runtime_hardening() {
+  # shellcheck disable=SC2016
   vm_exec bash -lc '
     set -euo pipefail
     echo safe-agentic-hardening-verify >/dev/null
 
     for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
-      if [ -d "$mnt" ] && ls -A "$mnt" 2>/dev/null | grep -q .; then
+      if [ -d "$mnt" ] && find "$mnt" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
         echo "unsafe mount visible: $mnt" >&2
         exit 1
       fi
@@ -499,10 +499,10 @@ append_runtime_hardening() {
   docker_cmd+=(--memory "$memory")
   docker_cmd+=(--pids-limit "$pids_limit")
   docker_cmd+=(--ulimit nofile=65536:65536)
-  docker_cmd+=(--tmpfs /tmp:rw,noexec,nosuid,size=512m)
-  docker_cmd+=(--tmpfs /var/tmp:rw,noexec,nosuid,size=256m)
-  docker_cmd+=(--tmpfs /run:rw,noexec,nosuid,size=16m)
-  docker_cmd+=(--tmpfs /dev/shm:rw,noexec,nosuid,size=64m)
+  docker_cmd+=(--tmpfs "/tmp:rw,noexec,nosuid,size=512m")
+  docker_cmd+=(--tmpfs "/var/tmp:rw,noexec,nosuid,size=256m")
+  docker_cmd+=(--tmpfs "/run:rw,noexec,nosuid,size=16m")
+  docker_cmd+=(--tmpfs "/dev/shm:rw,noexec,nosuid,size=64m")
   append_ephemeral_volume /workspace
   docker_cmd+=(--tmpfs "/home/agent/.config:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
   docker_cmd+=(--tmpfs "/home/agent/.ssh:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
@@ -515,6 +515,7 @@ append_ssh_mount() {
 
   if $enable_ssh; then
     local vm_ssh_sock
+    # shellcheck disable=SC2016
     vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
     if [ -n "$vm_ssh_sock" ]; then
       docker_cmd+=(-v "$vm_ssh_sock:/run/ssh-agent.sock:ro")
