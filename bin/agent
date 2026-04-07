@@ -39,7 +39,8 @@ vm_copy_from_host() {
   local destination_path="$2"
 
   [ -f "$source_path" ] || die "Local file not found: $source_path"
-  orb run -m "$VM_NAME" bash -lc "cat > '$destination_path'" < "$source_path"
+  # Use env var to safely pass path without shell interpolation
+  orb run -m "$VM_NAME" env DEST="$destination_path" bash -c 'cat > "$DEST"' < "$source_path"
 }
 
 source "$REPO_DIR/bin/agent-lib.sh"
@@ -60,8 +61,7 @@ cmd_setup() {
   orb start "$VM_NAME" 2>/dev/null || true
 
   info "Bootstrapping VM (installing Docker)..."
-  vm_copy_from_host "$REPO_DIR/vm/setup.sh" /tmp/setup.sh
-  vm_exec bash /tmp/setup.sh
+  reapply_vm_runtime_hardening
 
   cmd_update
 
@@ -110,6 +110,9 @@ cmd_spawn() {
 
   require_cmd orb
   require_vm
+  ensure_vm_runtime_hardening
+  ensure_local_image_present
+  validate_pids_limit "$pids_limit"
 
   local timestamp
   timestamp=$(date +%s)
@@ -178,6 +181,9 @@ cmd_shell() {
 
   require_cmd orb
   require_vm
+  ensure_vm_runtime_hardening
+  ensure_local_image_present
+  validate_pids_limit "$pids_limit"
 
   local timestamp
   timestamp=$(date +%s)
@@ -208,6 +214,7 @@ cmd_list() {
 cmd_attach() {
   local name="${1:-}"
   [ -z "$name" ] && die "Usage: agent attach <name>"
+  validate_name_component "$name" "Container name"
   require_vm
 
   if [[ ! "$name" == ${CONTAINER_PREFIX}-* ]]; then
@@ -244,6 +251,7 @@ cmd_stop() {
   fi
 
   local name="$1"
+  validate_name_component "$name" "Container name"
   if [[ ! "$name" == ${CONTAINER_PREFIX}-* ]]; then
     name="${CONTAINER_PREFIX}-${name}"
   fi
@@ -307,6 +315,7 @@ cmd_update() {
   require_cmd orb
   require_cmd git
   require_vm
+  ensure_vm_runtime_hardening
 
   info "Pushing build context to VM (tracked files only)..."
   local tarball
@@ -317,6 +326,8 @@ cmd_update() {
   vm_copy_from_host "$tarball" /tmp/safe-agentic-ctx.tar.gz
   vm_exec bash -c "rm -rf /tmp/safe-agentic && mkdir -p /tmp/safe-agentic && tar -xzf /tmp/safe-agentic-ctx.tar.gz -C /tmp/safe-agentic"
   rm -f "$tarball"
+
+  sync_vm_seccomp_profile
 
   local -a build_args=()
   if $quick; then
@@ -354,8 +365,7 @@ cmd_vm() {
       info "Starting VM..."
       orb start "$VM_NAME"
       info "Re-applying VM hardening..."
-      vm_copy_from_host "$REPO_DIR/vm/setup.sh" /tmp/setup.sh
-      vm_exec bash /tmp/setup.sh
+      reapply_vm_runtime_hardening
       ok "VM started and hardened."
       ;;
     *)
@@ -377,7 +387,7 @@ ${GREEN}Agent management:${NC}
     --name NAME                Container name suffix
     --ssh                      Enable SSH agent forwarding
     --reuse-auth               Reuse shared auth volume
-    --network NAME             Existing VM Docker network (default: dedicated bridge)
+    --network NAME             Existing VM Docker network (default: dedicated bridge with egress guardrails)
     --memory SIZE              Docker memory limit (default: ${DEFAULT_MEMORY})
     --cpus N                   Docker CPU limit (default: ${DEFAULT_CPUS})
     --pids-limit N             Docker PID limit (default: ${DEFAULT_PIDS_LIMIT})
@@ -399,7 +409,7 @@ ${GREEN}Security defaults:${NC}
   - SSH forwarding off unless --ssh
   - Shared auth only with --reuse-auth
   - Read-only rootfs, all capabilities dropped, no-new-privileges
-  - Dedicated per-container bridge network by default
+  - Dedicated per-container bridge network by default (private/local egress blocked; TCP 22/80/443 only)
   - Ephemeral workspace, auth, and cache volumes by default
 
 ${GREEN}Examples:${NC}

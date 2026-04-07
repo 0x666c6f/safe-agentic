@@ -43,7 +43,7 @@ graph TB
 | Auth tokens | Ephemeral — discarded on exit | `--reuse-auth` persists across sessions |
 | Rootfs | Read-only | — |
 | Capabilities | ALL dropped + no-new-privileges | — |
-| Network | Dedicated bridge per container | `--network <name>` joins existing |
+| Network | Dedicated bridge per container; private/local egress blocked; TCP 22/80/443 only | `--network <name>` joins existing and bypasses managed guardrails |
 | Resources | 8g memory, 4 CPUs, 512 PIDs | `--memory`, `--cpus`, `--pids-limit` |
 | Host keys | GitHub baked + StrictHostKeyChecking | — |
 | Sudo | Removed | — |
@@ -93,7 +93,17 @@ Stores the OAuth token in a named Docker volume that survives container restarts
 Joins an existing Docker network instead of creating a dedicated one.
 
 **When to use:** Multiple containers that need to communicate, or `--network agent-isolated` for air-gapped operation.
-**Risk:** Containers on the same network can reach each other.
+**Risk:** Containers on the same network can reach each other, and custom networks bypass the managed egress policy.
+
+## Managed-network egress guardrails
+
+Safe-agentic-managed bridges now get a VM firewall policy:
+
+- outbound TCP only on `22`, `80`, `443`
+- no access to local/private address ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, etc.)
+- no access to OrbStack/macOS mount paths when hardening is healthy
+
+This keeps default agent sessions usable for Git, package downloads, and Claude/Codex traffic while blocking the most dangerous east-west and local-host pivots. If you need broader network access, you must opt into a custom network explicitly.
 
 ## Supply chain hardening
 
@@ -135,6 +145,12 @@ graph TD
 ```
 
 All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes (from `--reuse-auth`) persist until `agent cleanup`.
+
+## Git identity
+
+Containers default to `Agent <agent@localhost>`. The host git identity is not copied in automatically.
+
+If you need explicit attribution, export `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` (and optionally `GIT_COMMITTER_*`) before launching the container.
 
 ## VM hardening details
 

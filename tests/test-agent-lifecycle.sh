@@ -9,6 +9,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 FAKE_BIN="$TMP_DIR/bin"
 ORB_LOG="$TMP_DIR/orb.log"
 ERR_LOG="$TMP_DIR/error.log"
+VERIFY_STATE="$TMP_DIR/verify-state"
 mkdir -p "$FAKE_BIN"
 
 cat >"$FAKE_BIN/orb" <<'ORBEOF'
@@ -16,6 +17,7 @@ cat >"$FAKE_BIN/orb" <<'ORBEOF'
 set -euo pipefail
 
 log_file="${TEST_ORB_LOG:?}"
+verify_state="${TEST_VERIFY_STATE:?}"
 cmd="${1:-}"
 shift || true
 
@@ -29,6 +31,9 @@ case "$cmd" in
 
     case "$*" in
       "docker network inspect custom-net")
+        exit 0
+        ;;
+      "docker image inspect safe-agentic:latest")
         exit 0
         ;;
       "docker ps -q --filter name=^agent-"*)
@@ -52,6 +57,11 @@ case "$cmd" in
         exit 0
         ;;
     esac
+
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
+      : >"$verify_state"
+      exit 0
+    fi
 
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "network" ] && [ "${3:-}" = "inspect" ] && [ "${4:-}" = "--format" ]; then
       case "${6:-}" in
@@ -94,7 +104,8 @@ fail=0
 
 run_agent() {
   : >"$ORB_LOG"
-  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$@"
+  : >"$VERIFY_STATE"
+  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$@"
 }
 
 assert_contains() {

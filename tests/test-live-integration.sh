@@ -211,6 +211,7 @@ if start_spawn_session "$spawn_suffix"; then
   assert_contains "$network_name" "$CURRENT_NETWORK" "spawn dedicated network"
   assert_ok "spawn has no SSH mount by default" test -z "$ssh_mount"
   assert_ok "spawn has no SSH_AUTH_SOCK env by default" bash -lc '[[ "$1" != *SSH_AUTH_SOCK=* ]]' _ "$env_list"
+  assert_ok "spawn has no host git identity env by default" bash -lc '[[ "$1" != *GIT_AUTHOR_NAME=* && "$1" != *GIT_AUTHOR_EMAIL=* && "$1" != *GIT_COMMITTER_NAME=* && "$1" != *GIT_COMMITTER_EMAIL=* ]]' _ "$env_list"
   assert_ok "spawn auth mount is anonymous by default" bash -lc '[ -n "$1" ] && [ "$1" != "agent-codex-auth" ]' _ "$codex_mount_name"
   assert_ok "spawn workspace mount is anonymous" test -n "$workspace_mount_name"
 

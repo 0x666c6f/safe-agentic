@@ -17,7 +17,7 @@ export IMAGE_NAME
 
 # Source the library
 source "$REPO_DIR/bin/agent-lib.sh"
-export -f validate_name_component validate_network_name network_name_for_container
+export -f validate_name_component validate_pids_limit validate_network_name bridge_name_for_network network_name_for_container
 
 pass=0
 fail=0
@@ -108,6 +108,35 @@ assert_net_fail "has space"      "space"
 assert_net_fail "semi;colon"     "semicolon"
 assert_net_fail "-leading-dash"  "leading dash"
 
+# --- validate_pids_limit ---
+
+assert_pids_ok() {
+  local input="$1"
+  if (validate_pids_limit "$input") 2>/dev/null; then
+    ((++pass))
+  else
+    echo "FAIL: validate_pids_limit '$input' should pass" >&2
+    ((++fail))
+  fi
+}
+
+assert_pids_fail() {
+  local input="$1"
+  local label="${2:-}"
+  if (validate_pids_limit "$input") 2>/dev/null; then
+    echo "FAIL: validate_pids_limit '$input' should fail${label:+ ($label)}" >&2
+    ((++fail))
+  else
+    ((++pass))
+  fi
+}
+
+assert_pids_ok "64"
+assert_pids_ok "512"
+assert_pids_fail "63" "below floor"
+assert_pids_fail "abc" "non-numeric"
+assert_pids_fail "64.5" "non-integer"
+
 # --- network_name_for_container ---
 
 result=$(network_name_for_container "agent-claude-review")
@@ -115,6 +144,16 @@ if [ "$result" = "agent-claude-review-net" ]; then
   ((++pass))
 else
   echo "FAIL: network_name_for_container 'agent-claude-review' → '$result'" >&2
+  ((++fail))
+fi
+
+# --- bridge_name_for_network ---
+
+bridge_name="$(bridge_name_for_network "agent-claude-review-net")"
+if [[ "$bridge_name" == sa* ]] && [ "${#bridge_name}" -le 14 ]; then
+  ((++pass))
+else
+  echo "FAIL: bridge_name_for_network produced '$bridge_name'" >&2
   ((++fail))
 fi
 

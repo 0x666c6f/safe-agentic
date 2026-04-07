@@ -88,6 +88,12 @@ expect_fail "git://github.com/acme/repo.git"      "git:// protocol (no auth)"
 expect_fail "https://github.com/acme/repo.git?ref=main"  "query params"
 expect_fail "ftp://files.example.com/a/b.git"     "ftp scheme"
 
+# --- Git flag injection ---
+expect_fail "--upload-pack=evil:foo/bar.git"     "flag injection (--upload-pack)"
+expect_fail "--config=core.sshCommand=evil:a/b"  "flag injection (--config)"
+expect_fail "-c core.sshCommand=evil:a/b"        "flag injection (short flag)"
+expect_fail "--template=/tmp/evil:a/b.git"       "flag injection (--template)"
+
 # --- Double .git suffix ---
 expect_ok "git@github.com:acme/repo.git.git"      "acme/repo.git"
 

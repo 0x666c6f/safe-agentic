@@ -1,4 +1,6 @@
-FROM ubuntu:24.04
+# Pin base image by digest for supply-chain reproducibility.
+# To update: docker pull ubuntu:24.04 && docker inspect --format='{{index .RepoDigests 0}}' ubuntu:24.04
+FROM ubuntu:24.04@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b
 
 LABEL app=safe-agentic
 LABEL maintainer="florian"
@@ -229,6 +231,14 @@ ARG CLI_CACHE_BUST=1
 RUN test -n "$CLI_CACHE_BUST" \
  && npm ci --omit=dev \
  && npm cache clean --force
+
+# Remove build-essential (gcc, make, etc.) now that native npm modules are compiled.
+# Reduces attack surface — agents work with interpreted languages and pre-compiled Go binaries.
+USER root
+RUN apt-get purge -y --auto-remove build-essential cpp gcc g++ make dpkg-dev \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+USER agent
 
 WORKDIR /workspace
 

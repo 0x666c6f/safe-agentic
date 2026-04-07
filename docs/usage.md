@@ -38,6 +38,8 @@ agent spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 
 The `--ssh` flag forwards your 1Password SSH agent into the container so `git clone`, `git push`, etc. work with your SSH keys.
 
+By default, safe-agentic-managed networks block private/local egress and only allow outbound TCP `22`, `80`, and `443`. Passing `--network <name>` opts out of those guardrails and joins the named Docker network as-is.
+
 ### Quick aliases (recommended)
 
 The aliases auto-detect whether SSH is needed based on the URL:
@@ -82,6 +84,18 @@ agent spawn claude --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 ```
 
 The token is stored in a named Docker volume (`agent-claude-auth` / `agent-codex-auth`) that persists until `agent cleanup`.
+
+### Git identity
+
+Containers default to `Agent <agent@localhost>`. If you want commits attributed to you, export identity explicitly before launch:
+
+```bash
+GIT_AUTHOR_NAME="Your Name" \
+GIT_AUTHOR_EMAIL="you@example.com" \
+agent spawn claude --repo https://github.com/myorg/myrepo.git
+```
+
+`GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` are also respected if set.
 
 ### Custom resource limits
 
@@ -187,6 +201,8 @@ agent update --full       # Full rebuild from scratch (no cache)
 ```
 
 Use `--quick` after Claude Code or Codex releases a new version. Use `--full` to pick up OS package updates.
+
+Launches are local-image only: if `safe-agentic:latest` is missing in the VM, `agent spawn` / `agent shell` will fail until you run `agent update` or `agent setup`.
 
 ### VM management
 

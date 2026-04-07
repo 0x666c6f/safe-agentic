@@ -194,8 +194,8 @@ RUN_ARGS=()
 run_entrypoint REPOS=' https://github.com/acme/one.git , git@github.com:team/two.git '
 assert_status 0 "multi repo exits cleanly"
 multi_git_log="$(cat "$GIT_LOG")"
-assert_contains "$multi_git_log" "clone https://github.com/acme/one.git /workspace/acme/one" "multi repo first clone"
-assert_contains "$multi_git_log" "clone git@github.com:team/two.git /workspace/team/two" "multi repo second clone"
+assert_contains "$multi_git_log" "clone -- https://github.com/acme/one.git /workspace/acme/one" "multi repo first clone"
+assert_contains "$multi_git_log" "clone -- git@github.com:team/two.git /workspace/team/two" "multi repo second clone"
 assert_contains "$(cat "$EXEC_LOG")" "bash|$RUN_DIR|-l" "multi repo stays outside /workspace for shell"
 
 # --- unsafe repo URL is rejected before clone/exec ---

@@ -1,6 +1,6 @@
 # safe-agentic
 
-Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks, and resource limits.
+Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks get egress guardrails, images are local-only at launch, and resource limits apply.
 
 ## Architecture
 
@@ -37,6 +37,7 @@ graph TB
 - Agents modifying files outside their cloned repo (read-only rootfs + per-agent workspace volume)
 - Agents accessing your macOS filesystem (VM hardened: macOS mounts blocked)
 - Agents interfering with each other (per-agent containers, networks, auth)
+- Agents reaching VM/private-network services by default (managed bridges block local/private egress and only allow TCP 22/80/443)
 - Credential exposure (SSH agent OFF by default, per-session OAuth tokens)
 - SSH MITM (GitHub host keys baked into image, StrictHostKeyChecking yes)
 - Container privilege escalation (capabilities dropped, no sudo)
@@ -44,7 +45,7 @@ graph TB
 **Opt-in flags that widen the attack surface:**
 - `--ssh` — Forwards SSH agent into container. Required for `git@` repos. A compromised agent could use SSH keys for other operations.
 - `--reuse-auth` — Shares OAuth token volume across sessions. Compromised container could steal the token.
-- `--network <name>` — Joins an existing Docker network in the VM. Use only for deliberately shared or isolated networks you created.
+- `--network <name>` — Joins an existing Docker network in the VM and bypasses the default managed-network egress guardrails. Use only for deliberately shared or isolated networks you created.
 
 **Known limitations:**
 - **OrbStack hardening is best-effort.** OrbStack does not yet support per-VM file sharing disable ([#169](https://github.com/orbstack/orbstack/issues/169)). `vm/setup.sh` mounts tmpfs over macOS paths and removes mac commands, but OrbStack may re-enable sharing on VM restart. Re-run `agent setup` after VM restarts, and disable file sharing in OrbStack UI (Settings > Linux) for defense-in-depth.
@@ -170,7 +171,7 @@ Node.js 22, Python 3.12, Go 1.23
 | Auth persistence | Ephemeral per-session volume | `--reuse-auth` |
 | Root filesystem | Read-only | — |
 | Capabilities | Dropped (`ALL`) + `no-new-privileges` | — |
-| Network | Dedicated per-container bridge | `--network <name>` |
+| Network | Dedicated per-container bridge with local/private egress blocked; TCP 22/80/443 only | `--network <name>` |
 | Resource limits | `--memory 8g --cpus 4 --pids-limit 512` | explicit flags |
 | GitHub host keys | Baked & pinned (StrictHostKeyChecking yes) | — |
 | Workspace/auth/cache volumes | Ephemeral | `--reuse-auth` for auth only |
@@ -195,6 +196,24 @@ git clone/push inside container
 ```
 
 GitHub host keys are baked into the image with `StrictHostKeyChecking yes` — no trust-on-first-use.
+
+### Git identity
+
+Containers default to neutral git identity (`Agent <agent@localhost>`). Your host git `user.name` / `user.email` are no longer copied in automatically.
+
+If you want explicit attribution, export it before launch:
+
+```bash
+GIT_AUTHOR_NAME="Your Name" \
+GIT_AUTHOR_EMAIL="you@example.com" \
+agent spawn claude --repo https://github.com/myorg/myrepo.git
+```
+
+`GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` are also honored if you set them explicitly.
+
+### Launch behavior
+
+`agent spawn` / `agent shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `agent update` or `agent setup`.
 
 ### Build context safety
 

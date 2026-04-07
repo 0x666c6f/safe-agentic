@@ -8,6 +8,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 FAKE_BIN="$TMP_DIR/bin"
 ORB_LOG="$TMP_DIR/orb.log"
 ERR_LOG="$TMP_DIR/error.log"
+VERIFY_STATE="$TMP_DIR/verify-state"
 mkdir -p "$FAKE_BIN"
 
 cat >"$FAKE_BIN/orb" <<'EOF'
@@ -15,6 +16,7 @@ cat >"$FAKE_BIN/orb" <<'EOF'
 set -euo pipefail
 
 log_file="${TEST_ORB_LOG:?}"
+verify_state="${TEST_VERIFY_STATE:?}"
 cmd="${1:-}"
 shift || true
 
@@ -31,6 +33,11 @@ case "$cmd" in
       exit 0
     fi
 
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
+      : >"$verify_state"
+      exit 0
+    fi
+
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "network" ] && [ "${3:-}" = "inspect" ]; then
       case "${4:-}" in
         custom-net|none)
@@ -40,6 +47,10 @@ case "$cmd" in
           exit 1
           ;;
       esac
+    fi
+
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
+      exit 0
     fi
 
     exit 0
@@ -77,7 +88,8 @@ assert_not_contains() {
 
 run_agent() {
   : >"$ORB_LOG"
-  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$@"
+  : >"$VERIFY_STATE"
+  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$@"
 }
 
 last_docker_run() {
@@ -96,13 +108,13 @@ assert_not_contains "$spawn_run" "--cap-add"
 assert_not_contains "$spawn_run" "src=agent-claude-auth"
 assert_not_contains "$spawn_run" "volume-nocopy"
 
-if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$REPO_DIR/bin/agent" spawn claude -- --privileged >"$ERR_LOG" 2>&1; then
+if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$REPO_DIR/bin/agent" spawn claude -- --privileged >"$ERR_LOG" 2>&1; then
   echo "unsafe passthrough unexpectedly accepted" >&2
   exit 1
 fi
 assert_contains "$(cat "$ERR_LOG")" "Unknown argument: --"
 
-if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$REPO_DIR/bin/agent" spawn claude --network host >"$ERR_LOG" 2>&1; then
+if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$REPO_DIR/bin/agent" spawn claude --network host >"$ERR_LOG" 2>&1; then
   echo "unsafe network mode unexpectedly accepted" >&2
   exit 1
 fi

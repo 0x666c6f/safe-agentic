@@ -24,6 +24,9 @@ repo_clone_path() {
   local clone_path
   local owner repo
 
+  # Reject URLs that look like flags (git option injection)
+  case "$repo_url" in -*) return 1 ;; esac
+
   # Strip trailing .git suffix
   clone_path="${repo_url%.git}"
 
@@ -40,9 +43,9 @@ repo_clone_path() {
   repo="${clone_path#*/}"
   [[ "$owner" == */* ]] && return 1
 
-  # Reject dot-prefixed names, empty, and unsafe characters
-  case "$owner" in ""|.*) return 1 ;; esac
-  case "$repo"  in ""|.*) return 1 ;; esac
+  # Reject dot-prefixed names, dash-prefixed names, empty, and unsafe characters
+  case "$owner" in ""|.*|-*) return 1 ;; esac
+  case "$repo"  in ""|.*|-*) return 1 ;; esac
   [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
   [[ "$repo"  =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
 
@@ -66,7 +69,7 @@ if [ -n "${REPOS:-}" ]; then
     else
       echo "[entrypoint] Cloning $repo_url → $clone_dir"
       mkdir -p "$(dirname "$clone_dir")"
-      git clone "$repo_url" "$clone_dir"
+      git clone -- "$repo_url" "$clone_dir"
     fi
   done
 

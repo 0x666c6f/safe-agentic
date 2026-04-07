@@ -55,6 +55,13 @@ for arg in $sha256_args; do
   assert_present 'sha256sum -c' "sha256sum check exists (for $arg)"
 done
 
+# --- build-essential purged after npm ci ---
+assert_present 'apt-get purge.*build-essential' "build-essential removed after npm ci"
+
+# --- Base image pinned by digest ---
+assert_present 'ubuntu:24\.04@sha256:' "base image pinned by digest"
+
+
 # --- Non-root user ---
 assert_present '^USER agent$'          "runs as non-root user"
 assert_present 'usermod -g agent -G "" agent' "agent supplemental groups cleared"
@@ -78,6 +85,30 @@ assert_present 'SHELL.*pipefail'       "SHELL has pipefail"
 
 # --- Image has labels ---
 assert_present 'LABEL app=safe-agentic' "app label present"
+
+# --- Seccomp profile exists and is valid JSON ---
+SECCOMP_PROFILE="$REPO_DIR/config/seccomp.json"
+if [ -f "$SECCOMP_PROFILE" ] && python3 -c "import json; json.load(open('$SECCOMP_PROFILE'))" 2>/dev/null; then
+  ((++pass))
+else
+  echo "FAIL: config/seccomp.json missing or invalid JSON" >&2
+  ((++fail))
+fi
+
+# Verify seccomp profile blocks ptrace in no-caps group
+if python3 -c "
+import json, sys
+with open('$SECCOMP_PROFILE') as f:
+    p = json.load(f)
+for g in p['syscalls']:
+    if 'ptrace' in g.get('names',[]) and not g.get('includes',{}).get('caps',[]):
+        sys.exit(1)  # ptrace found in unconditional group
+" 2>/dev/null; then
+  ((++pass))
+else
+  echo "FAIL: seccomp profile allows ptrace without CAP_SYS_PTRACE" >&2
+  ((++fail))
+fi
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

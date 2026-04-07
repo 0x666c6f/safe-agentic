@@ -10,12 +10,14 @@ FAKE_BIN="$TMP_DIR/bin"
 ORB_LOG="$TMP_DIR/orb.log"
 ERR_LOG="$TMP_DIR/error.log"
 OUT_LOG="$TMP_DIR/out.log"
+VERIFY_STATE="$TMP_DIR/verify-state"
 mkdir -p "$FAKE_BIN"
 
 cat >"$FAKE_BIN/orb" <<'ORBEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 log_file="${TEST_ORB_LOG:?}"
+verify_state="${TEST_VERIFY_STATE:?}"
 cmd="${1:-}"; shift || true
 case "$cmd" in
   list) echo "safe-agentic" ;;
@@ -24,6 +26,13 @@ case "$cmd" in
     printf '%s\n' "$*" >>"$log_file"
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *SSH_AUTH_SOCK* ]]; then
       echo "/tmp/fake-ssh.sock"; exit 0
+    fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
+      : >"$verify_state"
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
+      exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "network" ]; then
       case "${3:-}" in
@@ -51,7 +60,7 @@ fail=0
 
 run_ok() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     ((++pass))
   else
     echo "FAIL: $label: expected zero exit" >&2
@@ -61,7 +70,7 @@ run_ok() {
 
 run_fails() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
   else

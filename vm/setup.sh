@@ -22,7 +22,7 @@ done
 
 # Prevent remounting on reboot via fstab override
 # OrbStack uses gvproxy/virtio mounts; blocking them here
-for mnt in /Users /mnt/mac /Volumes /private; do
+for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
   if ! grep -q "^# safe-agentic: block $mnt" /etc/fstab 2>/dev/null; then
     echo "# safe-agentic: block $mnt" | sudo tee -a /etc/fstab > /dev/null
     echo "none $mnt tmpfs ro,noexec,nosuid,size=1k 0 0" | sudo tee -a /etc/fstab > /dev/null
@@ -30,7 +30,7 @@ for mnt in /Users /mnt/mac /Volumes /private; do
 done
 
 # Mount tiny read-only tmpfs over macOS paths to block access persistently
-for mnt in /Users /mnt/mac /Volumes /private; do
+for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
   sudo mkdir -p "$mnt"
   if ! mountpoint -q "$mnt" 2>/dev/null || ! mount | grep "$mnt" | grep -q tmpfs; then
     sudo mount -t tmpfs -o ro,noexec,nosuid,size=1k none "$mnt" 2>/dev/null || true
@@ -137,6 +137,33 @@ sudo systemctl restart docker
 # Enable and start Docker
 sudo systemctl enable docker
 sudo systemctl start docker
+
+# Install egress guardrails for safe-agentic managed bridges (bridge names start with "sa")
+echo "==> Installing managed-network egress guardrails..."
+sudo iptables -nL DOCKER-USER >/dev/null 2>&1 || sudo iptables -N DOCKER-USER
+sudo iptables -N SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+sudo iptables -F SAFE_AGENTIC_EGRESS
+sudo iptables -C DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 \
+  || sudo iptables -I DOCKER-USER 1 -j SAFE_AGENTIC_EGRESS
+sudo iptables -A SAFE_AGENTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+for cidr in \
+  0.0.0.0/8 \
+  10.0.0.0/8 \
+  100.64.0.0/10 \
+  127.0.0.0/8 \
+  169.254.0.0/16 \
+  172.16.0.0/12 \
+  192.168.0.0/16 \
+  224.0.0.0/4 \
+  240.0.0.0/4 \
+; do
+  sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -d "$cidr" -j REJECT
+done
+for port in 22 80 443; do
+  sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -p tcp --dport "$port" -j RETURN
+done
+sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -j REJECT
+sudo iptables -A SAFE_AGENTIC_EGRESS -j RETURN
 
 # Verify Docker
 echo "==> Verifying Docker..."

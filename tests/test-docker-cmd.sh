@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 FAKE_BIN="$TMP_DIR/bin"
 ORB_LOG="$TMP_DIR/orb.log"
 ERR_LOG="$TMP_DIR/error.log"
+VERIFY_STATE="$TMP_DIR/verify-state"
 mkdir -p "$FAKE_BIN"
 
 # Fake orb that logs docker commands
@@ -17,6 +18,7 @@ cat >"$FAKE_BIN/orb" <<'ORBEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 log_file="${TEST_ORB_LOG:?}"
+verify_state="${TEST_VERIFY_STATE:?}"
 cmd="${1:-}"
 shift || true
 case "$cmd" in
@@ -27,6 +29,13 @@ case "$cmd" in
     # Handle SSH_AUTH_SOCK query
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *SSH_AUTH_SOCK* ]]; then
       echo "/tmp/fake-ssh.sock"; exit 0
+    fi
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
+      : >"$verify_state"
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
+      exit 0
     fi
     # Handle docker network inspect — managed networks pass, unknown fail
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "network" ]; then
@@ -68,7 +77,14 @@ fail=0
 
 run_agent() {
   : >"$ORB_LOG"
-  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$@"
+  : >"$VERIFY_STATE"
+  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$@"
+}
+
+run_agent_env() {
+  : >"$ORB_LOG"
+  : >"$VERIFY_STATE"
+  PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" "$@"
 }
 
 last_docker_run() {
@@ -99,7 +115,7 @@ assert_not_contains() {
 
 assert_fails() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" bash "$@" >"$ERR_LOG" 2>&1; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$@" >"$ERR_LOG" 2>&1; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
   else
@@ -116,9 +132,11 @@ run="$(last_docker_run)"
 assert_contains "$run" "--cap-drop=ALL"                       "cap-drop"
 assert_contains "$run" "--security-opt=no-new-privileges:true" "no-new-privileges"
 assert_contains "$run" "--read-only"                           "read-only rootfs"
+assert_contains "$run" "--pull=never"                          "local image only"
 assert_contains "$run" "--memory 8g"                           "memory limit"
 assert_contains "$run" "--cpus 4"                              "cpu limit"
 assert_contains "$run" "--pids-limit 512"                      "pids limit"
+assert_contains "$run" "--security-opt seccomp=/etc/safe-agentic/seccomp.json" "custom seccomp profile"
 assert_not_contains "$run" "--cap-add"                         "no cap-add"
 assert_not_contains "$run" "--privileged"                      "no privileged"
 
@@ -128,7 +146,9 @@ assert_not_contains "$run" "--privileged"                      "no privileged"
 assert_contains "$run" "--tmpfs /tmp:rw,noexec,nosuid"             "tmp noexec"
 assert_contains "$run" "--tmpfs /var/tmp:rw,noexec,nosuid"         "var/tmp noexec"
 assert_contains "$run" "--tmpfs /run:rw,noexec,nosuid"             "run noexec"
+assert_contains "$run" "--tmpfs /dev/shm:rw,noexec,nosuid"         "shm noexec"
 assert_contains "$run" "--tmpfs /home/agent/.ssh:rw,noexec,nosuid" "ssh noexec"
+assert_contains "$run" "--ulimit nofile=65536:65536"                "nofile ulimit"
 
 # =============================================================================
 # Test: Ephemeral volumes use anonymous Docker volumes
@@ -144,16 +164,23 @@ assert_not_contains "$run" "volume-nocopy"                                "no vo
 # Test: Per-container network is created
 # =============================================================================
 assert_contains "$run" "--network agent-claude-sec-net"  "managed network"
+assert_contains "$(cat "$ORB_LOG")" "--opt com.docker.network.bridge.name=" "managed bridge named"
 
 # =============================================================================
-# Test: Git identity is passed from host
+# Test: Git identity is not leaked from host defaults
 # =============================================================================
-assert_contains "$run" "GIT_AUTHOR_NAME=Test User"     "git author name"
-assert_contains "$run" "GIT_COMMITTER_NAME=Test User"  "git committer name"
-assert_contains "$run" "GIT_AUTHOR_EMAIL=test@example.com"    "git author email"
-assert_contains "$run" "GIT_COMMITTER_EMAIL=test@example.com" "git committer email"
+assert_not_contains "$run" "GIT_AUTHOR_NAME=Test User"         "no host author leak"
+assert_not_contains "$run" "GIT_COMMITTER_NAME=Test User"      "no host committer leak"
+assert_not_contains "$run" "GIT_AUTHOR_EMAIL=test@example.com" "no host author email leak"
+assert_not_contains "$run" "GIT_COMMITTER_EMAIL=test@example.com" "no host committer email leak"
 assert_contains "$run" "GIT_CONFIG_GLOBAL=/home/agent/.config/git/config" "git config path"
 assert_not_contains "$run" "--tmpfs /home/agent/.gitconfig" "no file tmpfs mount"
+
+GIT_AUTHOR_NAME="Explicit User" GIT_AUTHOR_EMAIL="explicit@example.com" \
+  run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name gitenv --repo https://github.com/a/b.git >/dev/null 2>&1
+gitenv_run="$(last_docker_run)"
+assert_contains "$gitenv_run" "GIT_AUTHOR_NAME=Explicit User" "explicit author forwarded"
+assert_contains "$gitenv_run" "GIT_AUTHOR_EMAIL=explicit@example.com" "explicit email forwarded"
 
 # =============================================================================
 # Test: AGENT_TYPE is set for spawn, absent for shell
