@@ -170,14 +170,14 @@ assert_contains "$(cat "$GIT_LOG")" "config --global user.name Test Agent" "clau
 assert_contains "$(cat "$GIT_LOG")" "config --global user.email agent@example.com" "claude custom git email"
 assert_contains "$(cat "$EXEC_LOG")" "claude|$RUN_DIR|--dangerously-skip-permissions --print foo" "claude exec flags"
 
-# --- codex first run triggers device auth, then full-auto ---
+# --- codex first run triggers device auth, then yolo mode ---
 rm -f "$HOME_DIR/.codex/auth.json"
 RUN_ARGS=(plan)
 run_entrypoint AGENT_TYPE=codex
 assert_status 0 "codex first run exits cleanly"
 codex_first_log="$(cat "$EXEC_LOG")"
 assert_contains "$codex_first_log" "codex|$RUN_DIR|login --device-auth" "codex first run login"
-assert_contains "$codex_first_log" "codex|$RUN_DIR|--full-auto plan" "codex full-auto after login"
+assert_contains "$codex_first_log" "codex|$RUN_DIR|--yolo plan" "codex yolo after login"
 
 # --- existing codex auth skips login ---
 printf '{}\n' >"$HOME_DIR/.codex/auth.json"
@@ -186,7 +186,7 @@ run_entrypoint AGENT_TYPE=codex
 assert_status 0 "codex with auth exits cleanly"
 codex_existing_log="$(cat "$EXEC_LOG")"
 assert_not_contains "$codex_existing_log" "login --device-auth" "codex skips login with auth"
-assert_contains "$codex_existing_log" "codex|$RUN_DIR|--full-auto fix" "codex exec with auth"
+assert_contains "$codex_existing_log" "codex|$RUN_DIR|--yolo fix" "codex exec with auth"
 
 # --- multi-repo clone trims whitespace, clones under /workspace, stays in run dir ---
 rm -f "$HOME_DIR/.codex/auth.json"

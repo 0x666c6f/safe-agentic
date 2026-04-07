@@ -101,7 +101,8 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] A URL will appear. Open it in your macOS browser to log in."
       codex login --device-auth
     fi
-    exec codex --full-auto "$@"
+    # Container IS the sandbox — run Codex in yolo mode.
+    exec codex --yolo "$@"
     ;;
   *)
     echo "[entrypoint] No agent type set. Starting interactive shell."

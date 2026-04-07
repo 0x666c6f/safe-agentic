@@ -147,4 +147,5 @@ Agent skills in `.claude/skills/` and `.codex/skills/`:
 
 - OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `agent vm start`.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
+- Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
 - Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.

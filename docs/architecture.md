@@ -33,7 +33,7 @@ graph TB
 
         subgraph netB["Bridge network: agent-codex-fix-net"]
             subgraph containerB["Container: agent-codex-fix"]
-                agentB["Codex --full-auto"]
+                agentB["Codex --yolo"]
             end
         end
     end
@@ -184,7 +184,7 @@ sequenceDiagram
         Entry->>Agent: exec claude --dangerously-skip-permissions
     else AGENT_TYPE=codex
         Entry->>Agent: codex login --device-auth (first run)
-        Entry->>Agent: exec codex --full-auto
+        Entry->>Agent: exec codex --yolo
     end
 
     Agent-->>User: OAuth URL displayed

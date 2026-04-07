@@ -43,8 +43,8 @@ assert_present 'clone_dir="/workspace/\$clone_path"'     "clone under /workspace
 # --- Claude uses --dangerously-skip-permissions (container IS sandbox) ---
 assert_present 'exec claude --dangerously-skip-permissions'  "claude skip-permissions"
 
-# --- Codex uses --full-auto ---
-assert_present 'exec codex --full-auto'                       "codex full-auto"
+# --- Codex uses yolo mode ---
+assert_present 'exec codex --yolo' "codex yolo"
 
 # --- Codex auth uses device-auth flow (headless-compatible) ---
 assert_present 'codex login --device-auth'                    "codex device-auth flow"
