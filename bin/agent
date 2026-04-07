@@ -93,6 +93,7 @@ ${GREEN}Run:${NC}
 ${GREEN}Manage:${NC}
   agent list
   agent attach <name>|--latest
+  agent cp <name>|--latest <container-path> <host-path>
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
@@ -101,7 +102,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|cp|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -167,6 +168,16 @@ Examples:
   agent attach api-refactor
   agent attach agent-claude-api-refactor
   agent attach --latest
+EOF
+}
+
+print_help_cp() {
+  cat <<EOF
+Usage: agent cp <name>|--latest <container-path> <host-path>
+
+Examples:
+  agent cp api-refactor /workspace/out/test.log ./test.log
+  agent cp --latest /workspace/dist ./dist
 EOF
 }
 
@@ -667,6 +678,60 @@ resolve_target_container() {
   printf '%s\n' "$resolved"
 }
 
+cleanup_copy_artifacts() {
+  local remote_tmp="${1:-}"
+  local host_tar="${2:-}"
+  local host_stage="${3:-}"
+
+  [ -n "$remote_tmp" ] && vm_exec rm -rf "$remote_tmp" >/dev/null 2>&1 || true
+  [ -n "$host_tar" ] && rm -f "$host_tar"
+  [ -n "$host_stage" ] && rm -rf "$host_stage"
+}
+
+move_staged_copy_to_host() {
+  local stage_dir="$1"
+  local destination="$2"
+  local entry=""
+  local -a entries=()
+
+  while IFS= read -r -d '' entry; do
+    entries+=("$entry")
+  done < <(find "$stage_dir" -mindepth 1 -maxdepth 1 -print0)
+
+  if [ "${#entries[@]}" -eq 0 ]; then
+    echo "No files were staged for copy." >&2
+    return 1
+  fi
+
+  if [ "${#entries[@]}" -eq 1 ]; then
+    entry="${entries[0]}"
+
+    if [ -d "$destination" ]; then
+      mv "$entry" "$destination/"
+      return 0
+    fi
+
+    if [ -e "$destination" ] && [ -d "$entry" ]; then
+      echo "Destination exists and is not a directory: $destination" >&2
+      return 1
+    fi
+
+    mkdir -p "$(dirname "$destination")"
+    mv "$entry" "$destination"
+    return 0
+  fi
+
+  if [ -e "$destination" ] && [ ! -d "$destination" ]; then
+    echo "Destination must be a directory when copying multiple items: $destination" >&2
+    return 1
+  fi
+
+  mkdir -p "$destination"
+  for entry in "${entries[@]}"; do
+    mv "$entry" "$destination/"
+  done
+}
+
 cmd_attach() {
   local topic="attach"
   local name=""
@@ -697,6 +762,79 @@ cmd_attach() {
 
   info "Attaching to $name..."
   orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+}
+
+cmd_cp() {
+  local topic="cp"
+  local name=""
+  local latest=false
+  local container_path=""
+  local host_path=""
+  local remote_tmp=""
+  local host_tar=""
+  local host_stage=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ -z "$container_path" ]; then
+          container_path="$1"
+        elif [ -z "$host_path" ]; then
+          host_path="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+  [ -n "$container_path" ] || die_with_help "$topic" "Container path required."
+  [ -n "$host_path" ] || die_with_help "$topic" "Host path required."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  remote_tmp=$(vm_exec mktemp -d /tmp/safe-agentic-cp.XXXXXX)
+  [ -n "$remote_tmp" ] || die "Failed to allocate a VM temp directory."
+  host_tar=$(mktemp -t safe-agentic-cp)
+  host_stage=$(mktemp -d -t safe-agentic-cp)
+
+  info "Copying $name:$container_path -> $host_path"
+
+  if ! vm_exec docker cp "${name}:${container_path}" "$remote_tmp/" >/dev/null 2>&1; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed: $name:$container_path not found or unreadable."
+  fi
+
+  if ! vm_exec tar -C "$remote_tmp" -cf - . > "$host_tar"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed while streaming data from the VM."
+  fi
+
+  if ! tar -xf "$host_tar" -C "$host_stage"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed while unpacking data on the host."
+  fi
+
+  if ! move_staged_copy_to_host "$host_stage" "$host_path"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed. See error above."
+  fi
+
+  cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+  ok "Copied $name:$container_path -> $host_path"
 }
 
 cmd_stop() {
@@ -1000,6 +1138,9 @@ cmd_help() {
     attach)
       print_help_attach
       ;;
+    cp)
+      print_help_cp
+      ;;
     stop)
       print_help_stop
       ;;
@@ -1030,6 +1171,7 @@ case "$cmd" in
   shell)    cmd_shell "$@" ;;
   list)     cmd_list "$@" ;;
   attach)   cmd_attach "$@" ;;
+  cp)       cmd_cp "$@" ;;
   stop)     cmd_stop "$@" ;;
   cleanup)  cmd_cleanup "$@" ;;
   update)   cmd_update "$@" ;;

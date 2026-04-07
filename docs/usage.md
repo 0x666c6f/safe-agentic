@@ -184,6 +184,17 @@ agent attach agent-claude-api-refactor
 agent attach --latest
 ```
 
+### Copy files out
+
+Use `agent cp` to pull logs, test output, or build artifacts back to the host without adding bind mounts:
+
+```bash
+agent cp api-refactor /workspace/tmp/test.log ./test.log
+agent cp --latest /workspace/dist ./dist
+```
+
+This copies through a temp directory in the hardened VM, then writes to the host path you asked for.
+
 ### Stop
 
 ```bash

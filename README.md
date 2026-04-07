@@ -151,12 +151,21 @@ agent shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
 agent list                  # List running agents
 agent attach <name>         # Open second shell in running agent
 agent attach --latest       # Attach to newest running agent
+agent cp <name> <container-path> <host-path>  # Copy files out safely
+agent cp --latest <container-path> <host-path>
 agent stop <name>           # Stop specific agent
 agent stop --latest         # Stop newest running agent
 agent stop --all            # Stop all agents
 agent cleanup               # Stop all + keep shared auth + prune managed networks
 agent cleanup --auth        # Also remove shared auth volumes
 agent diagnose              # Check orb/VM/docker/image/SSH/defaults
+```
+
+Use `agent cp` when you need logs, test output, or build artifacts on the host without adding bind mounts:
+
+```bash
+agent cp api-refactor /workspace/tmp/test.log ./test.log
+agent cp --latest /workspace/dist ./dist
 ```
 
 Older `agent cleanup` removed shared auth volumes too. Full reset now needs `agent cleanup --auth`.

@@ -128,6 +128,9 @@ assert_output_contains "Unknown command" "unknown command error message"
 run_fails "attach no name"   bash "$REPO_DIR/bin/agent" attach
 assert_output_contains "agent help attach" "attach usage pointer"
 
+run_fails "cp no args"       bash "$REPO_DIR/bin/agent" cp
+assert_output_contains "agent help cp" "cp usage pointer"
+
 run_fails "stop no arg"      bash "$REPO_DIR/bin/agent" stop
 assert_output_contains "agent help stop" "stop usage pointer"
 
@@ -141,6 +144,10 @@ run_ok "help spawn topic" bash "$REPO_DIR/bin/agent" help spawn
 assert_output_contains "Usage: agent spawn" "spawn help topic"
 assert_output_contains "--reuse-gh-auth" "spawn help shows gh auth flag"
 assert_output_contains "--docker-socket" "spawn help shows docker socket flag"
+
+run_ok "help cp topic" bash "$REPO_DIR/bin/agent" help cp
+assert_output_contains "Usage: agent cp" "cp help topic"
+assert_output_contains "--latest" "cp help shows latest"
 
 # =============================================================================
 # agent-codex alias: correct agent type and SSH detection
