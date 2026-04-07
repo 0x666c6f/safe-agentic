@@ -75,6 +75,7 @@ assert_absent 'starship'              "starship removed"
 
 # --- Entrypoint is the custom script ---
 assert_present 'ENTRYPOINT.*entrypoint.sh' "entrypoint is custom script"
+assert_present 'COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh' "repo url helper copied into image"
 
 # --- CLI bundle is outside tmpfs-backed ~/.local ---
 assert_present '/opt/agent-cli' "CLI bundle installed outside ~/.local"

@@ -142,7 +142,7 @@ assert_contains "$setup_log" 'run|env DEST=/tmp/setup.sh bash -c cat > "$DEST"' 
 assert_contains "$setup_log" "run|bash /tmp/setup.sh" "setup runs hardening"
 assert_contains "$setup_log" 'run|env DEST=/tmp/seccomp.json bash -c cat > "$DEST"' "setup copies seccomp profile"
 assert_contains "$setup_log" "run|bash -c install -m 0644 -D /tmp/seccomp.json /etc/safe-agentic/seccomp.json" "setup installs seccomp profile"
-assert_contains "$setup_log" "run|docker build -t safe-agentic:latest /tmp/safe-agentic/" "setup builds image"
+assert_contains "$setup_log" "run|docker build --progress=plain -t safe-agentic:latest /tmp/safe-agentic/" "setup builds image"
 
 # --- setup with existing VM does not recreate it ---
 TEST_VM_EXISTS=1 run_agent setup >/dev/null 2>&1

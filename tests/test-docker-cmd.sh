@@ -10,8 +10,11 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 FAKE_BIN="$TMP_DIR/bin"
 ORB_LOG="$TMP_DIR/orb.log"
 ERR_LOG="$TMP_DIR/error.log"
+OUT_LOG="$TMP_DIR/out.log"
 VERIFY_STATE="$TMP_DIR/verify-state"
+DEFAULT_HOME="$TMP_DIR/home"
 mkdir -p "$FAKE_BIN"
+mkdir -p "$DEFAULT_HOME/.config/safe-agentic"
 
 # Fake orb that logs docker commands
 cat >"$FAKE_BIN/orb" <<'ORBEOF'
@@ -182,6 +185,53 @@ gitenv_run="$(last_docker_run)"
 assert_contains "$gitenv_run" "GIT_AUTHOR_NAME=Explicit User" "explicit author forwarded"
 assert_contains "$gitenv_run" "GIT_AUTHOR_EMAIL=explicit@example.com" "explicit email forwarded"
 
+run_agent "$REPO_DIR/bin/agent" spawn claude --name identity --identity "CLI User <cli@example.com>" --repo https://github.com/a/b.git >/dev/null 2>&1
+identity_run="$(last_docker_run)"
+assert_contains "$identity_run" "GIT_AUTHOR_NAME=CLI User" "identity flag author"
+assert_contains "$identity_run" "GIT_AUTHOR_EMAIL=cli@example.com" "identity flag email"
+assert_contains "$identity_run" "GIT_COMMITTER_NAME=CLI User" "identity flag committer"
+assert_contains "$identity_run" "GIT_COMMITTER_EMAIL=cli@example.com" "identity flag committer email"
+
+cat >"$DEFAULT_HOME/.config/safe-agentic/defaults.sh" <<'EOF'
+SAFE_AGENTIC_DEFAULT_MEMORY=12g
+SAFE_AGENTIC_DEFAULT_CPUS=6
+SAFE_AGENTIC_DEFAULT_NETWORK=custom-net
+SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_IDENTITY="Default User <default@example.com>"
+EOF
+
+HOME="$DEFAULT_HOME" run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name defaults --repo https://github.com/a/b.git >/dev/null 2>&1
+defaults_run="$(last_docker_run)"
+assert_contains "$defaults_run" "--memory 12g" "defaults memory"
+assert_contains "$defaults_run" "--cpus 6" "defaults cpus"
+assert_contains "$defaults_run" "--network custom-net" "defaults network"
+assert_contains "$defaults_run" "src=agent-claude-auth,dst=/home/agent/.claude" "defaults reuse-auth"
+assert_contains "$defaults_run" "GIT_AUTHOR_NAME=Default User" "defaults identity"
+
+BAD_HOME="$TMP_DIR/bad-home"
+BAD_MARKER="$TMP_DIR/defaults-ran"
+mkdir -p "$BAD_HOME/.config/safe-agentic"
+cat >"$BAD_HOME/.config/safe-agentic/defaults.sh" <<EOF
+SAFE_AGENTIC_DEFAULT_MEMORY=14g
+touch "$BAD_MARKER"
+EOF
+
+if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" HOME="$BAD_HOME" \
+  bash "$REPO_DIR/bin/agent" spawn claude --name bad-defaults --repo https://github.com/a/b.git >"$OUT_LOG" 2>"$ERR_LOG"; then
+  echo "FAIL: defaults parser should reject shell commands" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
+assert_not_contains "$(cat "$ERR_LOG")" "source " "defaults parser does not source shell"
+assert_contains "$(cat "$ERR_LOG")" "Use simple KEY=value assignments only" "defaults parser error"
+if [ -e "$BAD_MARKER" ]; then
+  echo "FAIL: defaults parser executed shell code" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
+
 # =============================================================================
 # Test: AGENT_TYPE is set for spawn, absent for shell
 # =============================================================================
@@ -295,6 +345,17 @@ assert_contains "$shell_repo_run" "REPOS=https://github.com/a/b.git" "shell pass
 run_agent "$REPO_DIR/bin/agent" shell --ssh >/dev/null 2>&1
 shell_ssh_run="$(last_docker_run)"
 assert_contains "$shell_ssh_run" "SSH_AUTH_SOCK=/run/ssh-agent.sock" "shell ssh forwarding"
+
+# =============================================================================
+# Test: Dry run prints command but does not execute docker run/create network
+# =============================================================================
+: >"$ORB_LOG"
+PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" \
+  bash "$REPO_DIR/bin/agent" spawn claude --dry-run --name preview --repo https://github.com/a/b.git >"$ERR_LOG" 2>&1
+dry_log="$(cat "$ORB_LOG")"
+assert_not_contains "$dry_log" "docker run " "dry-run skips docker run"
+assert_not_contains "$dry_log" "docker network create" "dry-run skips network create"
+assert_contains "$(cat "$ERR_LOG")" "Would run:" "dry-run prints docker command"
 
 # =============================================================================
 # Test: Image name is the last argument (after all flags)

@@ -2,6 +2,20 @@
 
 Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks get egress guardrails, images are local-only at launch, and resource limits apply.
 
+## Quick Start
+
+```bash
+agent setup
+agent-claude git@github.com:myorg/myrepo.git
+agent diagnose
+```
+
+- `agent-claude` / `agent-codex` auto-enable `--ssh` for `git@` and `ssh://` repos
+- add `--reuse-auth` to keep OAuth between sessions
+- add `--identity 'You <you@example.com>'` to avoid `Agent <agent@localhost>` commits
+- put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, and git identity
+  - format: simple `KEY=value` lines only; no shell snippets
+
 ## Architecture
 
 ```mermaid
@@ -81,7 +95,7 @@ agent spawn claude --repo <untrusted-repo> --network agent-isolated
 agent setup
 ```
 
-Creates OrbStack VM, hardens it, installs Docker, builds the agent image.
+Creates OrbStack VM, hardens it, installs Docker, builds the agent image. Progress now prints numbered phases during VM bootstrap and image build.
 
 **After VM restarts:** Run `agent vm start` (auto re-applies hardening).
 
@@ -109,6 +123,9 @@ agent spawn claude --ssh --repo git@github.com:myorg/api.git --repo git@github.c
 agent-claude git@github.com:myorg/myrepo.git
 agent-codex git@github.com:myorg/myrepo.git
 
+# Advanced alias usage still works
+agent-claude --name api-fix --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/api.git
+
 # Untrusted repo — no SSH, isolated network
 agent spawn claude --repo https://github.com/myorg/untrusted.git --network agent-isolated
 
@@ -121,10 +138,16 @@ agent shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
 ```bash
 agent list                  # List running agents
 agent attach <name>         # Open second shell in running agent
+agent attach --latest       # Attach to newest running agent
 agent stop <name>           # Stop specific agent
+agent stop --latest         # Stop newest running agent
 agent stop --all            # Stop all agents
-agent cleanup               # Stop all + remove shared auth + prune managed networks
+agent cleanup               # Stop all + keep shared auth + prune managed networks
+agent cleanup --auth        # Also remove shared auth volumes
+agent diagnose              # Check orb/VM/docker/image/SSH/defaults
 ```
+
+Older `agent cleanup` removed shared auth volumes too. Full reset now needs `agent cleanup --auth`.
 
 ### Interactive shell (no agent, no auth)
 
@@ -211,6 +234,24 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 
 `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` are also honored if you set them explicitly.
 
+Or use a one-off flag:
+
+```bash
+agent spawn claude --identity "Your Name <you@example.com>" --repo https://github.com/myorg/myrepo.git
+```
+
+Or set persistent defaults in `${XDG_CONFIG_HOME:-~/.config}/safe-agentic/defaults.sh`:
+
+```bash
+SAFE_AGENTIC_DEFAULT_MEMORY=16g
+SAFE_AGENTIC_DEFAULT_CPUS=8
+SAFE_AGENTIC_DEFAULT_NETWORK=agent-isolated
+SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
+```
+
+Use simple `KEY=value` assignments only. `defaults.sh` is parsed as config, not executed as shell.
+
 ### Launch behavior
 
 `agent spawn` / `agent shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `agent update` or `agent setup`.
@@ -223,5 +264,5 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 
 - **[Quickstart](docs/quickstart.md)** — from zero to a sandboxed agent in 5 minutes
 - **[Architecture](docs/architecture.md)** — system diagrams, component map, sequence flows
-- **[Usage guide](docs/usage.md)** — all commands, options, and workflows
+- **[Usage guide](docs/usage.md)** — all commands, options, defaults, and troubleshooting
 - **[Security model](docs/security.md)** — isolation boundaries, threat model, supply chain hardening

@@ -15,7 +15,9 @@ VERIFY_STATE="$TMP_DIR/verify-state"
 mkdir -p "$TEST_REPO/bin" "$TEST_REPO/config" "$TEST_REPO/vm" "$FAKE_BIN" "$VM_DIR"
 
 cp "$SRC_REPO_DIR/bin/agent" "$TEST_REPO/bin/agent"
+cp "$SRC_REPO_DIR/bin/agent-alias" "$TEST_REPO/bin/agent-alias"
 cp "$SRC_REPO_DIR/bin/agent-lib.sh" "$TEST_REPO/bin/agent-lib.sh"
+cp "$SRC_REPO_DIR/bin/repo-url.sh" "$TEST_REPO/bin/repo-url.sh"
 cp "$SRC_REPO_DIR/config/seccomp.json" "$TEST_REPO/config/seccomp.json"
 cp "$SRC_REPO_DIR/vm/setup.sh" "$TEST_REPO/vm/setup.sh"
 
@@ -158,7 +160,7 @@ last_build_cmd() {
   printf 'nested\n' > nested/keep.txt
   printf 'gone\n' > gone.txt
   printf 'ignore me\n' > scratch.txt
-  git add -- bin/agent bin/agent-lib.sh config/seccomp.json vm/setup.sh tracked.txt nested/keep.txt gone.txt 'space name.txt' '--leading-dash.txt'
+  git add -- bin/agent bin/agent-alias bin/agent-lib.sh bin/repo-url.sh config/seccomp.json vm/setup.sh tracked.txt nested/keep.txt gone.txt 'space name.txt' '--leading-dash.txt'
   git commit -qm "init"
   rm -f gone.txt
 )
@@ -166,7 +168,9 @@ last_build_cmd() {
 # --- default update ships tracked files only, skipping deleted tracked files ---
 run_update
 assert_file_exists "$VM_DIR/safe-agentic/bin/agent" "tracked bin/agent copied"
+assert_file_exists "$VM_DIR/safe-agentic/bin/agent-alias" "tracked bin/agent-alias copied"
 assert_file_exists "$VM_DIR/safe-agentic/bin/agent-lib.sh" "tracked agent-lib copied"
+assert_file_exists "$VM_DIR/safe-agentic/bin/repo-url.sh" "tracked repo-url helper copied"
 assert_file_exists "$VM_DIR/safe-agentic/tracked.txt" "tracked file copied"
 assert_file_exists "$VM_DIR/safe-agentic/nested/keep.txt" "nested tracked file copied"
 assert_file_exists "$VM_DIR/safe-agentic/space name.txt" "tracked file with space copied"
@@ -185,7 +189,7 @@ assert_contains "$quick_build" "--build-arg CLI_CACHE_BUST=" "quick build cache 
 # --- full update disables cache ---
 run_update --full
 full_build="$(last_build_cmd)"
-assert_contains "$full_build" "docker build --no-cache -t safe-agentic:latest /tmp/safe-agentic/" "full build no-cache"
+assert_contains "$full_build" "docker build --progress=plain --no-cache -t safe-agentic:latest /tmp/safe-agentic/" "full build no-cache"
 
 # --- quick + full is rejected ---
 if run_update --quick --full; then

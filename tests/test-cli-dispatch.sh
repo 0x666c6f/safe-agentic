@@ -120,16 +120,19 @@ run_fails "unknown command"  bash "$REPO_DIR/bin/agent" bogus
 assert_output_contains "Unknown command" "unknown command error message"
 
 run_fails "attach no name"   bash "$REPO_DIR/bin/agent" attach
-assert_output_contains "Usage: agent attach" "attach usage"
+assert_output_contains "agent help attach" "attach usage pointer"
 
 run_fails "stop no arg"      bash "$REPO_DIR/bin/agent" stop
-assert_output_contains "Usage: agent stop" "stop usage"
+assert_output_contains "agent help stop" "stop usage pointer"
 
 run_fails "vm no subcommand" bash "$REPO_DIR/bin/agent" vm
-assert_output_contains "Usage: agent vm" "vm usage"
+assert_output_contains "agent help vm" "vm usage pointer"
 
 run_fails "update bad flag"  bash "$REPO_DIR/bin/agent" update --bogus
-assert_output_contains "Usage: agent update" "update usage"
+assert_output_contains "agent help update" "update usage pointer"
+
+run_ok "help spawn topic" bash "$REPO_DIR/bin/agent" help spawn
+assert_output_contains "Usage: agent spawn" "spawn help topic"
 
 # =============================================================================
 # agent-codex alias: correct agent type and SSH detection
@@ -139,6 +142,7 @@ run_ok "codex alias https" bash "$REPO_DIR/bin/agent-codex" https://github.com/a
 codex_https="$(last_docker_run)"
 assert_contains "$codex_https" "AGENT_TYPE=codex"       "codex alias sets codex type"
 assert_not_contains "$codex_https" "SSH_AUTH_SOCK"       "codex alias https no ssh"
+assert_output_contains "agent spawn codex --repo https://github.com/acme/repo.git" "codex alias shows resolved command"
 
 : >"$ORB_LOG"
 run_ok "codex alias ssh" bash "$REPO_DIR/bin/agent-codex" git@github.com:acme/repo.git
@@ -168,6 +172,16 @@ assert_not_contains "$multi_run" "SSH_AUTH_SOCK" "multi https repos no ssh"
 run_ok "claude mixed repos" bash "$REPO_DIR/bin/agent-claude" https://github.com/a/one.git git@github.com:a/two.git
 mixed_run="$(last_docker_run)"
 assert_contains "$mixed_run" "SSH_AUTH_SOCK" "mixed repos enable ssh"
+
+# Advanced flags pass through aliases
+: >"$ORB_LOG"
+run_ok "codex alias passthrough" bash "$REPO_DIR/bin/agent-codex" --name codex-task --reuse-auth --identity "Alias User <alias@example.com>" https://github.com/acme/repo.git
+alias_run="$(last_docker_run)"
+assert_contains "$alias_run" "--name agent-codex-codex-task" "alias forwards name"
+assert_contains "$alias_run" "src=agent-codex-auth,dst=/home/agent/.codex" "alias forwards reuse-auth"
+assert_contains "$alias_run" "GIT_AUTHOR_NAME=Alias User" "alias forwards identity"
+assert_output_contains "agent spawn codex --name codex-task --reuse-auth" "alias passthrough command echo"
+assert_output_contains "alias@example.com" "alias identity echo"
 
 # =============================================================================
 # Alias with no args

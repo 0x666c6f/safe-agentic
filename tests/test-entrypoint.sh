@@ -36,7 +36,8 @@ assert_absent  'user\.email\s+"agent@safe-agentic'       "no stale hardcoded saf
 assert_absent 'insteadOf'                                "no git insteadOf rewrite"
 
 # --- Clone path validation exists and unsafe paths are rejected ---
-assert_present '^repo_clone_path\(\)'                    "repo_clone_path helper present"
+assert_present 'repo-url\.sh'                            "repo url helper sourced"
+assert_present 'repo_clone_path "\$repo_url"'            "repo clone path helper used"
 assert_present 'Refusing repo URL with unsafe clone path' "unsafe clone path rejection"
 assert_present 'clone_dir="/workspace/\$clone_path"'     "clone under /workspace only"
 

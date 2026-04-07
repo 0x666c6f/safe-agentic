@@ -275,7 +275,7 @@ sequenceDiagram
     Note over Volumes: Auth token, workspace,<br/>caches all gone
 
     alt --reuse-auth was used
-        Note over Volumes: Named auth volume<br/>survives until<br/>agent cleanup
+        Note over Volumes: Named auth volume<br/>survives until<br/>agent cleanup --auth
     end
 ```
 

@@ -2,6 +2,17 @@
 # Container entrypoint: set up runtime config on tmpfs, clone repos, launch agent or shell.
 set -euo pipefail
 
+ENTRYPOINT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+REPO_URL_LIB="/usr/local/lib/safe-agentic/repo-url.sh"
+
+if [ -f "$REPO_URL_LIB" ]; then
+  # shellcheck disable=SC1091
+  source "$REPO_URL_LIB"
+else
+  # shellcheck disable=SC1091
+  source "$ENTRYPOINT_DIR/bin/repo-url.sh"
+fi
+
 # ---------------------------------------------------------------------------
 # Runtime config (written to tmpfs — rootfs is read-only)
 # ---------------------------------------------------------------------------
@@ -18,39 +29,6 @@ git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
-
-repo_clone_path() {
-  local repo_url="$1"
-  local clone_path
-  local owner repo
-
-  # Reject URLs that look like flags (git option injection)
-  case "$repo_url" in -*) return 1 ;; esac
-
-  # Strip trailing .git suffix
-  clone_path="${repo_url%.git}"
-
-  # Extract the path after the host
-  case "$clone_path" in
-    https://*|ssh://*) clone_path="${clone_path#*://*/}" ;; # URL-style scheme://host/org/repo
-    *:*/*)   clone_path="${clone_path##*:}" ;;    # scp-style git@host:org/repo
-    *)       return 1 ;;
-  esac
-
-  # Must contain exactly one slash (owner/repo, two components)
-  [[ "$clone_path" == */* ]] || return 1
-  owner="${clone_path%/*}"
-  repo="${clone_path#*/}"
-  [[ "$owner" == */* ]] && return 1
-
-  # Reject dot-prefixed names, dash-prefixed names, empty, and unsafe characters
-  case "$owner" in ""|.*|-*) return 1 ;; esac
-  case "$repo"  in ""|.*|-*) return 1 ;; esac
-  [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
-  [[ "$repo"  =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
-
-  printf '%s/%s\n' "$owner" "$repo"
-}
 
 # ---------------------------------------------------------------------------
 # Clone repositories
@@ -91,12 +69,13 @@ AGENT_TYPE="${AGENT_TYPE:-}"
 case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
-    # Container IS the sandbox — skip permission checks
+    echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
     # OAuth login: on first run, Claude will display a URL to open in your browser
     exec claude --dangerously-skip-permissions "$@"
     ;;
   codex)
     echo "[entrypoint] Launching Codex..."
+    echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
     # In a headless container, the localhost callback OAuth flow doesn't work.
     # Use device-auth flow: shows a URL + code to open in your browser.
     if [ ! -f "$HOME/.codex/auth.json" ]; then
@@ -104,7 +83,6 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] A URL will appear. Open it in your macOS browser to log in."
       codex login --device-auth
     fi
-    # Container IS the sandbox — run Codex in yolo mode.
     exec codex --yolo "$@"
     ;;
   *)

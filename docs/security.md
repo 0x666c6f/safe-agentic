@@ -86,7 +86,7 @@ It **cannot** read your private key (1Password agent never exposes it).
 Stores the OAuth token in a named Docker volume that survives container restarts.
 
 **When to use:** Avoid re-authenticating every session.
-**Risk:** A compromised container could steal the token from the shared volume. Run `agent cleanup` to revoke.
+**Risk:** A compromised container could steal the token from the shared volume. Run `agent cleanup --auth` to revoke.
 
 ### `--network <name>`
 
@@ -144,7 +144,7 @@ graph TD
     style vols fill:#e3f2fd,stroke:#1565c0
 ```
 
-All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes (from `--reuse-auth`) persist until `agent cleanup`.
+All writable areas are either tmpfs (discarded on exit) or anonymous Docker volumes (discarded on `agent cleanup`). Named volumes (from `--reuse-auth`) persist until `agent cleanup --auth`.
 
 ## Git identity
 

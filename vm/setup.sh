@@ -3,6 +3,13 @@
 # Designed to run inside the OrbStack "safe-agentic" Ubuntu VM.
 set -euo pipefail
 
+TOTAL_STEPS=5
+step() {
+  local number="$1"
+  shift
+  echo "==> [$number/$TOTAL_STEPS] $*"
+}
+
 echo "==> Setting up safe-agentic VM..."
 
 # =============================================================================
@@ -10,7 +17,7 @@ echo "==> Setting up safe-agentic VM..."
 # OrbStack mounts macOS paths into VMs by default (/Users, /mnt/mac, etc.)
 # and links macOS commands (open, osascript, code). We disable all of this.
 # =============================================================================
-echo "==> Hardening VM: blocking macOS filesystem access..."
+step 1 "Hardening VM: blocking macOS filesystem access..."
 
 # Unmount any macOS-shared paths
 for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
@@ -38,7 +45,7 @@ for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
 done
 
 # Remove OrbStack macOS integration commands
-echo "==> Removing macOS integration commands..."
+step 2 "Removing macOS integration commands..."
 MASK_DIRS=""
 for cmd in open osascript code mac; do
   CMDPATH=$(command -v "$cmd" 2>/dev/null || true)
@@ -63,7 +70,7 @@ for dir in $MASK_DIRS; do
 done
 
 # Verify hardening
-echo "==> Verifying VM hardening..."
+step 3 "Verifying VM hardening..."
 HARDENING_OK=true
 for mnt in /Users /mnt/mac; do
   if [ -d "$mnt" ] && ls "$mnt" 2>/dev/null | grep -q .; then
@@ -91,7 +98,7 @@ fi
 # Install Docker CE
 # =============================================================================
 if ! command -v docker &>/dev/null; then
-  echo "==> Installing Docker CE..."
+  step 4 "Installing Docker CE..."
   sudo apt-get update -qq
   sudo apt-get install -y -qq ca-certificates curl gnupg
 
@@ -107,7 +114,7 @@ if ! command -v docker &>/dev/null; then
   sudo apt-get update -qq
   sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 else
-  echo "==> Docker already installed: $(docker --version)"
+  step 4 "Docker already installed: $(docker --version)"
 fi
 
 # Add current user to docker group
@@ -118,7 +125,7 @@ fi
 
 # Configure Docker daemon
 DAEMON_JSON=/etc/docker/daemon.json
-echo "==> Configuring Docker daemon..."
+step 5 "Configuring Docker daemon and egress guardrails..."
 sudo tee "$DAEMON_JSON" > /dev/null <<'DJEOF'
 {
   "log-driver": "json-file",
@@ -139,7 +146,6 @@ sudo systemctl enable docker
 sudo systemctl start docker
 
 # Install egress guardrails for safe-agentic managed bridges (bridge names start with "sa")
-echo "==> Installing managed-network egress guardrails..."
 sudo iptables -nL DOCKER-USER >/dev/null 2>&1 || sudo iptables -N DOCKER-USER
 sudo iptables -N SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
 sudo iptables -F SAFE_AGENTIC_EGRESS

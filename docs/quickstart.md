@@ -37,6 +37,9 @@ agent-claude git@github.com:myorg/myrepo.git
 
 # Codex instead of Claude
 agent-codex git@github.com:myorg/myrepo.git
+
+# Keep auth + set git identity
+agent-claude --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/myrepo.git
 ```
 
 That's it. The agent launches inside a hardened container with your repo cloned. On first run, you'll see an OAuth URL — open it in your browser to log in.
@@ -47,7 +50,10 @@ The container is destroyed when the agent exits. To stop a running agent:
 
 ```bash
 agent stop --all
+agent cleanup --auth   # optional: also remove shared auth volumes
 ```
+
+If setup or spawn fails, run `agent diagnose`.
 
 ## What happens under the hood
 
@@ -70,5 +76,5 @@ The agent has full freedom **inside** the container but can't escape it. SSH key
 ## Next steps
 
 - [Architecture](architecture.md) — system overview, diagrams, and component map
-- [Usage guide](usage.md) — all commands, options, and workflows
+- [Usage guide](usage.md) — all commands, options, defaults, and troubleshooting
 - [Security model](security.md) — what's protected and what's not

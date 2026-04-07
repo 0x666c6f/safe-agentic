@@ -65,6 +65,7 @@ prepare_live_agent_cli() {
 
   mkdir -p "$LIVE_AGENT_BIN"
   cp "$REPO_DIR/bin/agent-lib.sh" "$LIVE_AGENT_BIN/agent-lib.sh"
+  cp "$REPO_DIR/bin/repo-url.sh" "$LIVE_AGENT_BIN/repo-url.sh"
   sed "s/^IMAGE_TAG=.*/IMAGE_TAG=\"$image_tag\"/" "$REPO_DIR/bin/agent" >"$LIVE_AGENT_BIN/agent"
   chmod +x "$LIVE_AGENT_BIN/agent"
 }

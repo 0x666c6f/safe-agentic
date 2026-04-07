@@ -7,9 +7,11 @@ errors=0
 
 for script in \
   bin/agent \
+  bin/agent-alias \
   bin/agent-lib.sh \
   bin/agent-claude \
   bin/agent-codex \
+  bin/repo-url.sh \
   entrypoint.sh \
   vm/setup.sh \
   config/bashrc \

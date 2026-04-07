@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Unit tests for repo_clone_path() from entrypoint.sh.
+# Unit tests for shared repo path parsing.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Extract the function definition from entrypoint.sh so we can test it
-# without running the side-effectful top-level code.
-eval "$(sed -n '/^repo_clone_path()/,/^}/p' "$REPO_DIR/entrypoint.sh")"
+# shellcheck disable=SC1091
+source "$REPO_DIR/bin/repo-url.sh"
 
 pass=0
 fail=0

@@ -152,14 +152,19 @@ assert_contains "$stop_all_log" "docker stop cid-one cid-two" "stop all containe
 assert_contains "$stop_all_log" "docker network rm agent-one-net" "stop all first network"
 assert_contains "$stop_all_log" "docker network rm agent-two-net" "stop all second network"
 
-# --- cleanup removes stopped containers, shared auth, networks, pruned image layers ---
+# --- cleanup removes stopped containers, keeps shared auth by default, prunes image layers ---
 run_agent "$REPO_DIR/bin/agent" cleanup >/dev/null 2>&1
 cleanup_log="$(cat "$ORB_LOG")"
 assert_contains "$cleanup_log" "docker stop cid-one cid-two" "cleanup stop running"
 assert_contains "$cleanup_log" "docker rm cid-one cid-two" "cleanup remove stopped"
-assert_contains "$cleanup_log" "docker volume rm agent-claude-auth agent-codex-auth" "cleanup auth volumes"
+assert_not_contains "$cleanup_log" "docker volume rm agent-claude-auth agent-codex-auth" "cleanup keeps auth volumes"
 assert_contains "$cleanup_log" "docker network rm net-a net-b" "cleanup managed networks"
 assert_contains "$cleanup_log" "docker image prune -f --filter label=app=safe-agentic" "cleanup image prune"
+
+# --- cleanup --auth also removes shared auth volumes ---
+run_agent "$REPO_DIR/bin/agent" cleanup --auth >/dev/null 2>&1
+cleanup_auth_log="$(cat "$ORB_LOG")"
+assert_contains "$cleanup_auth_log" "docker volume rm agent-claude-auth agent-codex-auth" "cleanup auth volumes"
 
 # --- custom network uses existing network and skips managed create ---
 run_agent "$REPO_DIR/bin/agent" spawn claude --name custom --network custom-net --repo https://github.com/acme/repo.git >/dev/null 2>&1

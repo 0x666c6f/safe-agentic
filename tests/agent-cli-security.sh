@@ -112,7 +112,7 @@ if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STA
   echo "unsafe passthrough unexpectedly accepted" >&2
   exit 1
 fi
-assert_contains "$(cat "$ERR_LOG")" "Unknown argument: --"
+assert_contains "$(cat "$ERR_LOG")" "Unknown argument '--'."
 
 if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" bash "$REPO_DIR/bin/agent" spawn claude --network host >"$ERR_LOG" 2>&1; then
   echo "unsafe network mode unexpectedly accepted" >&2

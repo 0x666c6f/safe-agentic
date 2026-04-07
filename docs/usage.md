@@ -16,7 +16,9 @@
 | `agent attach <name>` | Open a second shell in a running agent |
 | `agent stop <name>` | Stop a specific agent |
 | `agent stop --all` | Stop all agents |
-| `agent cleanup` | Stop all, remove shared auth, prune networks |
+| `agent cleanup` | Stop all, keep shared auth, prune networks |
+| `agent cleanup --auth` | Also remove shared auth volumes |
+| `agent diagnose` | Check common setup/runtime issues |
 | `agent update` | Rebuild the Docker image |
 | `agent vm start` | Start VM and re-apply hardening |
 | `agent vm stop` | Stop the VM |
@@ -53,6 +55,9 @@ agent-claude git@github.com:myorg/myrepo.git
 
 # Codex variant
 agent-codex git@github.com:myorg/myrepo.git
+
+# Advanced flags still work
+agent-claude --name api-fix --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/myrepo.git
 ```
 
 ### Named sessions
@@ -83,7 +88,7 @@ By default, you re-authenticate every time (OAuth token is discarded when the co
 agent spawn claude --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 ```
 
-The token is stored in a named Docker volume (`agent-claude-auth` / `agent-codex-auth`) that persists until `agent cleanup`.
+The token is stored in a named Docker volume (`agent-claude-auth` / `agent-codex-auth`) that persists until `agent cleanup --auth` or manual volume removal.
 
 ### Git identity
 
@@ -96,6 +101,12 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 ```
 
 `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` are also respected if set.
+
+Or use a one-off flag:
+
+```bash
+agent spawn claude --identity "Your Name <you@example.com>" --repo https://github.com/myorg/myrepo.git
+```
 
 ### Custom resource limits
 
@@ -141,13 +152,15 @@ Open a second shell into a running agent. Useful for checking logs, running test
 agent attach api-refactor
 # or with full name:
 agent attach agent-claude-api-refactor
+agent attach --latest
 ```
 
 ### Stop
 
 ```bash
 agent stop api-refactor      # Stop one
-agent stop --all              # Stop all
+agent stop --latest          # Stop newest running session
+agent stop --all             # Stop all
 ```
 
 Stopping removes the container and its per-session network.
@@ -156,9 +169,14 @@ Stopping removes the container and its per-session network.
 
 ```bash
 agent cleanup
+agent cleanup --auth
 ```
 
-Stops all containers, removes shared auth volumes (from `--reuse-auth`), prunes managed networks and dangling images.
+`agent cleanup` stops containers, removes managed networks, and prunes safe-agentic image layers. Shared auth volumes are kept by default.
+
+Add `--auth` to remove shared auth volumes too.
+
+Older releases removed shared auth volumes on plain `agent cleanup`. Use `agent cleanup --auth` if you want the old full-reset behavior.
 
 ### Container lifecycle
 
@@ -171,7 +189,7 @@ graph LR
 
     gone -->|"ephemeral volumes"| cleaned["Volumes removed"]
     gone -->|"--reuse-auth volume"| persisted["Auth persists"]
-    persisted -->|"agent cleanup"| cleaned
+    persisted -->|"agent cleanup --auth"| cleaned
 
     style spawn fill:#e3f2fd,stroke:#1565c0
     style running fill:#dfd,stroke:#393
@@ -202,6 +220,8 @@ agent update --full       # Full rebuild from scratch (no cache)
 
 Use `--quick` after Claude Code or Codex releases a new version. Use `--full` to pick up OS package updates.
 
+Build logs now stream during `agent update`, so long rebuilds stay visible.
+
 Launches are local-image only: if `safe-agentic:latest` is missing in the VM, `agent spawn` / `agent shell` will fail until you run `agent update` or `agent setup`.
 
 ### VM management
@@ -210,9 +230,66 @@ Launches are local-image only: if `safe-agentic:latest` is missing in the VM, `a
 agent vm start            # Start VM + re-apply hardening
 agent vm stop             # Stop the VM (containers stop too)
 agent vm ssh              # Debug the VM itself
+agent diagnose            # Check orb/VM/docker/image/SSH/defaults
 ```
 
 Always use `agent vm start` (not `orb start`) — it re-applies the filesystem hardening that OrbStack may reset.
+
+## Defaults / Profiles
+
+safe-agentic loads `${XDG_CONFIG_HOME:-~/.config}/safe-agentic/defaults.sh` when present.
+Use simple `KEY=value` assignments only. The file is treated as config, not sourced as shell.
+
+Example:
+
+```bash
+SAFE_AGENTIC_DEFAULT_MEMORY=16g
+SAFE_AGENTIC_DEFAULT_CPUS=8
+SAFE_AGENTIC_DEFAULT_NETWORK=agent-isolated
+SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
+SAFE_AGENTIC_DEFAULT_SSH=false
+SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
+```
+
+You can also set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` directly there if you prefer explicit env vars.
+
+## Troubleshooting
+
+### `No SSH_AUTH_SOCK in VM`
+
+Run:
+
+```bash
+agent diagnose
+agent vm start
+```
+
+If it still fails, confirm 1Password SSH agent is enabled on macOS, then re-run with `--ssh`.
+
+### `Docker may need a re-login for group changes`
+
+Re-run:
+
+```bash
+agent vm start
+agent diagnose
+```
+
+If Docker is still unavailable inside the VM, run `agent setup` again.
+
+### `Image 'safe-agentic:latest' not found in VM`
+
+Run:
+
+```bash
+agent update
+```
+
+This is expected after a fresh VM or image cleanup.
+
+### OAuth appears to hang
+
+For Claude or Codex first run, wait for the login URL/device code prompt inside the container. If you want to preserve the session afterward, launch with `--reuse-auth`.
 
 ## Tools available inside containers
 

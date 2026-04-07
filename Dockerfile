@@ -220,6 +220,7 @@ RUN if id -u agent >/dev/null 2>&1; then \
  && mkdir -p /workspace /opt/agent-cli \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 
+COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER agent
