@@ -221,7 +221,8 @@ SAFE_AGENTIC_DEFAULT_DOCKER=true
 SAFE_AGENTIC_DEFAULT_IDENTITY="Default User <default@example.com>"
 EOF
 
-HOME="$DEFAULT_HOME" run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name defaults --repo https://github.com/a/b.git >/dev/null 2>&1
+HOME="$DEFAULT_HOME" XDG_CONFIG_HOME="$DEFAULT_HOME/.config" \
+  run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name defaults --repo https://github.com/a/b.git >/dev/null 2>&1
 defaults_run="$(last_docker_run)"
 assert_contains "$defaults_run" "--memory 12g" "defaults memory"
 assert_contains "$defaults_run" "--cpus 6" "defaults cpus"
@@ -241,7 +242,7 @@ SAFE_AGENTIC_DEFAULT_MEMORY=14g
 touch "$BAD_MARKER"
 EOF
 
-if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" HOME="$BAD_HOME" \
+if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" HOME="$BAD_HOME" XDG_CONFIG_HOME="$BAD_HOME/.config" \
   bash "$REPO_DIR/bin/agent" spawn claude --name bad-defaults --repo https://github.com/a/b.git >"$OUT_LOG" 2>"$ERR_LOG"; then
   echo "FAIL: defaults parser should reject shell commands" >&2
   ((++fail))

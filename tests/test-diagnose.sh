@@ -55,7 +55,7 @@ esac
 EOF
 chmod +x "$FAKE_BIN/orb"
 
-PATH="$FAKE_BIN:$PATH" TEST_VERIFY_STATE="$VERIFY_STATE" HOME="$HOME_DIR" \
+PATH="$FAKE_BIN:$PATH" TEST_VERIFY_STATE="$VERIFY_STATE" HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
   bash "$REPO_DIR/bin/agent" diagnose >"$OUT_LOG" 2>"$ERR_LOG"
 
 output="$(cat "$OUT_LOG" "$ERR_LOG")"

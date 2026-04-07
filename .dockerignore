@@ -1,5 +1,6 @@
 .git
-bin/
+bin/*
+!bin/repo-url.sh
 vm/
 README.md
 *.md

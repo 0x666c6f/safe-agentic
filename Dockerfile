@@ -248,7 +248,7 @@ RUN if id -u agent >/dev/null 2>&1; then \
  && usermod -g agent -G "" agent \
  && printf 'agent:100000:65536\n' >> /etc/subuid \
  && printf 'agent:100000:65536\n' >> /etc/subgid \
- && mkdir -p /workspace /opt/agent-cli \
+ && install -m 0755 -d /usr/local/lib/safe-agentic /workspace /opt/agent-cli \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 
 COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh
