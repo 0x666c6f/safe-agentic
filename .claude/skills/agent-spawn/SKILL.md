@@ -35,8 +35,10 @@ agent spawn <claude|codex> [options]
 |------|---------|---------|
 | `--repo URL` | Repo to clone (repeatable) | none |
 | `--name NAME` | Human-readable container name | timestamp |
+| `--prompt 'TASK'` | Initial task for the agent | none (interactive) |
 | `--ssh` | Forward SSH agent for private repos | off |
-| `--reuse-auth` | Keep OAuth token across sessions | ephemeral |
+| `--reuse-auth` | Keep OAuth token + config across sessions | ephemeral |
+| `--reuse-gh-auth` | Keep GitHub CLI auth across sessions | ephemeral |
 | `--network NAME` | Join existing Docker network | dedicated bridge |
 | `--memory SIZE` | Memory limit | 8g |
 | `--cpus N` | CPU limit | 4 |
@@ -53,6 +55,10 @@ agent-claude git@github.com:myorg/myrepo.git
 
 # Named session with persistent auth
 agent spawn claude --ssh --reuse-auth --name api-work --repo git@github.com:myorg/api.git
+
+# With an initial prompt (agent starts working immediately)
+agent spawn codex --ssh --reuse-auth --name fix-ci --repo git@github.com:myorg/api.git \
+  --prompt 'Fix the failing CI tests'
 
 # Multiple repos
 agent-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
@@ -73,8 +79,24 @@ git remote get-url origin
 
 Then pass that URL to the spawn command.
 
+## MCP OAuth login (before or after spawning)
+
+If the agent needs MCP servers (Linear, Notion, etc.), authenticate first:
+
+```bash
+# No container needed — uses default auth volume
+agent mcp-login linear
+agent mcp-login notion
+```
+
+The token persists in the auth volume for all agents using `--reuse-auth`.
+
 ## After spawning
 
 The agent opens interactively. On first run, an OAuth URL appears — the user opens it in their browser. After auth, the agent is ready to use.
 
-The container self-destructs on exit. Use `--reuse-auth` if the user doesn't want to re-authenticate each time.
+Containers persist after exit (stopped state). Use `agent attach <name>` to reattach, or `agent stop <name>` to remove. Use `--reuse-auth` to keep auth tokens and config across spawns.
+
+## Host config injection
+
+The host's `~/.codex/config.toml` or `~/.claude/settings.json` is automatically injected into new containers. This carries over MCP servers, model settings, features, and plugins. The config is only seeded once — edits inside the container are preserved.

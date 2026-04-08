@@ -5,29 +5,28 @@ description: List, attach to, stop, or clean up running safe-agentic containers.
 
 # Manage Safe Agents
 
-List, attach to, stop, or clean up sandboxed agent containers.
+List, attach to, stop, export sessions, or clean up agent containers.
 
 ## Commands
 
-### List running agents
+### List agents (running + stopped)
 
 ```bash
 agent list
 ```
 
-Shows all running agent containers with name, status, creation time, and image.
+Shows all agent containers with name, type, repo, auth, network, and status.
 
-### Attach to a running agent
-
-Open a second shell into an already-running agent:
+### Attach to an agent
 
 ```bash
 agent attach <name>
 ```
 
-The name can be the full container name (e.g., `agent-claude-api-work`) or the suffix (e.g., `api-work`).
+If the container is running, opens a shell into it. If stopped, restarts it.
+The name can be the full container name (e.g., `agent-codex-cardinality-restrictions`) or the suffix (e.g., `cardinality-restrictions`).
 
-### Stop agents
+### Stop and remove agents
 
 ```bash
 # Stop one agent
@@ -37,42 +36,69 @@ agent stop <name>
 agent stop --all
 ```
 
-Stopping removes the container and its per-session network. Auth and workspace volumes persist until cleanup.
+Stops and removes the container, its DinD sidecar (if any), and managed network. Auth volumes persist until cleanup.
+
+### Export session history
+
+```bash
+# Export to default path (./agent-sessions/<name>/)
+agent sessions <name>
+
+# Export to custom path
+agent sessions --latest ~/sessions/
+```
+
+Copies session files, history, and session index from the container to the host.
+
+### MCP OAuth login
+
+```bash
+# Standalone (uses default agent-codex-auth volume)
+agent mcp-login linear
+
+# For a specific container
+agent mcp-login <container> notion
+```
+
+Runs OAuth login in a temporary container. Token persists in the auth volume for all agents using `--reuse-auth`.
 
 ### Full cleanup
 
 ```bash
-agent cleanup
+agent cleanup          # keeps shared auth volumes
+agent cleanup --auth   # also removes auth volumes
 ```
 
 This:
 1. Stops all running agent containers
-2. Removes stopped containers
-3. Removes shared auth volumes (`--reuse-auth` tokens)
-4. Removes managed per-container networks
-5. Prunes dangling images
-
-Run this when you want a fresh start or to revoke persistent auth tokens.
+2. Removes all containers (running + stopped)
+3. Removes managed per-container networks
+4. Prunes dangling images
+5. With `--auth`: also removes shared auth volumes
 
 ## Workflow
 
-1. Check what's running with `agent list`
-2. Attach if you need a second terminal into an agent
-3. Stop individual agents or all at once
-4. Cleanup periodically to free resources and revoke tokens
+1. **Check agents** with `agent list`
+2. **Attach** to resume a stopped agent or get a second shell
+3. **Export sessions** before stopping if you want to keep history on host
+4. **Stop** individual agents or all at once
+5. **Cleanup** periodically to free resources
 
 ## Examples
 
 ```bash
-# What's running?
+# What agents exist?
 agent list
 
-# Attach to the api-work agent for a second shell
-agent attach api-work
+# Reattach to a stopped codex agent
+agent attach cardinality-restrictions
+
+# Save sessions before cleanup
+agent sessions cardinality-restrictions ~/my-sessions/
 
 # Done for the day — stop everything
 agent stop --all
 
 # Full reset — remove all containers, auth, networks
-agent cleanup
+agent cleanup --auth
 ```

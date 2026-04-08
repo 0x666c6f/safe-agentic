@@ -79,7 +79,7 @@ agent vm ssh
 
 ### "VM not found" error
 ```bash
-agent setup
+agent setup   # Creates the VM
 ```
 
 ### "'orb' is required but not installed"
@@ -101,11 +101,11 @@ agent update --full
 
 ### OrbStack restored macOS mounts
 ```bash
-agent vm start
+agent vm start   # Re-applies hardening
 ```
 
 ### Need to start over
 ```bash
-agent cleanup
-agent update --full
+agent cleanup            # Remove all containers, auth, networks
+agent update --full      # Rebuild image from scratch
 ```
