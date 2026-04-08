@@ -1310,8 +1310,8 @@ EOF
     vm_exec docker start "$name" >/dev/null 2>&1
     sleep 1
   fi
-  tar -cf - -C "$tmpcodex" . \
-    | orb run -m "$VM_NAME" docker exec -i "$name" tar -xf - --no-same-owner -C /home/agent/.codex/
+  tar -cf - --no-xattrs --no-mac-metadata -C "$tmpcodex" . 2>/dev/null \
+    | orb run -m "$VM_NAME" docker exec -i "$name" tar -xf - --no-same-owner -C /home/agent/.codex/ 2>/dev/null
 
   ok "MCP '$mcp_server' authenticated. Token synced to $name."
 }
