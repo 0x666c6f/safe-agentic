@@ -2,6 +2,49 @@
 
 Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks get egress guardrails, images are local-only at launch, and resource limits apply.
 
+## Features
+
+**Isolation & Security**
+- Three isolation boundaries: macOS ↔ VM (OrbStack + hardening), VM ↔ container (Docker + userns-remap), container ↔ container (separate volumes/networks/namespaces)
+- Read-only rootfs, `cap-drop ALL`, `no-new-privileges`, seccomp profile
+- Per-container dedicated bridge networks with egress guardrails (TCP 22/80/443 only)
+- VM hardening: macOS filesystem mounts blocked, integration commands removed
+- Docker userns-remap: container UIDs remapped to unprivileged host UIDs
+- GitHub SSH host keys baked with `StrictHostKeyChecking yes` — no TOFU
+- Resource limits: memory, CPU, PIDs (configurable per-container)
+- Build context safety: only git-tracked files sent to VM
+
+**Agent Lifecycle**
+- `--prompt 'task'` — send an initial task so the agent starts working immediately
+- Container persistence — containers survive exit, `agent attach` restarts stopped ones
+- `agent list` — show running + stopped containers with metadata
+- `agent stop` / `agent cleanup` — stop, remove, and clean up resources
+- `agent cp` — extract files, logs, or build artifacts from containers
+- `agent sessions` — export session history for archival
+- `agent diagnose` — health check for OrbStack, VM, Docker, image, SSH, defaults
+
+**Auth & Config**
+- `--ssh` — SSH agent forwarding via socat relay (userns-remap compatible)
+- `--reuse-auth` — persist Claude/Codex OAuth tokens across sessions
+- `--reuse-gh-auth` — persist GitHub CLI auth across sessions
+- `agent mcp-login` — MCP OAuth login (Linear, Notion, etc.) with token persistence
+- Host config auto-injection: `~/.codex/config.toml` and `~/.claude/settings.json` carry MCP servers, model settings, features, and plugins into containers
+- `--identity` — explicit git author/committer attribution
+- `defaults.sh` — persistent defaults for memory, CPU, network, Docker, auth, identity
+
+**Docker & Networking**
+- `--docker` — per-session Docker-in-Docker sidecar
+- `--docker-socket` — direct VM Docker daemon access
+- `--network` — join custom or isolated Docker networks
+- Quick aliases: `agent-claude` / `agent-codex` with auto SSH detection
+- Multi-repo support: clone multiple repos into a single container
+
+**Tools Included**
+- AI agents: Claude Code, Codex
+- SRE/DevOps: terraform, kubectl, helm, aws-cli, vault, docker, compose
+- Modern CLI: ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, socat
+- Runtimes: Node.js 22, pnpm, Bun, Python 3.12, Go 1.23
+
 ## Quick Start
 
 ```bash
