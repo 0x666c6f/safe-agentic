@@ -1316,6 +1316,98 @@ EOF
   ok "MCP '$mcp_server' authenticated. Token synced to $name."
 }
 
+cmd_sessions() {
+  local topic="sessions"
+  local name=""
+  local latest=false
+  local dest=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent sessions <container> [destination]
+       agent sessions --latest [destination]
+
+Export agent session history from a container to the host.
+Copies session files, history, and session index.
+Default destination: ./agent-sessions/<container-name>/
+
+Example:
+  agent sessions cardinality-restrictions
+  agent sessions --latest ~/codex-sessions/
+EOF
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ -z "$dest" ]; then
+          dest="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+  [ -z "$dest" ] && dest="./agent-sessions/$name"
+
+  # Ensure container is accessible
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..."
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+  fi
+
+  # Detect agent type
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    claude) config_dir="/home/agent/.claude" ;;
+    *) config_dir="/home/agent/.codex" ;;  # default to codex
+  esac
+
+  mkdir -p "$dest"
+
+  info "Exporting sessions from $name ($agent_type)..."
+
+  # Extract session-related files from the container
+  local tmptar
+  tmptar=$(mktemp /tmp/agent-sessions-XXXXXX.tar)
+  trap 'rm -f "$tmptar"' RETURN
+
+  orb run -m "$VM_NAME" docker exec -i "$name" \
+    tar -cf - -C "$config_dir" \
+      --ignore-failed-read \
+      sessions/ \
+      history.jsonl \
+      session_index.jsonl \
+      archived_sessions/ \
+      2>/dev/null > "$tmptar"
+
+  if [ ! -s "$tmptar" ]; then
+    warn "No session data found in $name."
+    return 0
+  fi
+
+  tar -xf "$tmptar" -C "$dest" 2>/dev/null
+
+  local count
+  count=$(find "$dest" -type f 2>/dev/null | wc -l | tr -d ' ')
+  ok "Exported $count files to $dest"
+}
+
 cmd="${1:-help}"
 shift 2>/dev/null || true
 
@@ -1332,6 +1424,7 @@ case "$cmd" in
   diagnose)   cmd_diagnose "$@" ;;
   vm)         cmd_vm "$@" ;;
   mcp-login)  cmd_mcp_login "$@" ;;
+  sessions)   cmd_sessions "$@" ;;
   help|-h|--help) cmd_help "$@" ;;
   *)          die "Unknown command: $cmd. Run 'agent help' for usage." ;;
 esac
