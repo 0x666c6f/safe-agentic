@@ -1262,71 +1262,32 @@ EOF
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  # Ensure container is running
+  # Verify the container exists and uses a codex auth volume
   vm_exec docker inspect "$name" >/dev/null 2>&1 || die "Container $name not found."
-  local state
-  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "")
-  if [ "$state" != "running" ]; then
-    info "Starting container $name..."
-    vm_exec docker start "$name" >/dev/null 2>&1
-    sleep 1
-  fi
+  local auth_volume
+  auth_volume=$(vm_exec docker inspect --format \
+    '{{range .Mounts}}{{if eq .Destination "/home/agent/.codex"}}{{.Name}}{{end}}{{end}}' \
+    "$name" 2>/dev/null || echo "")
+  [ -n "$auth_volume" ] || die "Container $name has no codex auth volume. Use --reuse-auth when spawning."
 
-  # Get container IP for port forwarding
-  local container_ip
-  container_ip=$(vm_exec docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || echo "")
-  [ -n "$container_ip" ] || die "Could not determine container IP for $name."
+  info "Running MCP OAuth login for '$mcp_server'..."
+  info "A URL will appear — open it in your browser."
 
-  info "Running MCP OAuth login for '$mcp_server' inside $name..."
-  info "Open the URL below in your browser when it appears."
-
-  # Run codex mcp login inside the container. The OAuth callback server binds
-  # to 127.0.0.1:PORT inside the container. We bridge it to macOS via:
-  #   container socat (0.0.0.0:PORT → 127.0.0.1:PORT)
-  #   → VM socat (VM:PORT → container_ip:PORT)
-  #   → OrbStack auto-forwards VM:PORT → macOS 127.0.0.1:PORT
-  local tmpout
-  tmpout=$(mktemp /tmp/mcp-login-XXXXXX)
-  trap 'rm -f "$tmpout"' RETURN
-
-  # Start login in background, tee output to parse the port
-  orb run -m "$VM_NAME" docker exec -i "$name" codex mcp login "$mcp_server" > "$tmpout" 2>&1 &
-  local login_pid=$!
-
-  # Watch output for the callback URL and set up port forwarding
-  local port="" forwarding_setup=false
-  while kill -0 "$login_pid" 2>/dev/null; do
-    if ! $forwarding_setup && [ -s "$tmpout" ]; then
-      # Print output as it arrives
-      cat "$tmpout"
-      port=$(grep -o '127\.0\.0\.1:[0-9]*' "$tmpout" 2>/dev/null | head -1 | cut -d: -f2)
-      if [ -n "$port" ]; then
-        # Bridge inside container: expose loopback server on all interfaces
-        vm_exec docker exec -d "$name" \
-          socat "TCP-LISTEN:$port,bind=0.0.0.0,fork,reuseaddr" "TCP-CONNECT:127.0.0.1:$port" 2>/dev/null || true
-        # Bridge in VM: expose container port on VM interface
-        vm_exec start-stop-daemon --start --background \
-          --exec /usr/bin/socat -- \
-          "TCP-LISTEN:$port,fork,reuseaddr" "TCP-CONNECT:$container_ip:$port" 2>/dev/null || true
-        info "Port $port bridged: container → VM → macOS"
-        forwarding_setup=true
-      fi
-    fi
-    sleep 0.3
-  done
-
-  # Print any remaining output
-  cat "$tmpout" 2>/dev/null
-
-  wait "$login_pid" 2>/dev/null
+  # Run login in a temporary container with --network=host so the OAuth
+  # callback server on 127.0.0.1:PORT is directly on the VM's localhost.
+  # OrbStack auto-forwards VM localhost ports to macOS, so the browser
+  # callback reaches the server with zero port bridging.
+  # The auth volume is shared so the token persists for the main container.
+  orb run -m "$VM_NAME" docker run --rm -it \
+    --network=host \
+    --entrypoint codex \
+    -v "$auth_volume:/home/agent/.codex" \
+    "$IMAGE_NAME:$IMAGE_TAG" \
+    mcp login "$mcp_server"
   local login_status=$?
 
-  # Cleanup socat processes
-  vm_exec bash -c "pkill -f 'socat.*TCP-LISTEN:${port}' 2>/dev/null" || true
-  vm_exec docker exec "$name" bash -c "pkill -f 'socat.*TCP-LISTEN:${port}' 2>/dev/null" || true
-
   if [ "$login_status" -eq 0 ]; then
-    ok "MCP '$mcp_server' authenticated. Token stored in container auth volume."
+    ok "MCP '$mcp_server' authenticated. Token stored in auth volume '$auth_volume'."
   else
     warn "MCP login exited with status $login_status."
   fi
