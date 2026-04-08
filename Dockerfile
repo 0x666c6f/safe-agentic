@@ -58,6 +58,7 @@ RUN apt-get update \
     python3-pip \
     python3-venv \
     ripgrep \
+    socat \
     software-properties-common \
     unzip \
     wget \
