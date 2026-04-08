@@ -1273,12 +1273,13 @@ EOF
   info "Running MCP OAuth login for '$mcp_server'..."
   info "A URL will appear — open it in your browser."
 
-  # Run login in a temporary container with --network=host so the OAuth
-  # callback server on 127.0.0.1:PORT is directly on the VM's localhost.
-  # OrbStack auto-forwards VM localhost ports to macOS, so the browser
-  # callback reaches the server with zero port bridging.
-  # The auth volume is shared so the token persists for the main container.
+  # Run login in a temporary container that bypasses userns-remap so we can
+  # use --network=host (userns-remap blocks host networking).
+  # --userns=host overrides the daemon-level remap for this container only.
+  # The OAuth callback server binds to VM localhost; OrbStack auto-forwards
+  # to macOS. Auth volume is shared so the token persists.
   orb run -m "$VM_NAME" docker run --rm -it \
+    --userns=host \
     --network=host \
     --entrypoint codex \
     -v "$auth_volume:/home/agent/.codex" \
