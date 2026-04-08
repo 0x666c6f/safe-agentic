@@ -1278,10 +1278,15 @@ EOF
   # --userns=host overrides the daemon-level remap for this container only.
   # The OAuth callback server binds to VM localhost; OrbStack auto-forwards
   # to macOS. Auth volume is shared so the token persists.
+  # --user root: the auth volume was created under userns-remap (uid 101000),
+  # but --userns=host maps uid 1000 to real 1000 which can't read those files.
+  # Root can access them regardless. This is safe — it's an ephemeral container.
   orb run -m "$VM_NAME" docker run --rm -it \
     --userns=host \
     --network=host \
+    --user root \
     --entrypoint codex \
+    -e "CODEX_HOME=/home/agent/.codex" \
     -v "$auth_volume:/home/agent/.codex" \
     "$IMAGE_NAME:$IMAGE_TAG" \
     mcp login "$mcp_server"
