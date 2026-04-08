@@ -119,6 +119,15 @@ agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
 
 Use `--docker` unless you explicitly need the VM daemon. `--docker-socket` gives the agent direct control over Docker in the VM.
 
+### Default agent CLI config
+
+On container startup, safe-agentic bootstraps default config files only when they are missing:
+
+- `~/.codex/config.toml` gets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`
+- `~/.claude/settings.json` gets bypass-permissions mode
+
+This matters mainly for `agent shell` and `agent attach`, where you may launch `codex` or `claude` manually after the container is already running. Existing config in shared auth volumes is preserved.
+
 ### Git identity
 
 Containers default to `Agent <agent@localhost>`. If you want commits attributed to you, export identity explicitly before launch:

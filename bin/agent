@@ -129,11 +129,13 @@ Options:
   --memory SIZE
   --cpus N
   --pids-limit N
+  --prompt 'TASK'
   --identity 'Name <email@example.com>'
   --dry-run
   -h, --help
 
 Notes:
+  - --prompt sends an initial task to the agent (claude -p / codex positional arg)
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
   - SSH repos require --ssh; aliases auto-enable it
@@ -293,6 +295,7 @@ cmd_spawn() {
   local managed_network=true
   local network_name=""
   local dry_run=false
+  local agent_prompt=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
@@ -312,6 +315,11 @@ cmd_spawn() {
       --name)
         require_option_value "$topic" "--name" "${2:-}"
         name="$2"
+        shift 2
+        ;;
+      --prompt)
+        require_option_value "$topic" "--prompt" "${2:-}"
+        agent_prompt="$2"
         shift 2
         ;;
       --ssh)
@@ -424,6 +432,9 @@ cmd_spawn() {
 
   build_container_runtime "$container_name" "$agent_type" "$repos_joined" "$enable_ssh" "$network_name" "$memory" "$cpus" "$pids_limit" "$repo_display" "$network_mode_label"
 
+  # Inject host agent config so MCP servers, model settings, etc. carry over
+  inject_host_config "$agent_type"
+
   if $reuse_auth; then
     auth_volume_name="agent-${agent_type}-auth"
     if auth_volume_exists "$auth_volume_name"; then
@@ -470,6 +481,15 @@ cmd_spawn() {
   docker_cmd+=(--label "safe-agentic.docker=$docker_label")
 
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
+
+  # Append agent prompt after image name (forwarded as entrypoint $@)
+  if [ -n "$agent_prompt" ]; then
+    case "$agent_type" in
+      claude) docker_cmd+=(-p "$agent_prompt") ;;
+      codex)  docker_cmd+=("$agent_prompt") ;;
+    esac
+    info "Prompt: ${agent_prompt:0:80}$([ ${#agent_prompt} -gt 80 ] && echo '...')"
+  fi
 
   if $dry_run; then
     show_dry_run "$managed_network" "$network_name"
@@ -610,6 +630,9 @@ cmd_shell() {
   fi
 
   build_container_runtime "$container_name" "" "$repos_joined" "$enable_ssh" "$network_name" "$memory" "$cpus" "$pids_limit" "$repo_display" "$network_mode_label"
+  # Shell mode has no agent auth volume — add tmpfs so entrypoint can write configs
+  docker_cmd+=(--tmpfs "/home/agent/.claude:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
+  docker_cmd+=(--tmpfs "/home/agent/.codex:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
   docker_cmd+=(-e "GH_CONFIG_DIR=/home/agent/.config/gh")
   if $reuse_gh_auth; then
     if auth_volume_exists "agent-gh-auth"; then
@@ -655,7 +678,7 @@ cmd_shell() {
 
 cmd_list() {
   require_vm
-  vm_exec docker ps \
+  vm_exec docker ps -a \
     --filter "name=^${CONTAINER_PREFIX}-" \
     --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.gh-auth"}}\t{{.Label "safe-agentic.docker"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
 }
@@ -768,8 +791,22 @@ cmd_attach() {
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  info "Attaching to $name..."
-  orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+  # If the container is stopped, restart it; if running, exec into it.
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  case "$state" in
+    running)
+      info "Attaching to running $name..."
+      orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+      ;;
+    exited|created)
+      info "Restarting stopped $name..."
+      orb run -m "$VM_NAME" docker start -ai "$name"
+      ;;
+    *)
+      die "Container $name is in state '$state' and cannot be attached."
+      ;;
+  esac
 }
 
 cmd_cp() {
@@ -881,19 +918,21 @@ cmd_stop() {
 
     info "Stopping all agent containers..."
     local ids names
-    ids=$(vm_exec docker ps -q --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
-    names=$(vm_exec docker ps --format '{{.Names}}' --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+    ids=$(vm_exec docker ps -a -q --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+    names=$(vm_exec docker ps -a --format '{{.Names}}' --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
     if [ -n "$ids" ]; then
       # shellcheck disable=SC2086
-      vm_exec docker stop $ids >/dev/null
+      vm_exec docker stop $ids >/dev/null 2>&1 || true
+      # shellcheck disable=SC2086
+      vm_exec docker rm $ids >/dev/null 2>&1 || true
       while IFS= read -r container_name; do
         [ -n "$container_name" ] || continue
         remove_docker_runtime_for_container "$container_name"
         remove_managed_network "$(network_name_for_container "$container_name")"
       done <<< "$names"
-      ok "All agent containers stopped."
+      ok "All agent containers stopped and removed."
     else
-      info "No running agent containers."
+      info "No agent containers."
     fi
     return 0
   fi
@@ -902,10 +941,11 @@ cmd_stop() {
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
   info "Stopping $name..."
-  vm_exec docker stop "$name" >/dev/null
+  vm_exec docker stop "$name" >/dev/null 2>&1 || true
+  vm_exec docker rm "$name" >/dev/null 2>&1 || true
   remove_docker_runtime_for_container "$name"
   remove_managed_network "$(network_name_for_container "$name")"
-  ok "$name stopped."
+  ok "$name stopped and removed."
 }
 
 cmd_cleanup() {
@@ -1177,21 +1217,127 @@ cmd_help() {
   esac
 }
 
+cmd_mcp_login() {
+  local topic="mcp-login"
+  local name=""
+  local latest=false
+  local mcp_server=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent mcp-login <container> <mcp-server>
+       agent mcp-login --latest <mcp-server>
+
+Runs 'codex mcp login <server>' inside the container with automatic
+port forwarding so the OAuth callback reaches the container.
+
+Example:
+  agent mcp-login cardinality-restrictions linear
+  agent mcp-login --latest notion
+EOF
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ -z "$mcp_server" ]; then
+          mcp_server="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login <container> linear"
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Ensure container is running
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..."
+    vm_exec docker start "$name" >/dev/null
+  fi
+
+  # Get the container's IP on its Docker network
+  local container_ip
+  container_ip=$(vm_exec docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || echo "")
+  [ -n "$container_ip" ] || die "Could not determine container IP for $name."
+
+  info "Running 'codex mcp login $mcp_server' inside $name..."
+  info "OAuth callback will be forwarded from macOS → VM → container."
+  info "Open the URL shown below in your browser."
+
+  # Run codex mcp login in the container, capture its output to detect the port,
+  # and set up port forwarding dynamically.
+  # Strategy: run login in background, parse the port from output, forward it.
+  local fifo
+  fifo=$(mktemp -u /tmp/mcp-login-XXXXXX)
+  mkfifo "$fifo"
+
+  # Start the mcp login and tee output so we can parse the port
+  orb run -m "$VM_NAME" docker exec -i "$name" codex mcp login "$mcp_server" 2>&1 | tee "$fifo" &
+  local login_pid=$!
+
+  # Read output line by line to find the port and set up forwarding
+  local forward_pid=""
+  while IFS= read -r line; do
+    echo "$line" >/dev/null  # already tee'd to stdout
+    if [[ "$line" == *"127.0.0.1:"*"/callback"* ]]; then
+      local port
+      port=$(echo "$line" | grep -o '127\.0\.0\.1:[0-9]*' | head -1 | cut -d: -f2)
+      if [ -n "$port" ]; then
+        # Forward VM localhost:port → container:port via socat in VM.
+        # OrbStack automatically forwards VM ports to macOS localhost,
+        # so the browser OAuth redirect reaches the container.
+        vm_exec start-stop-daemon --start --background \
+          --exec /usr/bin/socat -- \
+          "TCP-LISTEN:$port,fork,reuseaddr" "TCP-CONNECT:$container_ip:$port" \
+          2>/dev/null || true
+        forward_pid="vm"
+        info "Port $port forwarded for OAuth callback."
+      fi
+    fi
+  done < "$fifo" &
+  local reader_pid=$!
+
+  # Wait for login to complete
+  wait "$login_pid" 2>/dev/null || true
+
+  # Cleanup
+  kill "$reader_pid" 2>/dev/null || true
+  vm_exec bash -c "pkill -f 'socat.*TCP-LISTEN.*TCP-CONNECT' 2>/dev/null" || true
+  rm -f "$fifo"
+
+  ok "MCP login complete. Token saved in auth volume."
+}
+
 cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-  setup)    cmd_setup "$@" ;;
-  spawn)    cmd_spawn "$@" ;;
-  shell)    cmd_shell "$@" ;;
-  list)     cmd_list "$@" ;;
-  attach)   cmd_attach "$@" ;;
-  cp)       cmd_cp "$@" ;;
-  stop)     cmd_stop "$@" ;;
-  cleanup)  cmd_cleanup "$@" ;;
-  update)   cmd_update "$@" ;;
-  diagnose) cmd_diagnose "$@" ;;
-  vm)       cmd_vm "$@" ;;
+  setup)      cmd_setup "$@" ;;
+  spawn)      cmd_spawn "$@" ;;
+  shell)      cmd_shell "$@" ;;
+  list)       cmd_list "$@" ;;
+  attach)     cmd_attach "$@" ;;
+  cp)         cmd_cp "$@" ;;
+  stop)       cmd_stop "$@" ;;
+  cleanup)    cmd_cleanup "$@" ;;
+  update)     cmd_update "$@" ;;
+  diagnose)   cmd_diagnose "$@" ;;
+  vm)         cmd_vm "$@" ;;
+  mcp-login)  cmd_mcp_login "$@" ;;
   help|-h|--help) cmd_help "$@" ;;
-  *)        die "Unknown command: $cmd. Run 'agent help' for usage." ;;
+  *)          die "Unknown command: $cmd. Run 'agent help' for usage." ;;
 esac

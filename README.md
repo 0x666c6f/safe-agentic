@@ -297,6 +297,15 @@ If you want Docker on by default, set `SAFE_AGENTIC_DEFAULT_DOCKER=true` in `def
 
 `agent spawn` / `agent shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `agent update` or `agent setup`.
 
+### Agent CLI defaults inside the container
+
+When the container starts, safe-agentic writes default config files only if they do not already exist:
+
+- Codex: `~/.codex/config.toml` with `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`
+- Claude: `~/.claude/settings.json` with bypass-permissions mode
+
+This keeps manual `codex` / `claude` runs from `agent shell` aligned with the sandbox model. If you already have persistent auth/config volumes, your existing config is left unchanged.
+
 ### Build context safety
 
 `agent update` sends only git-tracked files that exist on disk to the VM. Untracked files (including `.env` or scratch files) are excluded from the build context.

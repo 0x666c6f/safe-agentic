@@ -33,6 +33,14 @@ case "$cmd" in
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *SSH_AUTH_SOCK* ]]; then
       echo "/tmp/fake-ssh.sock"; exit 0
     fi
+    # Handle socat relay setup (pretend it succeeds)
+    if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *socat* ]]; then
+      exit 0
+    fi
+    # Handle test -S for relay socket (pretend it exists)
+    if [ "${1:-}" = "test" ] && [ "${2:-}" = "-S" ]; then
+      exit 0
+    fi
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *'test -S /var/run/docker.sock'*'printf "%s\n" /var/run/docker.sock'* ]]; then
       echo "/var/run/docker.sock"; exit 0
     fi
@@ -361,7 +369,9 @@ run_agent "$REPO_DIR/bin/agent" spawn codex --name cdx --repo https://github.com
 codex_run="$(last_docker_run)"
 assert_contains "$codex_run" "AGENT_TYPE=codex"                                "codex agent type"
 assert_contains "$codex_run" "--mount type=volume,dst=/home/agent/.codex"      "codex ephemeral auth"
-assert_not_contains "$codex_run" "/home/agent/.claude"                         "codex no claude path"
+# .claude tmpfs is present (entrypoint writes claude config even for codex agents)
+# but no auth volume mount for .claude
+assert_not_contains "$codex_run" "--mount type=volume,dst=/home/agent/.claude" "codex no claude auth volume"
 
 # =============================================================================
 # Test: Multiple repos are comma-joined in REPOS env var
@@ -378,11 +388,12 @@ norepo_run="$(last_docker_run)"
 assert_not_contains "$norepo_run" "REPOS=" "no repos no env var"
 
 # =============================================================================
-# Test: SSH socket mount is read-only (:ro)
+# Test: SSH socket relay is mounted
 # =============================================================================
 run_agent "$REPO_DIR/bin/agent" spawn claude --ssh --name sshro --repo git@github.com:a/b.git >/dev/null 2>&1
 sshro_run="$(last_docker_run)"
-assert_contains "$sshro_run" "/run/ssh-agent.sock:ro" "ssh socket mounted read-only"
+assert_contains "$sshro_run" "/run/ssh-agent.sock" "ssh relay socket mounted"
+assert_contains "$sshro_run" "SSH_AUTH_SOCK=/run/ssh-agent.sock" "ssh auth sock env set"
 
 # =============================================================================
 # Test: Shell with repos gets REPOS env var

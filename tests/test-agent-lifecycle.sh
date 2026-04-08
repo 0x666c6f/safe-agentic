@@ -40,11 +40,19 @@ case "$cmd" in
         printf 'cid-one\ncid-two\n'
         exit 0
         ;;
+      "docker ps -a -q --filter name=^agent-"*)
+        printf 'cid-one\ncid-two\n'
+        exit 0
+        ;;
+      "docker ps -a --format {{.Names}} --filter name=^agent-"*)
+        printf 'agent-one\nagent-two\n'
+        exit 0
+        ;;
       "docker ps --format {{.Names}} --filter name=^agent-"*)
         printf 'agent-one\nagent-two\n'
         exit 0
         ;;
-      "docker ps -aq --filter name=^agent-"*)
+      "docker ps -aq --filter name=^agent-")
         printf 'cid-one\ncid-two\n'
         exit 0
         ;;
@@ -60,6 +68,11 @@ case "$cmd" in
 
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ] && [[ "${3:-}" == *safe-agentic-hardening-verify* ]]; then
       : >"$verify_state"
+      exit 0
+    fi
+
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
+      echo "running"
       exit 0
     fi
 
@@ -143,12 +156,14 @@ assert_contains "$attach_log" "docker exec -it agent-claude-review bash -l" "att
 run_agent "$REPO_DIR/bin/agent" stop stopme >/dev/null 2>&1
 stop_log="$(cat "$ORB_LOG")"
 assert_contains "$stop_log" "docker stop agent-stopme" "stop single container"
+assert_contains "$stop_log" "docker rm agent-stopme" "stop removes single container"
 assert_contains "$stop_log" "docker network rm agent-stopme-net" "stop removes single network"
 
 # --- stop --all removes networks for each running agent ---
 run_agent "$REPO_DIR/bin/agent" stop --all >/dev/null 2>&1
 stop_all_log="$(cat "$ORB_LOG")"
 assert_contains "$stop_all_log" "docker stop cid-one cid-two" "stop all containers"
+assert_contains "$stop_all_log" "docker rm cid-one cid-two" "stop all removes containers"
 assert_contains "$stop_all_log" "docker network rm agent-one-net" "stop all first network"
 assert_contains "$stop_all_log" "docker network rm agent-two-net" "stop all second network"
 
@@ -181,20 +196,18 @@ none_run="$(last_docker_run)"
 assert_contains "$none_run" "--network none" "network none used"
 assert_not_contains "$none_log" "docker network create" "no managed network create for none"
 
-# --- shell gets no agent auth mount by default ---
+# --- shell gets no agent auth volume by default (tmpfs is OK) ---
 run_agent "$REPO_DIR/bin/agent" shell --network custom-net >/dev/null 2>&1
 shell_run="$(last_docker_run)"
-assert_not_contains "$shell_run" "/home/agent/.claude" "shell no claude auth"
-assert_not_contains "$shell_run" "/home/agent/.codex" "shell no codex auth"
+assert_not_contains "$shell_run" "--mount type=volume,dst=/home/agent/.claude" "shell no claude auth volume"
+assert_not_contains "$shell_run" "--mount type=volume,dst=/home/agent/.codex" "shell no codex auth volume"
 
-# --- docker sidecar is cleaned up after run exits ---
+# --- docker sidecar is started and cleanup deferred to stop/cleanup ---
 run_agent "$REPO_DIR/bin/agent" spawn claude --docker --name docky --repo https://github.com/acme/repo.git >/dev/null 2>&1
 docker_log="$(cat "$ORB_LOG")"
 assert_contains "$docker_log" "docker run -d --name safe-agentic-docker-agent-claude-docky" "docker sidecar started"
-assert_contains "$docker_log" "docker rm -f safe-agentic-docker-agent-claude-docky" "docker sidecar removed"
-assert_contains "$docker_log" "docker volume rm agent-claude-docky-" "docker sidecar volume cleanup starts"
-assert_contains "$docker_log" "-docker-sock agent-claude-docky-" "docker sidecar socket/data volumes removed"
-assert_contains "$docker_log" "-docker-data" "docker sidecar data volume removed"
+assert_contains "$docker_log" "docker rm -f safe-agentic-docker-agent-claude-docky" "docker sidecar pre-start cleanup"
+assert_not_contains "$docker_log" "docker volume rm agent-claude-docky-docker-sock" "docker sidecar volume cleanup deferred"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

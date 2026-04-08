@@ -113,9 +113,11 @@ if ! command -v docker &>/dev/null; then
     sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
   sudo apt-get update -qq
-  sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat
 else
   step 4 "Docker already installed: $(docker --version)"
+  # Ensure socat is available for SSH agent relay (userns-remap compatibility)
+  command -v socat &>/dev/null || sudo apt-get install -y -qq socat
 fi
 
 # Add current user to docker group

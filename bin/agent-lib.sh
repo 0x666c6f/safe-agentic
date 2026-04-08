@@ -275,14 +275,22 @@ resolve_container_name() {
 
   container_name="${prefix}-${suffix}"
   if container_exists "$container_name"; then
-    container_name="${container_name}-${fallback}"
+    # Remove stopped container with same name to allow reuse
+    local state
+    state=$(vm_exec docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || echo "")
+    if [ "$state" = "exited" ] || [ "$state" = "created" ]; then
+      vm_exec docker rm "$container_name" >/dev/null 2>&1 || true
+    else
+      # Running container — append timestamp to avoid conflict
+      container_name="${container_name}-${fallback}"
+    fi
   fi
 
   printf '%s\n' "$container_name"
 }
 
 resolve_latest_container() {
-  vm_exec docker ps --latest --filter "name=^${CONTAINER_PREFIX}-" --format '{{.Names}}' 2>/dev/null || true
+  vm_exec docker ps -a --latest --filter "name=^${CONTAINER_PREFIX}-" --format '{{.Names}}' 2>/dev/null || true
 }
 
 resolve_container_reference() {
@@ -303,7 +311,7 @@ resolve_container_reference() {
       ;;
   esac
 
-  names=$(vm_exec docker ps --format '{{.Names}}' --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || true)
+  names=$(vm_exec docker ps -a --format '{{.Names}}' --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || true)
   while IFS= read -r candidate; do
     [ -n "$candidate" ] || continue
     case "$candidate" in
@@ -518,9 +526,34 @@ append_ssh_mount() {
     # shellcheck disable=SC2016
     vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
     if [ -n "$vm_ssh_sock" ]; then
-      docker_cmd+=(-v "$vm_ssh_sock:/run/ssh-agent.sock:ro")
-      docker_cmd+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
-      info "SSH agent forwarding: enabled"
+      # With userns-remap the container's uid maps to an unprivileged VM uid
+      # that cannot read the OrbStack SSH socket (owned florian:orbstack 660).
+      # Relay via socat to a world-accessible socket so the remapped uid works.
+      local relay_sock="/tmp/safe-agentic-ssh-agent.sock"
+      local relay_script="/tmp/safe-agentic-ssh-relay.sh"
+      # Use start-stop-daemon to fully daemonize socat. Plain nohup/&
+      # keeps orb run waiting because it tracks child processes.
+      # Split into separate vm_exec calls: start-stop-daemon inside
+      # bash -c inside orb run causes process tracking issues.
+      vm_exec bash -c "
+        pkill -f 'socat.*safe-agentic-ssh-agent' 2>/dev/null || true
+        rm -f '$relay_sock'
+        printf '#!/bin/bash\nexec socat UNIX-LISTEN:$relay_sock,fork,mode=666 UNIX-CONNECT:$vm_ssh_sock\n' > '$relay_script'
+        chmod +x '$relay_script'
+      " 2>/dev/null || true
+      vm_exec start-stop-daemon --start --background --exec "$relay_script" 2>/dev/null || true
+      # Brief wait for the socket to appear (failure is non-fatal, fallback below)
+      vm_exec bash -c "for i in 1 2 3 4 5; do [ -S '$relay_sock' ] && exit 0; sleep 0.2; done; exit 1" 2>/dev/null || true
+      if vm_exec test -S "$relay_sock" 2>/dev/null; then
+        docker_cmd+=(-v "$relay_sock:/run/ssh-agent.sock")
+        docker_cmd+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
+        info "SSH agent forwarding: enabled"
+      else
+        warn "Failed to create SSH relay socket. Falling back to direct mount."
+        docker_cmd+=(-v "$vm_ssh_sock:/run/ssh-agent.sock:ro")
+        docker_cmd+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
+        info "SSH agent forwarding: enabled (direct, may fail with userns-remap)"
+      fi
     else
       warn "No SSH_AUTH_SOCK in VM. Git SSH operations may not work."
     fi
@@ -531,6 +564,45 @@ append_ssh_mount() {
     warn "SSH repos detected but --ssh not passed. Clone will fail without SSH agent."
     warn "Re-run with --ssh to enable SSH agent forwarding."
   fi
+}
+
+inject_host_config() {
+  local agent_type="$1"
+  local host_config config_b64
+
+  case "$agent_type" in
+    codex)
+      host_config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+      if [ -f "$host_config" ]; then
+        # Adapt config for container: remap project trust paths to /workspace,
+        # ensure sandbox settings are correct for container environment.
+        config_b64=$(sed \
+          -e 's|^\[projects\."/Users/[^"]*"\]|# &|' \
+          -e 's|^trust_level = "trusted"|# &|' \
+          -e 's|^config_file = "/Users/[^"]*"|# &|' \
+          "$host_config" | {
+            cat
+            printf '\n[projects."/workspace"]\ntrust_level = "trusted"\n'
+          } | base64)
+        docker_cmd+=(-e "SAFE_AGENTIC_CODEX_CONFIG_B64=$config_b64")
+        info "Host config: injected from $host_config"
+        # Publish port range for MCP OAuth callbacks if OAuth MCP servers are configured.
+        # OrbStack forwards published container ports to macOS localhost, so the
+        # browser OAuth redirect (http://127.0.0.1:PORT/callback) reaches the container.
+        if grep -q 'mcp_servers\.' "$host_config" 2>/dev/null; then
+          docker_cmd+=(--label "safe-agentic.mcp-oauth=true")
+        fi
+      fi
+      ;;
+    claude)
+      host_config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+      if [ -f "$host_config" ]; then
+        config_b64=$(base64 < "$host_config")
+        docker_cmd+=(-e "SAFE_AGENTIC_CLAUDE_CONFIG_B64=$config_b64")
+        info "Host config: injected from $host_config"
+      fi
+      ;;
+  esac
 }
 
 append_cache_mounts() {
@@ -546,13 +618,8 @@ run_container() {
   local status=0
 
   orb run -m "$VM_NAME" "${docker_cmd[@]}" || status=$?
-  if [ "${DOCKER_RUNTIME_KIND:-off}" = "dind" ]; then
-    remove_docker_runtime_for_container "$ACTIVE_CONTAINER_NAME"
-    reset_docker_runtime_state
-  fi
-  if $managed_network; then
-    remove_managed_network "$network_name"
-  fi
+  # Container persists after exit (no --rm). Network and sidecar cleanup
+  # is deferred to 'agent stop' or 'agent cleanup'.
   return "$status"
 }
 
@@ -569,7 +636,7 @@ build_container_runtime() {
   local network_mode_label="${10}"
   local agent_label ssh_label
 
-  docker_cmd=(docker run -it --rm)
+  docker_cmd=(docker run -it)
   ACTIVE_CONTAINER_NAME="$container_name"
   docker_cmd+=(--pull=never)
   docker_cmd+=(--name "$container_name")

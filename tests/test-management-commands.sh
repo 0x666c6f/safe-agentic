@@ -41,12 +41,12 @@ case "$cmd" in
   run)
     [ "${1:-}" = "-m" ] && shift 2
     printf 'run|%s\n' "$*" >>"$log_file"
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--filter" ] && [ "${4:-}" = "name=^agent-" ] && [ "${5:-}" = "--format" ]; then
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-a" ] && [ "${4:-}" = "--filter" ] && [ "${5:-}" = "name=^agent-" ] && [ "${6:-}" = "--format" ]; then
       printf 'NAMES\tAGENT\tREPO\tSSH\tAUTH\tGH\tDOCKER\tNETWORK\tSTATUS\n'
       printf 'agent-claude-listy\tclaude\tacme/repo\toff\tephemeral\tshared\tdind\tmanaged\tUp 5 minutes\n'
       exit 0
     fi
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--latest" ] && [ "${4:-}" = "--filter" ] && [ "${5:-}" = "name=^agent-" ] && [ "${6:-}" = "--format" ]; then
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-a" ] && [ "${4:-}" = "--latest" ] && [ "${5:-}" = "--filter" ] && [ "${6:-}" = "name=^agent-" ] && [ "${7:-}" = "--format" ]; then
       printf 'agent-codex-latest-task\n'
       exit 0
     fi
@@ -66,6 +66,10 @@ case "$cmd" in
       exit 0
     fi
     if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == install\ -m\ 0644\ -D\ /tmp/seccomp.json* ]]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
+      echo "running"
       exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "image" ] && [ "${3:-}" = "inspect" ]; then
@@ -129,7 +133,7 @@ assert_not_contains() {
 # --- list uses filtered docker ps output ---
 list_output="$(TEST_VM_EXISTS=1 run_agent list)"
 list_log="$(cat "$ORB_LOG")"
-assert_contains "$list_log" "run|docker ps --filter name=^agent- --format table {{.Names}}" "list docker ps filter"
+assert_contains "$list_log" "run|docker ps -a --filter name=^agent- --format table {{.Names}}" "list docker ps filter"
 assert_contains "$list_output" $'NAMES\tAGENT\tREPO\tSSH\tAUTH\tGH\tDOCKER\tNETWORK\tSTATUS' "list header includes new columns"
 assert_contains "$list_output" $'agent-claude-listy\tclaude\tacme/repo\toff\tephemeral\tshared\tdind\tmanaged\tUp 5 minutes' "list row includes gh auth and docker labels"
 
@@ -176,14 +180,15 @@ assert_contains "$drift_log" "run|docker image inspect safe-agentic:latest" "spa
 # --- attach --latest resolves latest running container ---
 TEST_VM_EXISTS=1 run_agent attach --latest >/dev/null 2>&1
 attach_latest_log="$(cat "$ORB_LOG")"
-assert_contains "$attach_latest_log" "run|docker ps --latest --filter name=^agent- --format {{.Names}}" "attach latest resolves latest container"
+assert_contains "$attach_latest_log" "run|docker ps -a --latest --filter name=^agent- --format {{.Names}}" "attach latest resolves latest container"
 assert_contains "$attach_latest_log" "run|docker exec -it agent-codex-latest-task bash -l" "attach latest execs latest container"
 
 # --- stop --latest resolves latest running container and its network ---
 TEST_VM_EXISTS=1 run_agent stop --latest >/dev/null 2>&1
 stop_latest_log="$(cat "$ORB_LOG")"
-assert_contains "$stop_latest_log" "run|docker ps --latest --filter name=^agent- --format {{.Names}}" "stop latest resolves latest container"
+assert_contains "$stop_latest_log" "run|docker ps -a --latest --filter name=^agent- --format {{.Names}}" "stop latest resolves latest container"
 assert_contains "$stop_latest_log" "run|docker stop agent-codex-latest-task" "stop latest stops latest container"
+assert_contains "$stop_latest_log" "run|docker rm agent-codex-latest-task" "stop latest removes latest container"
 assert_contains "$stop_latest_log" "run|docker network rm agent-codex-latest-task-net" "stop latest removes latest network"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"

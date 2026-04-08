@@ -16,7 +16,7 @@ STDERR_LOG="$STATE_DIR/stderr.log"
 
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-mkdir -p "$FAKE_BIN" "$STATE_DIR" "$RUN_DIR" "$HOME_DIR/.codex"
+mkdir -p "$FAKE_BIN" "$STATE_DIR" "$RUN_DIR" "$HOME_DIR/.codex" "$HOME_DIR/.claude"
 
 cat >"$FAKE_BIN/cp" <<'EOF'
 #!/bin/bash
@@ -178,6 +178,9 @@ assert_contains "$(cat "$GIT_LOG")" "config --global user.email agent@localhost"
 assert_contains "$(cat "$GIT_LOG")" "config --global core.pager delta --dark" "shell pager config"
 assert_contains "$(cat "$GIT_LOG")" "config --global init.defaultBranch main" "shell init branch"
 assert_contains "$(cat "$EXEC_LOG")" "bash|$RUN_DIR|-l --noprofile" "shell execs login bash"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'approval_policy = "never"' "shell codex default approval"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'sandbox_mode = "danger-full-access"' "shell codex default sandbox"
+assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode": "bypassPermissions"' "shell claude default config"
 
 # --- env overrides flow into git config and Claude launch ---
 rm -f "$HOME_DIR/.codex/auth.json"
@@ -205,6 +208,19 @@ assert_status 0 "codex with auth exits cleanly"
 codex_existing_log="$(cat "$EXEC_LOG")"
 assert_not_contains "$codex_existing_log" "login --device-auth" "codex skips login with auth"
 assert_contains "$codex_existing_log" "codex|$RUN_DIR|--yolo fix" "codex exec with auth"
+
+# --- existing config files are preserved ---
+cat >"$HOME_DIR/.codex/config.toml" <<'EOF'
+approval_policy = "on-request"
+EOF
+cat >"$HOME_DIR/.claude/settings.json" <<'EOF'
+{"permissions":{"defaultMode":"ask"}}
+EOF
+RUN_ARGS=(--noprofile)
+run_entrypoint
+assert_status 0 "existing config shell exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'approval_policy = "on-request"' "existing codex config preserved"
+assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode":"ask"' "existing claude config preserved"
 
 # --- multi-repo clone trims whitespace, clones under /workspace, stays in run dir ---
 rm -f "$HOME_DIR/.codex/auth.json"

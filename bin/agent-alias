@@ -29,6 +29,7 @@ Pass-through spawn options:
   --memory SIZE
   --cpus N
   --pids-limit N
+  --prompt 'TASK'
   --identity 'Name <email@example.com>'
   --dry-run
   --repo URL
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
       show_usage
       exit 0
       ;;
-    --repo|--name|--network|--memory|--cpus|--pids-limit|--identity)
+    --repo|--name|--network|--memory|--cpus|--pids-limit|--identity|--prompt)
       require_value "$1" "${2:-}"
       [ "$1" = "--repo" ] && repo_count=$((repo_count + 1))
       if [ "$1" = "--repo" ] && repo_uses_ssh "$2"; then

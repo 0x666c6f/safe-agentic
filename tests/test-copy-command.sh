@@ -28,12 +28,12 @@ case "$cmd" in
     [ "${1:-}" = "-m" ] && shift 2
     printf '%s\n' "$*" >>"$log_file"
 
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--latest" ]; then
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-a" ] && [ "${4:-}" = "--latest" ]; then
       echo "agent-codex-latest"
       exit 0
     fi
 
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "--format" ]; then
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-a" ] && [ "${4:-}" = "--format" ]; then
       printf 'agent-claude-export\nagent-codex-latest\n'
       exit 0
     fi
@@ -146,7 +146,7 @@ run_ok "copy dir by latest" \
   bash "$REPO_DIR/bin/agent" cp --latest /workspace/dist "$TMP_DIR/collect"
 assert_file_contains "$TMP_DIR/collect/dist/build.txt" "artifact" "copied dir content"
 dir_copy_log="$(cat "$ORB_LOG")"
-assert_contains "$dir_copy_log" "docker ps --latest --filter name=^agent- --format {{.Names}}" "latest container lookup"
+assert_contains "$dir_copy_log" "docker ps -a --latest --filter name=^agent- --format {{.Names}}" "latest container lookup"
 assert_contains "$dir_copy_log" "docker cp agent-codex-latest:/workspace/dist" "docker cp dir source"
 
 # --- file copy into existing directory preserves basename ---

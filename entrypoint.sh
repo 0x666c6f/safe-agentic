@@ -22,6 +22,48 @@ if [ "${SAFE_AGENTIC_INTERNAL_DOCKERD:-}" = "1" ]; then
   exec dockerd --group agent --host "unix://$SOCKET_PATH" --data-root "$DATA_ROOT"
 fi
 
+ensure_codex_config() {
+  local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+  local codex_config="$codex_dir/config.toml"
+
+  mkdir -p "$codex_dir"
+  # Host config injected via SAFE_AGENTIC_CODEX_CONFIG_B64 always wins
+  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
+    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config"
+    return
+  fi
+  if [ -f "$codex_config" ]; then
+    return
+  fi
+
+  cat >"$codex_config" <<'EOF'
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+EOF
+}
+
+ensure_claude_config() {
+  local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  local claude_config="$claude_dir/settings.json"
+
+  mkdir -p "$claude_dir"
+  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
+    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config"
+    return
+  fi
+  if [ -f "$claude_config" ]; then
+    return
+  fi
+
+  cat >"$claude_config" <<'EOF'
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  }
+}
+EOF
+}
+
 # ---------------------------------------------------------------------------
 # Runtime config (written to tmpfs — rootfs is read-only)
 # ---------------------------------------------------------------------------
@@ -38,6 +80,11 @@ git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
+case "${AGENT_TYPE:-}" in
+  claude) ensure_claude_config ;;
+  codex)  ensure_codex_config ;;
+  *)      ensure_codex_config; ensure_claude_config ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Clone repositories

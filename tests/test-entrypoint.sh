@@ -53,6 +53,9 @@ assert_present 'exec codex --yolo' "codex yolo"
 
 # --- Codex auth uses device-auth flow (headless-compatible) ---
 assert_present 'codex login --device-auth'                    "codex device-auth flow"
+assert_present 'approval_policy = "never"'                    "codex default config"
+assert_present 'sandbox_mode = "danger-full-access"'          "codex sandbox default"
+assert_present '"defaultMode": "bypassPermissions"'           "claude default config"
 
 # --- set -euo pipefail ---
 assert_present '^set -euo pipefail$'                          "strict mode"
