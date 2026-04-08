@@ -27,11 +27,14 @@ ensure_codex_config() {
   local codex_config="$codex_dir/config.toml"
 
   mkdir -p "$codex_dir"
-  # Host config injected via SAFE_AGENTIC_CODEX_CONFIG_B64 always wins
-  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
+  # Host config injected via env var — only seed if no config exists yet.
+  # Once config.toml is in the auth volume (from a prior run or mcp-login),
+  # we leave it alone to preserve MCP auth and user edits.
+  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ] && [ ! -f "$codex_config" ]; then
     echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config"
     return
   fi
+  [ -f "$codex_config" ] && return
   if [ -f "$codex_config" ]; then
     return
   fi
@@ -47,10 +50,11 @@ ensure_claude_config() {
   local claude_config="$claude_dir/settings.json"
 
   mkdir -p "$claude_dir"
-  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
+  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ] && [ ! -f "$claude_config" ]; then
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config"
     return
   fi
+  [ -f "$claude_config" ] && return
   if [ -f "$claude_config" ]; then
     return
   fi
