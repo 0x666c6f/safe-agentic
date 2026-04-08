@@ -1248,7 +1248,8 @@ EOF
         return 0
         ;;
       *)
-        if [ -z "$name" ] && ! $latest; then
+        # Collect positional args; we figure out which is which after parsing
+        if [ -z "$name" ]; then
           name="$1"
         elif [ -z "$mcp_server" ]; then
           mcp_server="$1"
@@ -1260,6 +1261,12 @@ EOF
     esac
   done
 
+  # With one positional arg: it's the MCP server name (no container).
+  # With two: first is container, second is MCP server.
+  if [ -z "$mcp_server" ]; then
+    mcp_server="$name"
+    name=""
+  fi
   [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login linear"
 
   require_vm
