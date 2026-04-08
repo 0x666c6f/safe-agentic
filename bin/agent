@@ -1310,6 +1310,15 @@ EOF
   local login_status=$?
 
   if [ "$login_status" -eq 0 ]; then
+    # Fix ownership: the login container ran with --userns=host (real root),
+    # so files are owned by uid 0. The main agent container uses userns-remap
+    # where uid 1000 maps to VM uid 101000. Chown from the VM so the main
+    # container can read the files.
+    local vol_path
+    vol_path=$(vm_exec docker volume inspect --format '{{.Mountpoint}}' "$auth_volume" 2>/dev/null || echo "")
+    if [ -n "$vol_path" ]; then
+      vm_exec sudo chown -R 101000:101000 "$vol_path" 2>/dev/null || true
+    fi
     ok "MCP '$mcp_server' authenticated. Token stored in auth volume '$auth_volume'."
   else
     warn "MCP login exited with status $login_status."
