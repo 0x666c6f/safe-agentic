@@ -637,6 +637,7 @@ build_container_runtime() {
   local agent_label ssh_label
 
   docker_cmd=(docker run -it)
+  # shellcheck disable=SC2034  # used in bin/agent (dry-run docker sidecar label)
   ACTIVE_CONTAINER_NAME="$container_name"
   docker_cmd+=(--pull=never)
   docker_cmd+=(--name "$container_name")

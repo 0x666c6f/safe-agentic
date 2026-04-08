@@ -26,20 +26,14 @@ ensure_codex_config() {
   local codex_dir="${CODEX_HOME:-$HOME/.codex}"
   local codex_config="$codex_dir/config.toml"
 
-  mkdir -p "$codex_dir"
-  # Host config injected via env var — only seed if no config exists yet.
-  # Once config.toml is in the auth volume (from a prior run or mcp-login),
-  # we leave it alone to preserve MCP auth and user edits.
-  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ] && [ ! -f "$codex_config" ]; then
-    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config"
-    return
-  fi
-  [ -f "$codex_config" ] && return
-  if [ -f "$codex_config" ]; then
-    return
+  mkdir -p "$codex_dir" 2>/dev/null || return 0
+  [ -f "$codex_config" ] && return 0
+  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
+    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || return 0
+    return 0
   fi
 
-  cat >"$codex_config" <<'EOF'
+  cat >"$codex_config" 2>/dev/null <<'EOF' || return 0
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 EOF
@@ -49,17 +43,14 @@ ensure_claude_config() {
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local claude_config="$claude_dir/settings.json"
 
-  mkdir -p "$claude_dir"
-  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ] && [ ! -f "$claude_config" ]; then
-    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config"
-    return
-  fi
-  [ -f "$claude_config" ] && return
-  if [ -f "$claude_config" ]; then
-    return
+  mkdir -p "$claude_dir" 2>/dev/null || return 0
+  [ -f "$claude_config" ] && return 0
+  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
+    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || return 0
+    return 0
   fi
 
-  cat >"$claude_config" <<'EOF'
+  cat >"$claude_config" 2>/dev/null <<'EOF' || return 0
 {
   "permissions": {
     "defaultMode": "bypassPermissions"
