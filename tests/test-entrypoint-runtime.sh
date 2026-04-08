@@ -241,5 +241,86 @@ assert_contains "$(cat "$STDERR_LOG")" "Refusing repo URL with unsafe clone path
 assert_not_contains "$(cat "$GIT_LOG")" "clone" "unsafe repo no clone"
 assert_not_contains "$(cat "$EXEC_LOG")" "bash|" "unsafe repo no shell exec"
 
+# =============================================================================
+# Test: SAFE_AGENTIC_CODEX_CONFIG_B64 seeds config.toml when file doesn't exist
+# =============================================================================
+rm -f "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.codex/auth.json"
+rm -f "$HOME_DIR/.claude/settings.json"
+CODEX_B64=$(printf 'model = "gpt-4"\n' | base64)
+RUN_ARGS=(fix)
+run_entrypoint AGENT_TYPE=codex "SAFE_AGENTIC_CODEX_CONFIG_B64=$CODEX_B64"
+assert_status 0 "codex config B64 seed exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'model = "gpt-4"' "codex config created from B64 env"
+
+# =============================================================================
+# Test: SAFE_AGENTIC_CODEX_CONFIG_B64 does NOT overwrite existing config.toml
+# =============================================================================
+cat >"$HOME_DIR/.codex/config.toml" <<'EOF'
+model = "o3"
+EOF
+printf '{}\n' >"$HOME_DIR/.codex/auth.json"
+CODEX_B64_NEW=$(printf 'model = "gpt-4"\n' | base64)
+RUN_ARGS=(fix)
+run_entrypoint AGENT_TYPE=codex "SAFE_AGENTIC_CODEX_CONFIG_B64=$CODEX_B64_NEW"
+assert_status 0 "codex config B64 preserve exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'model = "o3"' "existing codex config preserved over B64"
+assert_not_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'model = "gpt-4"' "B64 config not written over existing"
+
+# =============================================================================
+# Test: SAFE_AGENTIC_CLAUDE_CONFIG_B64 seeds settings.json when file doesn't exist
+# =============================================================================
+rm -f "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.codex/auth.json"
+rm -f "$HOME_DIR/.codex/config.toml"
+CLAUDE_B64=$(printf '{"permissions":{"defaultMode":"ask"}}\n' | base64)
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude "SAFE_AGENTIC_CLAUDE_CONFIG_B64=$CLAUDE_B64"
+assert_status 0 "claude config B64 seed exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode":"ask"' "claude config created from B64 env"
+
+# =============================================================================
+# Test: SAFE_AGENTIC_CLAUDE_CONFIG_B64 does NOT overwrite existing settings.json
+# =============================================================================
+cat >"$HOME_DIR/.claude/settings.json" <<'EOF'
+{"permissions":{"defaultMode":"bypassPermissions"}}
+EOF
+CLAUDE_B64_NEW=$(printf '{"permissions":{"defaultMode":"ask"}}\n' | base64)
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude "SAFE_AGENTIC_CLAUDE_CONFIG_B64=$CLAUDE_B64_NEW"
+assert_status 0 "claude config B64 preserve exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode":"bypassPermissions"' "existing claude config preserved over B64"
+assert_not_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode":"ask"' "B64 claude config not written over existing"
+
+# =============================================================================
+# Test: Codex agent type only writes .codex config, not .claude
+# =============================================================================
+rm -f "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.codex/auth.json"
+rm -f "$HOME_DIR/.claude/settings.json"
+RUN_ARGS=(fix)
+run_entrypoint AGENT_TYPE=codex
+assert_status 0 "codex-only config exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'approval_policy = "never"' "codex config written for codex agent"
+if [ -f "$HOME_DIR/.claude/settings.json" ]; then
+  echo "FAIL: codex agent should not create .claude config" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
+
+# =============================================================================
+# Test: Claude agent type only writes .claude config, not .codex
+# =============================================================================
+rm -f "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.codex/auth.json"
+rm -f "$HOME_DIR/.claude/settings.json"
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude
+assert_status 0 "claude-only config exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode": "bypassPermissions"' "claude config written for claude agent"
+if [ -f "$HOME_DIR/.codex/config.toml" ]; then
+  echo "FAIL: claude agent should not create .codex config" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

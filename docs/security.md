@@ -54,25 +54,31 @@ graph TB
 
 ### `--ssh`
 
-Forwards your 1Password SSH agent socket into the container (mounted read-only):
+Forwards your 1Password SSH agent socket into the container via a socat relay in the VM:
 
 ```mermaid
 sequenceDiagram
     participant Agent as Agent (container)
+    participant Relay as socat relay (VM)
     participant VM as OrbStack VM
     participant Mac as macOS
     participant 1P as 1Password
     participant GH as GitHub
 
-    Agent->>VM: git push via SSH socket (:ro)
+    Agent->>Relay: git push via relayed socket (:ro)
+    Note over Relay: Bridges userns-remap<br/>UID permissions
+    Relay->>VM: OrbStack SSH socket
     VM->>Mac: OrbStack forwarding
     Mac->>1P: Sign challenge
     Note over 1P: Private key never<br/>leaves 1Password
     1P-->>Mac: Signature
     Mac-->>VM: Response
-    VM-->>Agent: Authenticated
+    VM-->>Relay: Response
+    Relay-->>Agent: Authenticated
     Agent->>GH: Push (host key verified)
 ```
+
+The socat relay is needed because Docker userns-remap maps container UIDs to unprivileged VM UIDs that cannot read the OrbStack SSH socket directly. The relay listens on a world-accessible socket and forwards to the real OrbStack socket.
 
 The agent can:
 - Clone and push to any repo your SSH key has access to
@@ -186,6 +192,7 @@ If you need explicit attribution, export `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` 
 5. **Masks OrbStack integration directories** — tmpfs over `/opt/orbstack-guest/`
 6. **Verifies hardening** — checks that mounts are blocked and commands are gone
 7. **Enables Docker userns-remap** — container UIDs are remapped to unprivileged host UIDs
+8. **Installs socat** — required for the SSH agent relay (bridges userns-remap UID permissions) and MCP port bridging
 
 ### Known limitation
 

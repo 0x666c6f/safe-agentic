@@ -455,5 +455,67 @@ assert_contains "$codex_run" "safe-agentic:latest" "image name present"
 # =============================================================================
 assert_contains "$codex_run" "GIT_CONFIG_GLOBAL=/home/agent/.config/git/config" "codex git config path"
 
+# =============================================================================
+# Test: --prompt flag for codex appends positional arg after image name
+# =============================================================================
+run_agent "$REPO_DIR/bin/agent" spawn codex --prompt 'do stuff' --name p --repo https://github.com/a/b.git >/dev/null 2>&1
+prompt_codex_run="$(last_docker_run)"
+assert_contains "$prompt_codex_run" "safe-agentic:latest do stuff" "codex prompt as positional arg"
+
+# =============================================================================
+# Test: --prompt flag for claude appends -p "prompt" after image name
+# =============================================================================
+run_agent "$REPO_DIR/bin/agent" spawn claude --prompt 'do stuff' --name pc --repo https://github.com/a/b.git >/dev/null 2>&1
+prompt_claude_run="$(last_docker_run)"
+assert_contains "$prompt_claude_run" "safe-agentic:latest -p do stuff" "claude prompt with -p flag"
+
+# =============================================================================
+# Test: --prompt without value should error
+# =============================================================================
+assert_fails "prompt missing value" "$REPO_DIR/bin/agent" spawn codex --prompt
+
+# =============================================================================
+# Test: Container persistence — docker run does NOT contain --rm
+# =============================================================================
+run_agent "$REPO_DIR/bin/agent" spawn claude --name persist --repo https://github.com/a/b.git >/dev/null 2>&1
+persist_run="$(last_docker_run)"
+assert_not_contains "$persist_run" "--rm " "no --rm for container persistence"
+assert_not_contains "$persist_run" " --rm" "no --rm flag anywhere"
+
+# =============================================================================
+# Test: Host config injection — codex config.toml injected as B64 env var
+# =============================================================================
+CODEX_CONFIG_HOME="$TMP_DIR/codex-home"
+mkdir -p "$CODEX_CONFIG_HOME"
+cat >"$CODEX_CONFIG_HOME/config.toml" <<'TOMLEOF'
+model = "o3"
+TOMLEOF
+CODEX_HOME="$CODEX_CONFIG_HOME" \
+  run_agent_env bash "$REPO_DIR/bin/agent" spawn codex --name cfgcodex --repo https://github.com/a/b.git >/dev/null 2>&1
+cfgcodex_run="$(last_docker_run)"
+assert_contains "$cfgcodex_run" "SAFE_AGENTIC_CODEX_CONFIG_B64=" "codex config B64 env var present"
+
+# =============================================================================
+# Test: Host config injection — claude settings.json injected as B64 env var
+# =============================================================================
+CLAUDE_CONFIG_HOME="$TMP_DIR/claude-home"
+mkdir -p "$CLAUDE_CONFIG_HOME"
+cat >"$CLAUDE_CONFIG_HOME/settings.json" <<'JSONEOF'
+{"permissions":{"defaultMode":"bypassPermissions"}}
+JSONEOF
+CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_HOME" \
+  run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name cfgclaude --repo https://github.com/a/b.git >/dev/null 2>&1
+cfgclaude_run="$(last_docker_run)"
+assert_contains "$cfgclaude_run" "SAFE_AGENTIC_CLAUDE_CONFIG_B64=" "claude config B64 env var present"
+
+# =============================================================================
+# Test: Shell mode does NOT inject host config env vars
+# =============================================================================
+CODEX_HOME="$CODEX_CONFIG_HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_HOME" \
+  run_agent_env bash "$REPO_DIR/bin/agent" shell >/dev/null 2>&1
+shell_cfg_run="$(last_docker_run)"
+assert_not_contains "$shell_cfg_run" "SAFE_AGENTIC_CODEX_CONFIG_B64=" "shell no codex config env var"
+assert_not_contains "$shell_cfg_run" "SAFE_AGENTIC_CLAUDE_CONFIG_B64=" "shell no claude config env var"
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

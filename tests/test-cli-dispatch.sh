@@ -215,5 +215,26 @@ assert_output_contains "--docker" "alias help shows docker flag"
 run_fails "claude alias no args" bash "$REPO_DIR/bin/agent-claude"
 run_fails "codex alias no args"  bash "$REPO_DIR/bin/agent-codex"
 
+# =============================================================================
+# mcp-login: single arg is MCP server name
+# =============================================================================
+run_ok "mcp-login help" bash "$REPO_DIR/bin/agent" mcp-login --help
+assert_output_contains "mcp-login" "mcp-login help mentions command"
+
+# mcp-login with no args should fail (missing mcp server name)
+run_fails "mcp-login no args" bash "$REPO_DIR/bin/agent" mcp-login
+assert_output_contains "MCP server name required" "mcp-login error without args"
+
+# =============================================================================
+# sessions: basic dispatch works
+# =============================================================================
+run_ok "sessions help" bash "$REPO_DIR/bin/agent" sessions --help
+assert_output_contains "agent sessions" "sessions help mentions command"
+assert_output_contains "destination" "sessions help mentions destination"
+
+# sessions with no args should fail (requires container name or --latest)
+run_fails "sessions no args" bash "$REPO_DIR/bin/agent" sessions
+assert_output_contains "agent help sessions" "sessions usage pointer"
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

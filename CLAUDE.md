@@ -28,9 +28,9 @@ Full diagrams in `docs/architecture.md`.
 - **`bin/agent`** — Host-side CLI dispatcher. All commands (`spawn`, `setup`, `update`, etc.) are `cmd_*` functions. Sources `bin/agent-lib.sh` for container/network helpers. Talks to VM via `orb run -m safe-agentic`.
 - **`bin/agent-lib.sh`** — Shared functions: input validation (`validate_name_component`, `validate_network_name`), network lifecycle (`create_managed_network`, `remove_managed_network`), container runtime construction (`build_container_runtime`, `append_runtime_hardening`), volume helpers. Docker commands built as bash arrays to prevent injection.
 - **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that auto-detect SSH URLs (`git@`, `ssh://`) and delegate to `bin/agent spawn`.
-- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`. Re-run on every `agent vm start`.
+- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`, installs socat for SSH relay and MCP bridging. Re-run on every `agent vm start`.
 - **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). No `curl | bash`. Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. AI CLIs installed via `npm ci` with lockfile. Non-root `agent` user, no sudo, no supplemental groups.
-- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent or shell.
+- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent or shell.
 - **`config/bashrc`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
 - **`package.json`, `package-lock.json`** — Pins Claude Code and Codex CLI versions for reproducible `npm ci` installs.
 - **`op-env.sh`** — Template for optional 1Password secret injection. Not used for base OAuth flow.
@@ -44,16 +44,25 @@ agent setup
 # Spawn agents
 agent spawn claude --ssh --repo git@github.com:org/repo.git
 agent spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
+agent spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
 
 # Quick aliases (auto-detect SSH from URL)
 agent-claude git@github.com:org/repo.git
 agent-codex https://github.com/org/repo.git
 
 # Management
-agent list
-agent attach <name>
-agent stop <name|--all>
-agent cleanup                  # removes containers + shared auth + managed networks
+agent list                     # shows running + stopped containers
+agent attach <name>            # reattach (restarts stopped containers)
+agent stop <name|--all>        # stop + remove
+agent cleanup                  # removes containers + managed networks (keeps auth)
+
+# MCP OAuth login (token persists in auth volume)
+agent mcp-login linear
+agent mcp-login <container> notion
+
+# Export session history
+agent sessions <container>
+agent sessions --latest ~/sessions/
 
 # Image rebuild
 agent update                   # cached build
@@ -76,8 +85,9 @@ agent spawn claude --repo https://... --network agent-isolated
 
 | Default | Override |
 |---------|----------|
-| SSH agent OFF | `--ssh` |
+| SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
 | Per-session auth (ephemeral volume) | `--reuse-auth` |
+| Host config auto-injected (seeds only, no overwrite) | — |
 | Read-only rootfs | — |
 | cap-drop ALL + no-new-privileges | — |
 | Dedicated bridge network per container | `--network <name>` |

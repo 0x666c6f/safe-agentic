@@ -13,8 +13,11 @@ agent diagnose
 - `agent-claude` / `agent-codex` auto-enable `--ssh` for `git@` and `ssh://` repos
 - add `--reuse-auth` to keep Claude/Codex OAuth between sessions
 - add `--reuse-gh-auth` to keep `gh auth login` state between sessions
+- add `--prompt 'task'` to send an initial task to the agent
 - add `--docker` for Docker-in-Docker, or `--docker-socket` to mount the VM daemon directly
 - add `--identity 'You <you@example.com>'` to avoid `Agent <agent@localhost>` commits
+- host `~/.codex/config.toml` and `~/.claude/settings.json` are auto-injected into containers (MCP servers, model settings carry over)
+- containers persist after exit — `agent attach` restarts stopped ones, `agent stop` removes
 - put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, Docker mode, shared auth, and git identity
   - format: simple `KEY=value` lines only; no shell snippets
 
@@ -148,16 +151,18 @@ agent shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
 ### Manage agents
 
 ```bash
-agent list                  # List running agents
-agent attach <name>         # Open second shell in running agent
-agent attach --latest       # Attach to newest running agent
+agent list                  # List running + stopped agents
+agent attach <name>         # Attach (restarts stopped containers)
+agent attach --latest       # Attach to newest agent
 agent cp <name> <container-path> <host-path>  # Copy files out safely
 agent cp --latest <container-path> <host-path>
-agent stop <name>           # Stop specific agent
-agent stop --latest         # Stop newest running agent
-agent stop --all            # Stop all agents
+agent stop <name>           # Stop and remove specific agent
+agent stop --latest         # Stop and remove newest agent
+agent stop --all            # Stop and remove all agents
 agent cleanup               # Stop all + keep shared auth + prune managed networks
 agent cleanup --auth        # Also remove shared auth volumes
+agent mcp-login <server>    # MCP OAuth login (persists in auth volume)
+agent sessions <name>       # Export session history from container
 agent diagnose              # Check orb/VM/docker/image/SSH/defaults
 ```
 
@@ -211,7 +216,7 @@ Node.js 22, `pnpm`, Bun, Python 3.12, Go 1.23
 
 | Feature | Default | Override |
 |---------|---------|----------|
-| SSH agent | OFF | `--ssh` |
+| SSH agent | OFF | `--ssh` (socat relay for userns-remap compat) |
 | Auth persistence | Ephemeral per-session volume | `--reuse-auth` |
 | GitHub CLI auth | Ephemeral per-session volume | `--reuse-gh-auth` |
 | Docker access | OFF | `--docker` (DinD) / `--docker-socket` |
@@ -244,8 +249,9 @@ On first `agent spawn`, the CLI shows an OAuth URL. Open it in your macOS browse
 Only available when `--ssh` is passed:
 ```
 git clone/push inside container
-  → SSH agent socket forwarded: container → VM → macOS → 1Password
+  → SSH agent socket forwarded: container → socat relay (VM) → macOS → 1Password
   → Uses SSH keys managed by 1Password
+  → socat relay bridges userns-remap UID permissions
 ```
 
 GitHub host keys are baked into the image with `StrictHostKeyChecking yes` — no trust-on-first-use.
@@ -297,14 +303,16 @@ If you want Docker on by default, set `SAFE_AGENTIC_DEFAULT_DOCKER=true` in `def
 
 `agent spawn` / `agent shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `agent update` or `agent setup`.
 
-### Agent CLI defaults inside the container
+### Host config injection
 
-When the container starts, safe-agentic writes default config files only if they do not already exist:
+Your host `~/.codex/config.toml` and `~/.claude/settings.json` are automatically injected into containers on first launch. MCP server definitions, model settings, and feature flags carry over. If config already exists in the auth volume (from a prior run or `mcp-login`), the host config is not re-injected.
+
+If no host config is found, safe-agentic writes minimal defaults:
 
 - Codex: `~/.codex/config.toml` with `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`
 - Claude: `~/.claude/settings.json` with bypass-permissions mode
 
-This keeps manual `codex` / `claude` runs from `agent shell` aligned with the sandbox model. If you already have persistent auth/config volumes, your existing config is left unchanged.
+This keeps manual `codex` / `claude` runs from `agent shell` aligned with the sandbox model.
 
 ### Build context safety
 

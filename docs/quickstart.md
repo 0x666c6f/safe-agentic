@@ -46,11 +46,11 @@ That's it. The agent launches inside a hardened container with your repo cloned.
 
 ## 5. When you're done
 
-The container is destroyed when the agent exits. To stop a running agent:
+The container stops when the agent exits but persists — you can reattach with `agent attach --latest`. To remove containers:
 
 ```bash
-agent stop --all
-agent cleanup --auth   # optional: also remove shared auth volumes
+agent stop --all             # stop and remove all agent containers
+agent cleanup --auth         # optional: also remove shared auth volumes
 ```
 
 If setup or spawn fails, run `agent diagnose`.
@@ -71,7 +71,7 @@ graph LR
     style E fill:#e3f2fd,stroke:#1565c0
 ```
 
-The agent has full freedom **inside** the container but can't escape it. SSH keys are only forwarded if you use a `git@` URL. Auth tokens are thrown away when the container exits.
+The agent has full freedom **inside** the container but can't escape it. SSH keys are only forwarded if you use a `git@` URL. Auth tokens live in ephemeral volumes unless you use `--reuse-auth`.
 
 ## Next steps
 

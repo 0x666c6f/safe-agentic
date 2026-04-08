@@ -12,12 +12,14 @@
 | `agent-claude <url>` | Shortcut for `agent spawn claude --repo <url>` |
 | `agent-codex <url>` | Shortcut for `agent spawn codex --repo <url>` |
 | `agent shell` | Interactive shell (no agent, no auth) |
-| `agent list` | Show running agent containers |
-| `agent attach <name>` | Open a second shell in a running agent |
-| `agent stop <name>` | Stop a specific agent |
-| `agent stop --all` | Stop all agents |
+| `agent list` | Show running + stopped agent containers |
+| `agent attach <name>` | Attach to running container, or restart a stopped one |
+| `agent stop <name>` | Stop and remove a specific agent |
+| `agent stop --all` | Stop and remove all agents |
 | `agent cleanup` | Stop all, keep shared auth, prune networks |
 | `agent cleanup --auth` | Also remove shared auth volumes |
+| `agent mcp-login <server>` | MCP OAuth login (token persists in auth volume) |
+| `agent sessions <name>` | Export session history from a container |
 | `agent diagnose` | Check common setup/runtime issues |
 | `agent update` | Rebuild the Docker image |
 | `agent vm start` | Start VM and re-apply hardening |
@@ -37,6 +39,16 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 ```bash
 agent spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 ```
+
+### With an initial prompt
+
+Pass a task to the agent at launch:
+
+```bash
+agent spawn codex --ssh --prompt 'Fix the failing CI tests' --repo git@github.com:myorg/myrepo.git
+```
+
+For Claude this passes `-p 'TASK'`; for Codex it becomes a positional argument.
 
 The `--ssh` flag forwards your 1Password SSH agent into the container so `git clone`, `git push`, etc. work with your SSH keys.
 
@@ -119,14 +131,16 @@ agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
 
 Use `--docker` unless you explicitly need the VM daemon. `--docker-socket` gives the agent direct control over Docker in the VM.
 
-### Default agent CLI config
+### Host config injection
 
-On container startup, safe-agentic bootstraps default config files only when they are missing:
+Your host `~/.codex/config.toml` and `~/.claude/settings.json` are automatically injected into containers on first launch. MCP server definitions, model settings, and feature flags carry over. If config already exists in the auth volume (from a prior run or `mcp-login`), the host config is not re-injected — existing config is preserved.
+
+If no host config exists, safe-agentic writes minimal defaults:
 
 - `~/.codex/config.toml` gets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`
 - `~/.claude/settings.json` gets bypass-permissions mode
 
-This matters mainly for `agent shell` and `agent attach`, where you may launch `codex` or `claude` manually after the container is already running. Existing config in shared auth volumes is preserved.
+This matters mainly for `agent shell` and `agent attach`, where you may launch `codex` or `claude` manually after the container is already running.
 
 ### Git identity
 
@@ -180,11 +194,11 @@ The agent can work on the code but can't reach the internet, your SSH keys, or o
 agent list
 ```
 
-Shows all running agent containers with their names, status, and creation time.
+Shows all agent containers (running and stopped) with their names, agent type, repo, flags, and status.
 
 ### Attach
 
-Open a second shell into a running agent. Useful for checking logs, running tests in parallel, etc.
+Attach to a running container, or restart a stopped one. Useful for resuming work, checking logs, or running tests in parallel.
 
 ```bash
 agent attach api-refactor
@@ -192,6 +206,8 @@ agent attach api-refactor
 agent attach agent-claude-api-refactor
 agent attach --latest
 ```
+
+If the container is stopped (exited), `agent attach` automatically restarts it and reattaches.
 
 ### Copy files out
 
@@ -207,12 +223,12 @@ This copies through a temp directory in the hardened VM, then writes to the host
 ### Stop
 
 ```bash
-agent stop api-refactor      # Stop one
-agent stop --latest          # Stop newest running session
-agent stop --all             # Stop all
+agent stop api-refactor      # Stop and remove one
+agent stop --latest          # Stop and remove newest session
+agent stop --all             # Stop and remove all
 ```
 
-Stopping removes the container and its per-session network.
+Stopping removes the container, its per-session network, and any DinD sidecar.
 
 ### Cleanup
 
@@ -229,12 +245,17 @@ Older releases removed shared auth volumes on plain `agent cleanup`. Use `agent 
 
 ### Container lifecycle
 
+Containers persist after the agent exits (no auto-remove). This lets you reattach to resume work or export session history.
+
 ```mermaid
 graph LR
     spawn["agent spawn"] --> running["Running<br/>(interactive session)"]
-    running -->|"agent exit"| gone["Destroyed<br/>(auto --rm)"]
-    running -->|"agent stop"| gone
+    running -->|"agent exits"| stopped["Stopped<br/>(container persists)"]
     running -->|"agent attach"| running
+    stopped -->|"agent attach"| running
+    stopped -->|"agent sessions"| stopped
+    running -->|"agent stop"| gone["Removed"]
+    stopped -->|"agent stop"| gone
 
     gone -->|"ephemeral volumes"| cleaned["Volumes removed"]
     gone -->|"--reuse-auth volume"| persisted["Auth persists"]
@@ -242,10 +263,39 @@ graph LR
 
     style spawn fill:#e3f2fd,stroke:#1565c0
     style running fill:#dfd,stroke:#393
-    style gone fill:#fff3e0,stroke:#e65100
-    style cleaned fill:#f5f5f5,stroke:#999
+    style stopped fill:#fff3e0,stroke:#e65100
+    style gone fill:#f5f5f5,stroke:#999
     style persisted fill:#ffd,stroke:#c93
 ```
+
+## MCP OAuth login
+
+Authenticate MCP servers (Linear, Notion, etc.) so tokens persist in the auth volume for all agents:
+
+```bash
+agent mcp-login linear
+agent mcp-login notion
+```
+
+Runs OAuth in a temporary container with `--network=host`. The token is stored in the shared codex auth volume (`agent-codex-auth`). To target a specific container's auth volume instead:
+
+```bash
+agent mcp-login my-agent linear
+agent mcp-login --latest notion
+```
+
+One-time setup per MCP server.
+
+## Session export
+
+Export agent session history (conversations, session index) from a container to the host:
+
+```bash
+agent sessions api-refactor
+agent sessions --latest ~/my-sessions/
+```
+
+Default destination: `./agent-sessions/<container-name>/`. Works on both running and stopped containers.
 
 ## Interactive shell
 
@@ -362,7 +412,9 @@ agent-claude git@github.com:myorg/service.git
 
 # ... Claude Code opens, work as usual ...
 
-# When done, the container is removed automatically on exit
+# When done, the container stops but persists (reattach with agent attach)
+# To remove it:
+agent stop --latest
 ```
 
 ### Parallel sessions
