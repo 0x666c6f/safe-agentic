@@ -1231,14 +1231,17 @@ cmd_mcp_login() {
         ;;
       -h|--help)
         cat <<EOF
-Usage: agent mcp-login <container> <mcp-server>
+Usage: agent mcp-login [container] <mcp-server>
        agent mcp-login --latest <mcp-server>
 
-Runs OAuth login for an MCP server on the host (where the browser
-callback works) and syncs the resulting token into the container's
-auth volume. One-time setup per MCP server.
+Authenticate an MCP server via OAuth. Runs in a temporary container
+with the shared auth volume so the token persists for all agents.
+
+Container name is optional — without it, uses the default
+agent-codex-auth volume. One-time setup per MCP server.
 
 Example:
+  agent mcp-login linear
   agent mcp-login cardinality-restrictions linear
   agent mcp-login --latest notion
 EOF
@@ -1257,18 +1260,25 @@ EOF
     esac
   done
 
-  [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login <container> linear"
+  [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login linear"
 
   require_vm
-  name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  # Verify the container exists and uses a codex auth volume
-  vm_exec docker inspect "$name" >/dev/null 2>&1 || die "Container $name not found."
-  local auth_volume
-  auth_volume=$(vm_exec docker inspect --format \
-    '{{range .Mounts}}{{if eq .Destination "/home/agent/.codex"}}{{.Name}}{{end}}{{end}}' \
-    "$name" 2>/dev/null || echo "")
-  [ -n "$auth_volume" ] || die "Container $name has no codex auth volume. Use --reuse-auth when spawning."
+  # Determine the auth volume. If a container name is given, read it from
+  # the container. Otherwise use the default shared codex auth volume.
+  local auth_volume=""
+  if [ -n "$name" ] || $latest; then
+    name=$(resolve_target_container "$topic" "$name" "$latest")
+    auth_volume=$(vm_exec docker inspect --format \
+      '{{range .Mounts}}{{if eq .Destination "/home/agent/.codex"}}{{.Name}}{{end}}{{end}}' \
+      "$name" 2>/dev/null || echo "")
+    [ -n "$auth_volume" ] || die "Container $name has no codex auth volume. Use --reuse-auth when spawning."
+  else
+    auth_volume="agent-codex-auth"
+    # Create the volume if it doesn't exist yet
+    vm_exec docker volume inspect "$auth_volume" >/dev/null 2>&1 \
+      || vm_exec docker volume create "$auth_volume" >/dev/null
+  fi
 
   info "Running MCP OAuth login for '$mcp_server'..."
   info "A URL will appear — open it in your browser."
