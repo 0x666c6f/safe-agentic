@@ -1234,8 +1234,9 @@ cmd_mcp_login() {
 Usage: agent mcp-login <container> <mcp-server>
        agent mcp-login --latest <mcp-server>
 
-Runs 'codex mcp login <server>' inside the container with automatic
-port forwarding so the OAuth callback reaches the container.
+Runs OAuth login for an MCP server on the host (where the browser
+callback works) and syncs the resulting token into the container's
+auth volume. One-time setup per MCP server.
 
 Example:
   agent mcp-login cardinality-restrictions linear
@@ -1257,69 +1258,57 @@ EOF
   done
 
   [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login <container> linear"
+  command -v codex >/dev/null 2>&1 || die "codex CLI not found on host. Install it first."
 
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  # Ensure container is running
-  local state
-  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
-  if [ "$state" != "running" ]; then
-    info "Starting container $name..."
-    vm_exec docker start "$name" >/dev/null
+  # Ensure container exists
+  vm_exec docker inspect "$name" >/dev/null 2>&1 || die "Container $name not found."
+
+  # Create temp CODEX_HOME on host, seed it with config + existing auth
+  local tmpcodex
+  tmpcodex=$(mktemp -d)
+  trap 'rm -rf "$tmpcodex"' RETURN
+
+  # Copy config from the container's auth volume (has config.toml + any existing auth)
+  local container_state
+  container_state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "")
+  if [ "$container_state" != "running" ]; then
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+  fi
+  # Extract current .codex contents from container
+  orb run -m "$VM_NAME" docker cp "$name:/home/agent/.codex/." - 2>/dev/null \
+    | tar -xf - -C "$tmpcodex" 2>/dev/null || true
+  # Ensure config.toml exists (use host config as fallback)
+  if [ ! -f "$tmpcodex/config.toml" ]; then
+    local host_config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+    [ -f "$host_config" ] && cp "$host_config" "$tmpcodex/config.toml"
+  fi
+  # Copy host auth.json for API access during login
+  local host_auth="${CODEX_HOME:-$HOME/.codex}/auth.json"
+  [ -f "$host_auth" ] && cp "$host_auth" "$tmpcodex/auth.json"
+
+  info "Running MCP OAuth login for '$mcp_server' on host..."
+  info "A URL will appear — open it in your browser to authorize."
+
+  # Run login on HOST with temp CODEX_HOME (browser callback hits macOS localhost)
+  CODEX_HOME="$tmpcodex" codex mcp login "$mcp_server"
+  local login_status=$?
+
+  if [ "$login_status" -ne 0 ]; then
+    die "MCP login failed (exit $login_status)."
   fi
 
-  # Get the container's IP on its Docker network
-  local container_ip
-  container_ip=$(vm_exec docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name" 2>/dev/null || echo "")
-  [ -n "$container_ip" ] || die "Could not determine container IP for $name."
+  # Sync the updated .codex contents back into the container's auth volume
+  info "Syncing MCP auth token to container..."
+  tar -cf - -C "$tmpcodex" . 2>/dev/null \
+    | orb run -m "$VM_NAME" docker cp - "$name:/home/agent/.codex/" 2>/dev/null
+  # Fix ownership (userns-remap maps uid 1000 → 101000)
+  vm_exec docker exec "$name" true 2>/dev/null || vm_exec docker start "$name" >/dev/null 2>&1
 
-  info "Running 'codex mcp login $mcp_server' inside $name..."
-  info "OAuth callback will be forwarded from macOS → VM → container."
-  info "Open the URL shown below in your browser."
-
-  # Run codex mcp login in the container, capture its output to detect the port,
-  # and set up port forwarding dynamically.
-  # Strategy: run login in background, parse the port from output, forward it.
-  local fifo
-  fifo=$(mktemp -u /tmp/mcp-login-XXXXXX)
-  mkfifo "$fifo"
-
-  # Start the mcp login and tee output so we can parse the port
-  orb run -m "$VM_NAME" docker exec -i "$name" codex mcp login "$mcp_server" 2>&1 | tee "$fifo" &
-  local login_pid=$!
-
-  # Read output line by line to find the port and set up forwarding
-  local forward_pid=""
-  while IFS= read -r line; do
-    echo "$line" >/dev/null  # already tee'd to stdout
-    if [[ "$line" == *"127.0.0.1:"*"/callback"* ]]; then
-      local port
-      port=$(echo "$line" | grep -o '127\.0\.0\.1:[0-9]*' | head -1 | cut -d: -f2)
-      if [ -n "$port" ]; then
-        # Forward VM localhost:port → container:port via socat in VM.
-        # OrbStack automatically forwards VM ports to macOS localhost,
-        # so the browser OAuth redirect reaches the container.
-        vm_exec start-stop-daemon --start --background \
-          --exec /usr/bin/socat -- \
-          "TCP-LISTEN:$port,fork,reuseaddr" "TCP-CONNECT:$container_ip:$port" \
-          2>/dev/null || true
-        forward_pid="vm"
-        info "Port $port forwarded for OAuth callback."
-      fi
-    fi
-  done < "$fifo" &
-  local reader_pid=$!
-
-  # Wait for login to complete
-  wait "$login_pid" 2>/dev/null || true
-
-  # Cleanup
-  kill "$reader_pid" 2>/dev/null || true
-  vm_exec bash -c "pkill -f 'socat.*TCP-LISTEN.*TCP-CONNECT' 2>/dev/null" || true
-  rm -f "$fifo"
-
-  ok "MCP login complete. Token saved in auth volume."
+  ok "MCP '$mcp_server' authenticated. Token synced to $name."
 }
 
 cmd="${1:-help}"
