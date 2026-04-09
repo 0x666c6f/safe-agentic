@@ -31,11 +31,11 @@ func ShowOverlay(app *App, name string, title string, content string) {
 func ShowCopyForm(app *App, containerName string) {
 	form := tview.NewForm().
 		AddInputField("Container path:", "/workspace/", 40, nil, nil).
-		AddInputField("Host path:", "./", 40, nil, nil)
+		AddInputField("VM path (not macOS host):", "./", 40, nil, nil)
 
 	form.AddButton("Copy", func() {
 		containerPath := form.GetFormItemByLabel("Container path:").(*tview.InputField).GetText()
-		hostPath := form.GetFormItemByLabel("Host path:").(*tview.InputField).GetText()
+		hostPath := form.GetFormItemByLabel("VM path (not macOS host):").(*tview.InputField).GetText()
 
 		app.pages.SwitchToPage("main")
 		app.pages.RemovePage("copy")
