@@ -74,14 +74,19 @@ graph LR
 ```
 --cap-drop=ALL
 --security-opt=no-new-privileges:true
+--security-opt seccomp=/etc/safe-agentic/seccomp.json
 --read-only
---memory 8g                        (configurable)
---cpus 4                           (configurable)
---pids-limit 512                   (configurable)
---network agent-<name>-net         (dedicated bridge)
---tmpfs /tmp:rw,noexec,nosuid
---tmpfs /home/agent/.ssh:rw,noexec,nosuid
---tmpfs /home/agent/.config:rw,noexec,nosuid
+--memory 8g                                  (configurable)
+--cpus 4                                     (configurable)
+--pids-limit 512                             (configurable)
+--ulimit nofile=65536:65536
+--network agent-<name>-net                   (dedicated bridge)
+--tmpfs /tmp:rw,noexec,nosuid,size=512m
+--tmpfs /var/tmp:rw,noexec,nosuid,size=256m
+--tmpfs /run:rw,noexec,nosuid,size=16m
+--tmpfs /dev/shm:rw,noexec,nosuid,size=64m
+--tmpfs /home/agent/.ssh:rw,noexec,nosuid,size=1m
+--tmpfs /home/agent/.config:rw,noexec,nosuid,size=32m
 ```
 
 These flags are built as bash arrays in `bin/agent-lib.sh` to prevent injection. Unsafe flags (`--privileged`, `host` network, `--` passthrough) are explicitly blocked.
