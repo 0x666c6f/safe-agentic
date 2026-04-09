@@ -67,7 +67,7 @@ graph LR
 
 **Resource exhaustion:** Memory, CPU, and PID limits prevent a runaway agent from consuming all VM resources and affecting other containers.
 
-**Network lateral movement:** Each container gets a dedicated bridge network. Default egress rules allow only TCP 22 (SSH), 80 (HTTP), 443 (HTTPS). Private/local address ranges are blocked.
+**Network lateral movement:** Each container gets a dedicated bridge network. Default egress rules allow only TCP 22 (SSH), 80 (HTTP), 443 (HTTPS). Nine private/local/reserved address ranges are blocked: 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10 (CGNAT), 127.0.0.0/8, 169.254.0.0/16 (link-local), 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 (multicast), 240.0.0.0/4 (reserved).
 
 ### Docker flags applied to every container
 
