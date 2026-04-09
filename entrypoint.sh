@@ -246,6 +246,16 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
+    # If a prompt was saved by agent-session.sh, send it as keystrokes
+    # to the interactive Claude session after a short delay for init.
+    if [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+      (
+        sleep 5
+        prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
+        rm -f "$SESSION_STATE_DIR/pending-prompt"
+        tmux send-keys -t "$TMUX_SESSION_NAME" "$prompt" Enter
+      ) &
+    fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     ;;
   codex)

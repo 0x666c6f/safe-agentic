@@ -110,10 +110,24 @@ launch_claude() {
   fi
 
   if $has_prompt; then
-    # Run the prompt directly (non-interactive, output visible in tmux pane),
-    # then exec into interactive mode so the session stays alive for attach/peek.
-    "${cmd[@]}" || true
-    rendered=$(quote_cmd claude --dangerously-skip-permissions --continue)
+    # Extract the prompt text from args (-p "prompt text")
+    local prompt_text=""
+    local skip_next=false
+    for arg in "$@"; do
+      if $skip_next; then
+        prompt_text="$arg"
+        break
+      fi
+      if [ "$arg" = "-p" ]; then
+        skip_next=true
+      fi
+    done
+
+    # Save prompt to a file; the entrypoint will send it via tmux send-keys
+    # after the interactive session starts. This keeps Claude in full
+    # interactive mode with live output visible in the tmux pane.
+    echo "$prompt_text" > "$SESSION_STATE_DIR/pending-prompt"
+    rendered=$(quote_cmd claude --dangerously-skip-permissions)
     exec script -qfc "$rendered" /dev/null
   else
     rendered=$(quote_cmd "${cmd[@]}")
