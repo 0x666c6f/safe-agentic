@@ -1872,6 +1872,7 @@ cmd_diff() {
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
+  # shellcheck disable=SC2016
   if $stat; then
     vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff --stat'
   else
@@ -1954,6 +1955,7 @@ cmd_checkpoint() {
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
+  # shellcheck disable=SC2016
   case "$subcmd" in
     create)
       [ -z "$label" ] && label="checkpoint-$(date +%s)"
@@ -2192,6 +2194,7 @@ cmd_review() {
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
   # Detect workspace directory inside container
+  # shellcheck disable=SC2016
   local workspace_cd='cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace'
 
   # Check if codex is available in the container
@@ -3065,6 +3068,7 @@ if incomplete:
   fi
 
   # Get current branch
+  # shellcheck disable=SC2016
   local branch
   branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
   branch=$(echo "$branch" | tr -d '[:space:]')
@@ -3078,14 +3082,17 @@ if incomplete:
 
   info "Creating PR from $branch → $base in $name..."
 
+  # shellcheck disable=SC2016
   # Stage and commit any uncommitted changes
   vm_exec docker exec -e SA_TITLE="$title" "$name" bash -c \
     'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m "agent work: $SA_TITLE"'
 
+  # shellcheck disable=SC2016
   # Push branch
   vm_exec docker exec -e SA_BRANCH="$branch" "$name" bash -c \
     'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git push -u origin "$SA_BRANCH"' || die "Failed to push branch '$branch' in $name."
 
+  # shellcheck disable=SC2016
   # Create PR
   local pr_url
   pr_url=$(vm_exec docker exec -e SA_TITLE="$title" -e SA_BASE="$base" -e SA_NAME="$name" "$name" bash -c \
