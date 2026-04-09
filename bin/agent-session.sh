@@ -110,11 +110,11 @@ launch_claude() {
   fi
 
   if $has_prompt; then
-    # Run the prompt first, then continue into interactive mode so the
-    # session stays alive for attach/peek in detached containers.
-    rendered=$(quote_cmd "${cmd[@]}")
-    rendered="$rendered; $(quote_cmd claude --dangerously-skip-permissions --continue)"
-    script -qfc "$rendered" /dev/null
+    # Run the prompt directly (non-interactive, output visible in tmux pane),
+    # then exec into interactive mode so the session stays alive for attach/peek.
+    "${cmd[@]}" || true
+    rendered=$(quote_cmd claude --dangerously-skip-permissions --continue)
+    exec script -qfc "$rendered" /dev/null
   else
     rendered=$(quote_cmd "${cmd[@]}")
     exec script -qfc "$rendered" /dev/null
