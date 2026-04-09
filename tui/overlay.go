@@ -153,64 +153,32 @@ func ShowSpawnForm(app *App) {
 			args = append(args, "--identity", identity)
 		}
 
-		// Spawn detached: use dry-run to get the docker command, run it with
-		// -d, then return to the TUI. User presses 'r' to connect.
+		// Spawn detached using --background flag: the agent CLI handles
+		// creating networks and running the container in detached mode.
 		app.footer.ShowStatus("Spawning "+agentType+" agent...", false)
 		go func() {
-			spawnArgs := append(args, "--dry-run")
+			spawnArgs := append(args, "--background")
 			spawnCmd := newAgentCmd(spawnArgs...)
-			spawnOut, _ := spawnCmd.CombinedOutput()
+			spawnOut, spawnErr := spawnCmd.CombinedOutput()
+			outStr := strings.TrimSpace(string(spawnOut))
 
-			// Extract and run the network create command
-			for _, line := range strings.Split(string(spawnOut), "\n") {
-				if strings.Contains(line, "Would create network:") && strings.Contains(line, "docker network create") {
-					if idx := strings.Index(line, "orb run"); idx >= 0 {
-						exec.Command("bash", "-c", line[idx:]).Run()
-					}
-					break
-				}
-			}
-
-			// Extract the docker run command, switch to detached mode
-			dockerLine := ""
-			for _, line := range strings.Split(string(spawnOut), "\n") {
-				if strings.Contains(line, "Would run:") && strings.Contains(line, "docker run") {
-					if idx := strings.Index(line, "orb run"); idx >= 0 {
-						dockerLine = line[idx:]
-					}
-					break
-				}
-			}
-			if dockerLine == "" {
+			if spawnErr != nil {
 				app.tapp.QueueUpdateDraw(func() {
-					app.footer.ShowStatus("Spawn failed: couldn't parse dry-run output", true)
+					msg := "Spawn failed"
+					if outStr != "" {
+						msg += ": " + outStr
+					}
+					app.footer.ShowStatus(msg, true)
 				})
 				return
 			}
 
-			if agentType == "codex" || agentType == "claude" {
-				dockerLine = strings.Replace(dockerLine, "docker run -it", "docker run -d", 1)
-			} else {
-				dockerLine = strings.Replace(dockerLine, "docker run -it", "docker run -dit", 1)
-			}
-			runCmd := exec.Command("bash", "-c", dockerLine)
-			runOut, runErr := runCmd.CombinedOutput()
-			if runErr != nil {
-				app.tapp.QueueUpdateDraw(func() {
-					app.footer.ShowStatus("Spawn failed: "+strings.TrimSpace(string(runOut)), true)
-				})
-				return
-			}
-
-			// Extract container name
+			// Extract container name from output (last non-empty line)
 			containerName := ""
-			for i, p := range strings.Fields(dockerLine) {
-				if p == "--name" {
-					parts := strings.Fields(dockerLine)
-					if i+1 < len(parts) {
-						containerName = parts[i+1]
-					}
-					break
+			for _, line := range strings.Split(outStr, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "agent-") {
+					containerName = line
 				}
 			}
 
