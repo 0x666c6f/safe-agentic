@@ -1957,6 +1957,7 @@ cmd_checkpoint() {
   case "$subcmd" in
     create)
       [ -z "$label" ] && label="checkpoint-$(date +%s)"
+      validate_name_component "$label" || die "Invalid checkpoint label: $label"
       local stash_sha
       stash_sha=$(vm_exec docker exec "$name" bash -c \
         'cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
@@ -1965,8 +1966,8 @@ cmd_checkpoint() {
         info "No changes to checkpoint."
         return 0
       fi
-      vm_exec docker exec "$name" bash -c \
-        "cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/$label $stash_sha"
+      vm_exec docker exec -e SA_LABEL="$label" -e SA_SHA="$stash_sha" "$name" bash -c \
+        'cd /workspace/* 2>/dev/null || cd /workspace; git update-ref "refs/safe-agentic/checkpoints/$SA_LABEL" "$SA_SHA"'
       ok "Checkpoint '$label' created ($stash_sha) in $name."
       ;;
     list)
@@ -1986,8 +1987,9 @@ cmd_checkpoint() {
           done
       ;;
     revert)
-      vm_exec docker exec "$name" bash -c \
-        "cd /workspace/* 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply refs/safe-agentic/checkpoints/$ref"
+      validate_name_component "$ref" || die "Invalid checkpoint ref: $ref"
+      vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
+        'cd /workspace/* 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
       ok "Reverted $name to checkpoint '$ref'."
       ;;
   esac
@@ -2544,8 +2546,12 @@ PYEOF
   local -a pids=()
   local cmd_str
   for cmd_str in "${spawn_cmds[@]}"; do
-    # Evaluate the pre-quoted command string in a subshell
-    eval "$cmd_str" &
+    # Parse the shlex-quoted command back into an array safely (no eval)
+    local -a cmd_array=()
+    while IFS= read -r -d '' arg; do
+      cmd_array+=("$arg")
+    done < <(python3 -c "import shlex,sys; [sys.stdout.buffer.write(a.encode()+b'\x00') for a in shlex.split(sys.stdin.read())]" <<< "$cmd_str")
+    "${cmd_array[@]}" &
     pids+=($!)
   done
 
@@ -3073,14 +3079,17 @@ if incomplete:
   info "Creating PR from $branch → $base in $name..."
 
   # Stage and commit any uncommitted changes
-  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m 'agent work: $title'"
+  vm_exec docker exec -e SA_TITLE="$title" "$name" bash -c \
+    'cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m "agent work: $SA_TITLE"'
 
   # Push branch
-  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git push -u origin $branch" || die "Failed to push branch '$branch' in $name."
+  vm_exec docker exec -e SA_BRANCH="$branch" "$name" bash -c \
+    'cd /workspace/* 2>/dev/null || cd /workspace; git push -u origin "$SA_BRANCH"' || die "Failed to push branch '$branch' in $name."
 
   # Create PR
   local pr_url
-  pr_url=$(vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; gh pr create --title '$title' --body 'Created by safe-agentic agent: $name' --base '$base'" 2>/dev/null || echo "")
+  pr_url=$(vm_exec docker exec -e SA_TITLE="$title" -e SA_BASE="$base" -e SA_NAME="$name" "$name" bash -c \
+    'cd /workspace/* 2>/dev/null || cd /workspace; gh pr create --title "$SA_TITLE" --body "Created by safe-agentic agent: $SA_NAME" --base "$SA_BASE"' 2>/dev/null || echo "")
   [ -n "$pr_url" ] || die "Failed to create PR from $name. Ensure gh is authenticated and the repo has a remote."
 
   ok "PR created: $pr_url"
@@ -3151,7 +3160,7 @@ EOF
   local creds_b64
   creds_b64=$(base64 < "$aws_creds_file")
 
-  vm_exec docker exec "$name" bash -c "echo '$creds_b64' | base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials"
+  echo "$creds_b64" | vm_exec docker exec -i "$name" bash -c 'base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials'
 
   ok "AWS credentials refreshed in $name (profile: $profile)"
 }

@@ -33,6 +33,7 @@ type Poller struct {
 	stale    bool
 	stopCh   chan struct{}
 	stopped  chan struct{}
+	stopOnce sync.Once
 	onUpdate func([]Agent, bool) // callback: agents, stale
 }
 
@@ -51,8 +52,11 @@ func (p *Poller) Start() {
 }
 
 // Stop stops the polling loop and waits for it to finish.
+// Safe to call multiple times.
 func (p *Poller) Stop() {
-	close(p.stopCh)
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
 	<-p.stopped
 }
 
@@ -61,11 +65,13 @@ func (p *Poller) ForceRefresh() {
 	go p.poll()
 }
 
-// Restart creates new channels and restarts the loop.
+// Restart stops the current loop, creates new channels, and restarts.
 func (p *Poller) Restart() {
+	p.Stop()
 	p.mu.Lock()
 	p.stopCh = make(chan struct{})
 	p.stopped = make(chan struct{})
+	p.stopOnce = sync.Once{}
 	p.mu.Unlock()
 	go p.loop()
 }
