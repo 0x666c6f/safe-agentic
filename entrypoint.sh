@@ -7,6 +7,7 @@ REPO_URL_LIB="/usr/local/lib/safe-agentic/repo-url.sh"
 AGENT_SESSION_LIB="/usr/local/lib/safe-agentic/agent-session.sh"
 TMUX_SESSION_NAME="${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}"
 TMUX_HISTORY_LIMIT="${SAFE_AGENTIC_TMUX_HISTORY_LIMIT:-500000}"
+# shellcheck disable=SC2034  # used by agent-session.sh via env
 SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
 
 if [ -f "$REPO_URL_LIB" ]; then

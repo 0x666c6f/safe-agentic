@@ -2888,6 +2888,7 @@ cmd_pr() {
 
   # Check for incomplete todos
   local todos_check
+  # shellcheck disable=SC2016
   todos_check=$(vm_exec docker exec "$name" bash -c '
     f=/workspace/.safe-agentic/todos.json
     if [ -f "$f" ]; then
@@ -2911,7 +2912,9 @@ if incomplete:
   branch=$(vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
   branch=$(echo "$branch" | tr -d '[:space:]')
   [ -n "$branch" ] || die "Could not determine current branch in $name."
-  [ "$branch" != "main" ] && [ "$branch" != "master" ] || die "Container $name is on branch '$branch'. Cannot create a PR from main/master."
+  if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+    die "Container $name is on branch '$branch'. Cannot create a PR from main/master."
+  fi
 
   # Default title = branch name
   [ -n "$title" ] || title="$branch"
