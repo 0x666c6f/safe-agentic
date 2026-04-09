@@ -237,6 +237,11 @@ case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
     echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
+    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+      # Background mode: run directly, no tmux. Output goes to docker logs.
+      echo "[entrypoint] Background mode — output to docker logs, not attachable."
+      exec "$AGENT_SESSION_LIB" "${launch_args[@]}"
+    fi
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else
@@ -269,6 +274,10 @@ case "$AGENT_TYPE" in
   codex)
     echo "[entrypoint] Launching Codex..."
     echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
+    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+      echo "[entrypoint] Background mode — output to docker logs, not attachable."
+      exec "$AGENT_SESSION_LIB" "${launch_args[@]}"
+    fi
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else

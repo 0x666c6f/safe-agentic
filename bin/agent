@@ -157,12 +157,14 @@ Options:
   --aws PROFILE
   --identity 'Name <email@example.com>'
   --auto-trust
+  --background
   --dry-run
   -h, --help
 
 Notes:
   - --prompt sends an initial task to the agent (claude -p / codex positional arg)
   - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
+  - --background runs headless (no tmux, not attachable, output via docker logs)
   - --aws injects credentials from ~/.aws/credentials for the given profile
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
@@ -581,6 +583,7 @@ cmd_spawn() {
   local network_name=""
   local dry_run=false
   local auto_trust=false
+  local background=false
   local agent_prompt=""
   local aws_profile=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
@@ -663,6 +666,10 @@ cmd_spawn() {
         ;;
       --auto-trust)
         auto_trust=true
+        shift
+        ;;
+      --background)
+        background=true
         shift
         ;;
       --dry-run)
@@ -783,6 +790,13 @@ cmd_spawn() {
 
   if $auto_trust; then
     docker_cmd+=(-e "SAFE_AGENTIC_AUTO_TRUST=1")
+  fi
+
+  if $background; then
+    docker_cmd+=(-e "SAFE_AGENTIC_BACKGROUND=1")
+    docker_cmd+=(--label "safe-agentic.terminal=none")
+  else
+    docker_cmd+=(--label "safe-agentic.terminal=tmux")
   fi
 
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
@@ -2481,6 +2495,9 @@ for agent in agents:
     if agent.get('auto_trust') is True:
         cmd.append('--auto-trust')
 
+    if agent.get('background') is True:
+        cmd.append('--background')
+
     prompt = agent.get('prompt', '')
     if prompt:
         cmd += ['--prompt', str(prompt)]
@@ -2744,7 +2761,7 @@ cmd_pipeline() {
     local step_line="$1"
     [ -z "$step_line" ] && return 1
 
-    local name type repo prompt ssh reuse_auth auto_trust on_failure retry depends_on
+    local name type repo prompt ssh reuse_auth auto_trust background on_failure retry depends_on
     name=$(        echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     type=$(        echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     repo=$(        echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -2752,6 +2769,7 @@ cmd_pipeline() {
     ssh=$(         echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     reuse_auth=$(  echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     auto_trust=$(  echo "$step_line" | grep -o 'auto_trust=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    background=$(  echo "$step_line" | grep -o 'background=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     retry=$(       echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
     depends_on=$(  echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -2780,6 +2798,7 @@ cmd_pipeline() {
     [[ "$ssh" == "true" ]] && spawn_args+=(--ssh)
     [[ "$reuse_auth" == "true" ]] && spawn_args+=(--reuse-auth)
     [[ "$auto_trust" == "true" ]] && spawn_args+=(--auto-trust)
+    [[ "$background" == "true" ]] && spawn_args+=(--background)
     spawn_args+=(--name "pipeline-${name}")
 
     local attempt=0

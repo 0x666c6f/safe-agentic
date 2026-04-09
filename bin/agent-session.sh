@@ -36,6 +36,11 @@ launch_codex() {
     exec codex --yolo resume --last
   fi
 
+  if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+    # Background mode: run directly, output to stdout (docker logs).
+    exec codex --yolo "$@"
+  fi
+
   if [ $# -gt 0 ]; then
     # Run the prompt first, then continue into interactive mode so the
     # session stays alive for attach/peek in detached containers.
@@ -107,6 +112,12 @@ launch_claude() {
       fi
     done
     cmd+=("$@")
+  fi
+
+  if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+    # Background mode: run directly with -p, output to stdout (docker logs).
+    # No tmux, no script PTY wrapper needed.
+    exec "${cmd[@]}"
   fi
 
   if $has_prompt; then
