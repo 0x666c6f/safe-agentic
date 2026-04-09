@@ -57,7 +57,6 @@ func NewFooter() *Footer {
 
 var allShortcuts = []shortcut{
 	{"a", "Attach"},
-	{"r", "Resume"},
 	{"s", "Stop"},
 	{"l", "Logs"},
 	{"d", "Describe"},
