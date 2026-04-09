@@ -1,0 +1,271 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"syscall"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+// ShowOverlay displays text in a scrollable overlay pane.
+func ShowOverlay(app *App, name string, title string, content string) {
+	tv := tview.NewTextView().
+		SetText(content).
+		SetScrollable(true).
+		SetDynamicColors(false)
+	tv.SetBorder(true).
+		SetTitle(" " + title + " (Esc to close) ").
+		SetTitleColor(colorTitle).
+		SetBorderColor(colorBorder).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	app.pages.AddAndSwitchToPage(name, tv, true)
+	app.tapp.SetFocus(tv)
+}
+
+// ShowCopyForm shows a modal form for copying files from a container.
+func ShowCopyForm(app *App, containerName string) {
+	form := tview.NewForm().
+		AddInputField("Container path:", "/workspace/", 40, nil, nil).
+		AddInputField("Host path:", "./", 40, nil, nil)
+
+	form.AddButton("Copy", func() {
+		containerPath := form.GetFormItemByLabel("Container path:").(*tview.InputField).GetText()
+		hostPath := form.GetFormItemByLabel("Host path:").(*tview.InputField).GetText()
+
+		app.pages.SwitchToPage("main")
+		app.pages.RemovePage("copy")
+		app.tapp.SetFocus(app.table.Table())
+
+		if containerPath == "" || hostPath == "" {
+			app.footer.ShowStatus("Both paths required", true)
+			return
+		}
+
+		app.footer.ShowStatus("Copying...", false)
+		go func() {
+			out, err := execOrb("docker", "cp", containerName+":"+containerPath, hostPath)
+			app.tapp.QueueUpdateDraw(func() {
+				if err != nil {
+					app.footer.ShowStatus("Copy failed: "+string(out), true)
+				} else {
+					app.footer.ShowStatus("Copied to "+hostPath, false)
+				}
+			})
+		}()
+	})
+
+	form.AddButton("Cancel", func() {
+		app.pages.SwitchToPage("main")
+		app.pages.RemovePage("copy")
+		app.tapp.SetFocus(app.table.Table())
+	})
+
+	form.SetBorder(true).
+		SetTitle(" Copy from " + containerName + " (Esc to close) ").
+		SetTitleColor(colorTitle).
+		SetBorderColor(colorBorder).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	// Center the form
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, 10, 0, true).
+			AddItem(nil, 0, 1, false),
+			50, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	app.pages.AddAndSwitchToPage("copy", modal, true)
+	app.tapp.SetFocus(form)
+}
+
+// ShowSpawnForm shows a modal form for spawning a new agent.
+func ShowSpawnForm(app *App) {
+	agentType := "claude"
+	form := tview.NewForm().
+		AddDropDown("Type:", []string{"claude", "codex"}, 0, func(option string, index int) {
+			agentType = option
+		}).
+		AddInputField("Repo URL:", "", 50, nil, nil).
+		AddInputField("Name (optional):", "", 30, nil, nil).
+		AddCheckbox("SSH:", true, nil).
+		AddCheckbox("Reuse auth:", true, nil).
+		AddCheckbox("Reuse GH auth:", false, nil)
+
+	form.AddButton("Spawn", func() {
+		repoURL := form.GetFormItemByLabel("Repo URL:").(*tview.InputField).GetText()
+		name := form.GetFormItemByLabel("Name (optional):").(*tview.InputField).GetText()
+		ssh := form.GetFormItemByLabel("SSH:").(*tview.Checkbox).IsChecked()
+		reuseAuth := form.GetFormItemByLabel("Reuse auth:").(*tview.Checkbox).IsChecked()
+		reuseGHAuth := form.GetFormItemByLabel("Reuse GH auth:").(*tview.Checkbox).IsChecked()
+
+		app.pages.SwitchToPage("main")
+		app.pages.RemovePage("spawn")
+		app.tapp.SetFocus(app.table.Table())
+
+		// Auto-convert HTTPS GitHub URLs to SSH when SSH is enabled
+		if ssh && strings.HasPrefix(repoURL, "https://github.com/") {
+			path := strings.TrimPrefix(repoURL, "https://github.com/")
+			path = strings.TrimSuffix(path, ".git")
+			repoURL = "git@github.com:" + path + ".git"
+		}
+
+		args := []string{"spawn", agentType}
+		if repoURL != "" {
+			args = append(args, "--repo", repoURL)
+		}
+		if name != "" {
+			args = append(args, "--name", name)
+		}
+		if ssh {
+			args = append(args, "--ssh")
+		}
+		if reuseAuth {
+			args = append(args, "--reuse-auth")
+		}
+		if reuseGHAuth {
+			args = append(args, "--reuse-gh-auth")
+		}
+
+		// Spawn detached: use dry-run to get the docker command, run it with
+		// -d, then return to the TUI. User presses 'r' to connect.
+		app.footer.ShowStatus("Spawning "+agentType+" agent...", false)
+		go func() {
+			spawnArgs := append(args, "--dry-run")
+			spawnCmd := newAgentCmd(spawnArgs...)
+			spawnOut, _ := spawnCmd.CombinedOutput()
+
+			// Extract and run the network create command
+			for _, line := range strings.Split(string(spawnOut), "\n") {
+				if strings.Contains(line, "Would create network:") && strings.Contains(line, "docker network create") {
+					if idx := strings.Index(line, "orb run"); idx >= 0 {
+						exec.Command("bash", "-c", line[idx:]).Run()
+					}
+					break
+				}
+			}
+
+			// Extract the docker run command, switch to detached mode
+			dockerLine := ""
+			for _, line := range strings.Split(string(spawnOut), "\n") {
+				if strings.Contains(line, "Would run:") && strings.Contains(line, "docker run") {
+					if idx := strings.Index(line, "orb run"); idx >= 0 {
+						dockerLine = line[idx:]
+					}
+					break
+				}
+			}
+			if dockerLine == "" {
+				app.tapp.QueueUpdateDraw(func() {
+					app.footer.ShowStatus("Spawn failed: couldn't parse dry-run output", true)
+				})
+				return
+			}
+
+			if agentType == "codex" || agentType == "claude" {
+				dockerLine = strings.Replace(dockerLine, "docker run -it", "docker run -d", 1)
+			} else {
+				dockerLine = strings.Replace(dockerLine, "docker run -it", "docker run -dit", 1)
+			}
+			runCmd := exec.Command("bash", "-c", dockerLine)
+			runOut, runErr := runCmd.CombinedOutput()
+			if runErr != nil {
+				app.tapp.QueueUpdateDraw(func() {
+					app.footer.ShowStatus("Spawn failed: "+strings.TrimSpace(string(runOut)), true)
+				})
+				return
+			}
+
+			// Extract container name
+			containerName := ""
+			for i, p := range strings.Fields(dockerLine) {
+				if p == "--name" {
+					parts := strings.Fields(dockerLine)
+					if i+1 < len(parts) {
+						containerName = parts[i+1]
+					}
+					break
+				}
+			}
+
+			app.poller.ForceRefresh()
+			app.tapp.QueueUpdateDraw(func() {
+				if containerName != "" {
+					app.footer.ShowStatus("Spawned "+containerName+". Press 'r' to connect.", false)
+				} else {
+					app.footer.ShowStatus("Agent spawned. Press 'r' to connect.", false)
+				}
+			})
+		}()
+	})
+
+	form.AddButton("Cancel", func() {
+		app.pages.SwitchToPage("main")
+		app.pages.RemovePage("spawn")
+		app.tapp.SetFocus(app.table.Table())
+	})
+
+	form.SetBorder(true).
+		SetTitle(" Spawn New Agent (Esc to close) ").
+		SetTitleColor(colorTitle).
+		SetBorderColor(colorBorder).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, 20, 0, true).
+			AddItem(nil, 0, 1, false),
+			70, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	app.pages.AddAndSwitchToPage("spawn", modal, true)
+	app.tapp.SetFocus(form)
+}
+
+// newAgentCmd creates an exec.Cmd for the agent CLI.
+func newAgentCmd(args ...string) *exec.Cmd {
+	return exec.Command("agent", args...)
+}
+
+// execAgent replaces the current process with `agent <args>`.
+// Used for spawn which needs a real TTY chain for nested TUI apps (claude/codex).
+func execAgent(args []string) {
+	agentPath, err := exec.LookPath("agent")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent not found: %v\n", err)
+		os.Exit(1)
+	}
+	fullArgs := append([]string{"agent"}, args...)
+	// Replace process — never returns on success
+	if err := syscall.Exec(agentPath, fullArgs, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "exec failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// shellQuoteArgs joins args with proper quoting for shell execution.
+func shellQuoteArgs(args []string) string {
+	var b strings.Builder
+	for i, a := range args {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		// Simple quoting: wrap in single quotes, escape existing single quotes
+		if strings.ContainsAny(a, " \t'\"\\$`!&|;(){}[]<>?*#~") {
+			b.WriteByte('\'')
+			b.WriteString(strings.ReplaceAll(a, "'", "'\\''"))
+			b.WriteByte('\'')
+		} else {
+			b.WriteString(a)
+		}
+	}
+	return b.String()
+}
