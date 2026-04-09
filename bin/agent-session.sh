@@ -35,21 +35,43 @@ launch_codex() {
     exec codex --yolo resume --last
   fi
 
-  exec codex --yolo "$@"
+  if [ $# -gt 0 ]; then
+    # Run the prompt first, then continue into interactive mode so the
+    # session stays alive for attach/peek in detached containers.
+    codex --yolo "$@"
+    exec codex --yolo resume --last
+  fi
+
+  exec codex --yolo
 }
 
 launch_claude() {
   local -a cmd=(claude --dangerously-skip-permissions)
-  local rendered
+  local rendered has_prompt=false
 
   if $resuming; then
     cmd+=(--continue)
   else
+    # Check if args contain a -p prompt flag
+    for arg in "$@"; do
+      if [ "$arg" = "-p" ]; then
+        has_prompt=true
+        break
+      fi
+    done
     cmd+=("$@")
   fi
 
-  rendered=$(quote_cmd "${cmd[@]}")
-  exec script -qfc "$rendered" /dev/null
+  if $has_prompt; then
+    # Run the prompt first, then continue into interactive mode so the
+    # session stays alive for attach/peek in detached containers.
+    rendered=$(quote_cmd "${cmd[@]}")
+    rendered="$rendered; $(quote_cmd claude --dangerously-skip-permissions --continue)"
+    script -qfc "$rendered" /dev/null
+  else
+    rendered=$(quote_cmd "${cmd[@]}")
+    exec script -qfc "$rendered" /dev/null
+  fi
 }
 
 launch_shell() {
