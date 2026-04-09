@@ -233,6 +233,15 @@ if [ -n "$AGENT_TYPE" ] && [ "${#launch_args[@]}" -eq 1 ] && [ "${launch_args[0]
   launch_args=()
 fi
 
+# Short-circuit for --help: run the CLI directly without tmux (needed for CI smoke tests)
+if [ "${#launch_args[@]}" -ge 1 ] && [ "${launch_args[0]}" = "--help" ]; then
+  case "$AGENT_TYPE" in
+    claude) exec claude "${launch_args[@]}" ;;
+    codex)  exec codex "${launch_args[@]}" ;;
+    *)      exec bash -l "${launch_args[@]}" ;;
+  esac
+fi
+
 case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
