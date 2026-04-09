@@ -8,6 +8,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 const defaultResumeCWD = "/workspace"
@@ -251,54 +254,77 @@ func (ac *Actions) StopAgent() {
 // Logs shows the agent's latest session log in an overlay pane.
 // Containers run with -it (TTY), so `docker logs` is raw escape sequences.
 // Instead, we find the latest session JSONL and render it readably.
+// logsState holds mutable state for the live logs overlay.
+type logsState struct {
+	autoRefresh bool
+	tailLines   string // "500", "2000", or "0" (all)
+}
+
 func (ac *Actions) Logs() {
 	agent := ac.selectedOrWarn()
 	if agent == nil {
 		return
 	}
 	name := agent.Name
-	agentType := agent.Type
+	state := &logsState{autoRefresh: agent.Running, tailLines: "500"}
 
-	configDir := "/home/agent/.codex"
-	if agentType == "claude" {
-		configDir = "/home/agent/.claude"
-	}
-	sessionsDir := configDir + "/sessions/"
-
-	var data []byte
-	var err error
-
-	if agent.Running {
-		// Running container: use docker exec
-		data, err = readSessionViaExec(name, sessionsDir)
-	} else {
-		// Stopped container: use docker cp
-		data, err = readSessionViaCp(name, sessionsDir)
-	}
-
-	if err != nil || len(data) == 0 {
-		ac.app.footer.ShowStatus("No session logs found", true)
+	data := ac.fetchDockerLogs(name, state.tailLines)
+	if len(data) == 0 {
+		ac.app.footer.ShowStatus("No logs found", true)
 		return
 	}
 
-	rendered := renderSessionLog(data)
-	tv := ShowOverlayLive(ac.app, "logs", fmt.Sprintf("Session: %s (auto-refresh 3s, Esc to close)", name), rendered)
+	title := ac.logsTitle(name, state)
+	tv := ShowOverlayLive(ac.app, "logs", title, string(data))
 
-	// Auto-refresh logs every 3 seconds while the overlay is open
+	// Keybindings within the logs overlay:
+	//   r — toggle auto-refresh
+	//   5 — last 500 lines
+	//   a — all lines
+	//   2 — last 2000 lines
+	tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyRune {
+			switch event.Rune() {
+			case 'r':
+				state.autoRefresh = !state.autoRefresh
+				ac.app.tapp.QueueUpdateDraw(func() {
+					tv.SetTitle(" " + ac.logsTitle(name, state) + " ")
+				})
+				return nil
+			case '5':
+				state.tailLines = "500"
+				ac.refreshLogsNow(tv, name, state)
+				return nil
+			case 'a':
+				state.tailLines = "0"
+				ac.refreshLogsNow(tv, name, state)
+				return nil
+			case '2':
+				state.tailLines = "2000"
+				ac.refreshLogsNow(tv, name, state)
+				return nil
+			}
+		}
+		return event
+	})
+
+	// Auto-refresh goroutine
 	if agent.Running {
 		go func() {
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
-				if frontPage, _ := ac.app.pages.GetFrontPage(); frontPage != "logs" {
+				if fp, _ := ac.app.pages.GetFrontPage(); fp != "logs" {
 					return
 				}
-				newData, _ := readSessionViaExec(name, sessionsDir)
+				if !state.autoRefresh {
+					continue
+				}
+				newData := ac.fetchDockerLogs(name, state.tailLines)
 				if len(newData) > 0 {
-					newRendered := renderSessionLog(newData)
 					ac.app.tapp.QueueUpdateDraw(func() {
 						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
-							tv.SetText(newRendered)
+							tv.SetText(string(newData))
 							tv.ScrollToEnd()
 						}
 					})
@@ -308,8 +334,43 @@ func (ac *Actions) Logs() {
 	}
 }
 
+func (ac *Actions) logsTitle(name string, state *logsState) string {
+	refresh := "off"
+	if state.autoRefresh {
+		refresh = "3s"
+	}
+	lines := state.tailLines
+	if lines == "0" {
+		lines = "all"
+	}
+	return fmt.Sprintf("Logs: %s | [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, refresh, lines)
+}
+
+func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
+	args := []string{"docker", "logs"}
+	if tailLines != "0" {
+		args = append(args, "--tail", tailLines)
+	}
+	args = append(args, name)
+	data, _ := execOrbTimeout(60*time.Second, args...)
+	return data
+}
+
+func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsState) {
+	ac.app.footer.ShowStatus("Loading...", false)
+	go func() {
+		data := ac.fetchDockerLogs(name, state.tailLines)
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if len(data) > 0 {
+				tv.SetText(string(data))
+				tv.SetTitle(" " + ac.logsTitle(name, state) + " ")
+			}
+			ac.app.footer.Reset()
+		})
+	}()
+}
+
 func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
-	// Find the most recently modified session JSONL (by mtime, not name)
 	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
 	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c",
 		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", configDir))
@@ -320,8 +381,7 @@ func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	// Read the last 2000 lines — session files can be multi-MB, scrollable in the overlay
-	return execOrbLong("docker", "exec", name, "tail", "-2000", path)
+	return execOrbLong("docker", "exec", name, "cat", path)
 }
 
 func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
@@ -348,8 +408,7 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	// Read the last 2000 lines
-	return execOrbLong("bash", "-c", fmt.Sprintf("tail -2000 '%s'", path))
+	return execOrbLong("cat", path)
 }
 
 // Checkpoint creates a named git stash checkpoint of the agent's current working tree.
