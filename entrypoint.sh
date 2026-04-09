@@ -32,13 +32,14 @@ ensure_codex_config() {
   local codex_config="$codex_dir/config.toml"
 
   mkdir -p "$codex_dir" 2>/dev/null || return 0
+  [ -w "$codex_dir" ] || return 0
   [ -f "$codex_config" ] && return 0
   if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
-    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || return 0
+    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
 
-  cat >"$codex_config" 2>/dev/null <<'EOF' || return 0
+  cat >"$codex_config" 2>/dev/null <<'EOF' || true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 EOF
@@ -51,22 +52,23 @@ ensure_claude_config() {
   local legacy_backup=""
 
   mkdir -p "$claude_dir" 2>/dev/null || return 0
+  [ -w "$claude_dir" ] || return 0
   if [ ! -f "$claude_legacy" ]; then
     legacy_backup=$(find "$claude_dir/backups" -maxdepth 1 -name '.claude.json.backup.*' -type f 2>/dev/null | sort | tail -1 || true)
     if [ -n "$legacy_backup" ]; then
-      cat "$legacy_backup" > "$claude_legacy" 2>/dev/null || return 0
+      cat "$legacy_backup" > "$claude_legacy" 2>/dev/null || true
     else
-      printf '{\n  "firstStartTime": "%s"\n}\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$claude_legacy" 2>/dev/null || return 0
+      printf '{\n  "firstStartTime": "%s"\n}\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$claude_legacy" 2>/dev/null || true
     fi
   fi
 
   [ -f "$claude_config" ] && return 0
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
-    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || return 0
+    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
 
-  cat >"$claude_config" 2>/dev/null <<'EOF' || return 0
+  cat >"$claude_config" 2>/dev/null <<'EOF' || true
 {
   "permissions": {
     "defaultMode": "bypassPermissions"

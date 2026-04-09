@@ -33,9 +33,14 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Quick Start: quickstart.md
-    - Usage Guide: usage.md
+  - Quick Start: quickstart.md
+  - Guide:
+    - Spawning Agents: guide/spawning.md
+    - Managing Agents: guide/managing.md
+    - Developer Workflow: guide/workflow.md
+    - Fleet & Orchestration: guide/fleet.md
+    - Analytics: guide/analytics.md
+    - Configuration: guide/configuration.md
   - Architecture: architecture.md
   - Security: security.md
 
