@@ -246,14 +246,22 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
-    # If a prompt was saved by agent-session.sh, send it as keystrokes
-    # to the interactive Claude session after a short delay for init.
-    if [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+    # Auto-accept trust prompt and/or send pending prompt via tmux keystrokes.
+    if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       (
-        sleep 5
-        prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
-        rm -f "$SESSION_STATE_DIR/pending-prompt"
-        tmux send-keys -t "$TMUX_SESSION_NAME" "$prompt" Enter
+        if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ]; then
+          # Wait for Claude to show the trust prompt, then press Enter to accept
+          sleep 4
+          tmux send-keys -t "$TMUX_SESSION_NAME" Enter
+          sleep 3
+        fi
+        if [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+          # Wait for Claude to be ready, then type the prompt
+          [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || sleep 5
+          prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
+          rm -f "$SESSION_STATE_DIR/pending-prompt"
+          tmux send-keys -t "$TMUX_SESSION_NAME" "$prompt" Enter
+        fi
       ) &
     fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
