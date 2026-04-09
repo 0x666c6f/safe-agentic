@@ -229,6 +229,9 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		case 'm':
 			a.actions.McpLogin()
 			return nil
+		case 'g':
+			a.actions.CreatePR()
+			return nil
 		case '/':
 			a.footer.ShowFilter(func(text string) {
 				a.table.SetFilter(text)

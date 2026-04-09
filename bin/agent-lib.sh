@@ -763,6 +763,21 @@ build_container_runtime() {
   append_cache_mounts
 }
 
+# Audit logging — append-only JSONL
+AUDIT_LOG_FILE="${SAFE_AGENTIC_AUDIT_LOG:-${DEFAULTS_DIR}/audit.jsonl}"
+
+audit_log() {
+  local action="$1"
+  local container="${2:-}"
+  local details="${3:-}"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$AUDIT_LOG_FILE")" 2>/dev/null || return 0
+  printf '{"timestamp":"%s","action":"%s","container":"%s","details":"%s"}\n' \
+    "$timestamp" "$action" "$container" "$details" \
+    >>"$AUDIT_LOG_FILE" 2>/dev/null || true
+}
+
 prepare_network() {
   local managed_network="$1"
   local container_name="$2"

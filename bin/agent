@@ -104,6 +104,20 @@ ${GREEN}Manage:${NC}
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
+${GREEN}Observe:${NC}
+  agent review <name>|--latest [--base BRANCH]
+  agent cost <name>|--latest
+
+${GREEN}Analytics:${NC}
+  agent audit [--lines N]
+
+${GREEN}Orchestrate:${NC}
+  agent fleet <manifest.yaml> [--dry-run]
+  agent pipeline <pipeline.yaml> [--dry-run]
+
+${GREEN}Workflow:${NC}
+  agent pr <name>|--latest [--title TITLE] [--base BRANCH]
+
 ${GREEN}AWS:${NC}
   agent aws-refresh <name>|--latest [profile]
 
@@ -112,12 +126,14 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|review|cost|audit|fleet|pipeline|pr|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
   agent spawn codex --reuse-auth --identity 'You <you@example.com>' --repo https://github.com/myorg/api.git
   agent shell --dry-run --repo https://github.com/myorg/myrepo.git
+  agent fleet agents.yaml --dry-run
+  agent pipeline my-workflow.yaml --dry-run
 EOF
 }
 
@@ -308,6 +324,142 @@ Examples:
   agent todo check my-task 1
   agent todo uncheck --latest 2
   agent todo list --latest
+EOF
+}
+
+print_help_review() {
+  cat <<EOF
+Usage: agent review <name>|--latest [--base BRANCH]
+
+Run an AI code review (codex) or git diff of changes in a running agent's
+workspace.  If codex is available in the container it is used; otherwise
+falls back to plain git diff.
+
+Options:
+  --base BRANCH   Compare against BRANCH (codex review --base / git diff)
+                  Without --base, reviews all uncommitted changes.
+  --latest        Use the most recently started container.
+  -h, --help      Show this help.
+
+Examples:
+  agent review my-task
+  agent review --latest --base main
+  agent review my-task --base origin/main
+EOF
+}
+
+print_help_audit() {
+  cat <<EOF
+Usage: agent audit [--lines N]
+
+Show the last N entries (default 50) from the audit log.
+Log location: ${AUDIT_LOG_FILE:-${DEFAULTS_DIR}/audit.jsonl}
+EOF
+}
+
+print_help_cost() {
+  cat <<EOF
+Usage: agent cost <name>|--latest
+
+Estimate API spend for a session by reading JSONL session files from
+the container and summing token usage fields.
+
+Outputs:
+  - total input/output tokens
+  - per-model breakdown
+  - estimated cost in USD (approximate rates)
+
+Examples:
+  agent cost api-refactor
+  agent cost --latest
+EOF
+}
+
+print_help_fleet() {
+  cat <<EOF
+Usage: agent fleet <manifest.yaml> [--dry-run]
+
+Spawn multiple agents from a YAML manifest file in parallel.
+
+Manifest format:
+  agents:
+    - name: api-worker
+      type: claude
+      repo: git@github.com:org/api.git
+      ssh: true
+      reuse_auth: true
+    - name: frontend
+      type: codex
+      repo: https://github.com/org/frontend.git
+
+Supported fields per agent entry:
+  name, type, repo, ssh, reuse_auth, reuse_gh_auth, docker,
+  prompt, aws, network, memory, cpus
+
+Options:
+  --dry-run   Print spawn commands without executing them
+  -h, --help
+EOF
+}
+
+print_help_pipeline() {
+  cat <<EOF
+Usage: agent pipeline <pipeline.yaml> [--dry-run]
+
+Execute a multi-step agent workflow defined in a YAML file.
+
+Pipeline YAML format:
+  name: my-pipeline
+  steps:
+    - name: step-name
+      type: claude|codex
+      repo: git@github.com:org/repo.git
+      prompt: "Task description"
+      ssh: true|false
+      reuse_auth: true|false
+      on_failure: other-step-name
+      retry: N
+      depends_on: step-name
+
+Options:
+  --dry-run   Print execution plan without running any agents
+
+Step fields:
+  name        Required. Unique step identifier.
+  type        Agent type: claude (default) or codex.
+  repo        Repository URL to clone.
+  prompt      Initial task prompt for the agent.
+  ssh         Enable SSH agent forwarding (default: false).
+  reuse_auth  Reuse shared auth volume (default: false).
+  on_failure  Step name to run if this step fails.
+  retry       Number of retry attempts on failure (default: 0).
+  depends_on  Step name that must have completed successfully.
+
+Examples:
+  agent pipeline workflow.yaml
+  agent pipeline workflow.yaml --dry-run
+EOF
+}
+
+print_help_pr() {
+  cat <<EOF
+Usage: agent pr <name>|--latest [--title TITLE] [--base BRANCH]
+
+Create a GitHub Pull Request from the agent's current branch.
+
+Requires the container to have been spawned with --ssh (needed for push).
+Checks for incomplete todos before proceeding.
+
+Options:
+  --latest         Target the most recently started container
+  --title TITLE    PR title (default: branch name)
+  --base BRANCH    Base branch for the PR (default: main)
+  -h, --help
+
+Examples:
+  agent pr my-agent
+  agent pr --latest --title "Fix auth bug"
+  agent pr --latest --base dev
 EOF
 }
 
@@ -643,8 +795,10 @@ cmd_spawn() {
   fi
   if [ "$agent_type" = "codex" ] || [ "$agent_type" = "claude" ]; then
     run_container_detached
+    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     auto_attach_tmux_session "$container_name"
   else
+    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     run_container "$managed_network" "$network_name"
   fi
 }
@@ -937,6 +1091,7 @@ cmd_attach() {
 
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
+  audit_log "attach" "$name" ""
 
   # If the container is stopped, restart it; if running, exec into it.
   local state
@@ -1103,6 +1258,7 @@ cmd_stop() {
   vm_exec docker rm "$name" >/dev/null 2>&1 || true
   remove_docker_runtime_for_container "$name"
   remove_managed_network "$(network_name_for_container "$name")"
+  audit_log "stop" "$name" ""
   ok "$name stopped and removed."
 }
 
@@ -1380,6 +1536,24 @@ cmd_help() {
       ;;
     diagnose)
       print_help_diagnose
+      ;;
+    review)
+      print_help_review
+      ;;
+    audit)
+      print_help_audit
+      ;;
+    cost)
+      print_help_cost
+      ;;
+    fleet)
+      print_help_fleet
+      ;;
+    pipeline)
+      print_help_pipeline
+      ;;
+    pr)
+      print_help_pr
       ;;
     *)
       die "Unknown help topic: $topic. Run 'agent help' for available topics."
@@ -1952,6 +2126,812 @@ PYEOF
   esac
 }
 
+cmd_review() {
+  local topic="review"
+  local name=""
+  local latest=false
+  local base=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --base)
+        require_option_value "$topic" "--base" "${2:-}"
+        base="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_review
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Detect workspace directory inside container
+  local workspace_cd="cd /workspace/* 2>/dev/null || cd /workspace"
+
+  # Check if codex is available in the container
+  if vm_exec docker exec "$name" command -v codex >/dev/null 2>&1; then
+    if [ -n "$base" ]; then
+      info "Running codex review --base $base in $name..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --base $base"
+    else
+      info "Running codex review --uncommitted in $name..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --uncommitted"
+    fi
+  else
+    if [ -n "$base" ]; then
+      info "Running git diff against $base in $name (codex not available)..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff $base"
+    else
+      info "Running git diff in $name (codex not available)..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff"
+    fi
+  fi
+}
+
+cmd_audit() {
+  local topic="audit"
+  local lines=50
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lines)
+        require_option_value "$topic" "--lines" "${2:-}"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_audit
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  local log_file="${AUDIT_LOG_FILE:-${DEFAULTS_DIR}/audit.jsonl}"
+  if [ ! -f "$log_file" ]; then
+    echo "No audit log yet."
+    return 0
+  fi
+
+  tail -n "$lines" "$log_file" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        e = json.loads(line)
+        details = (' ' + e.get('details','')) if e.get('details') else ''
+        print('{ts}  {action:<10}  {container}{details}'.format(
+            ts=e.get('timestamp',''),
+            action=e.get('action',''),
+            container=e.get('container',''),
+            details=details,
+        ))
+    except Exception:
+        print(line)
+"
+}
+
+cmd_cost() {
+  local topic="cost"
+  local name=""
+  local latest=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_cost
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..."
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+  fi
+
+  # Detect agent type to find the right config dir
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    claude) config_dir="/home/agent/.claude" ;;
+    *) config_dir="/home/agent/.claude" ;;  # default to claude
+  esac
+
+  info "Reading session data from $name ($agent_type)..."
+
+  # Collect all JSONL lines from session files, then pipe to python3 for cost analysis
+  local jsonl_data
+  jsonl_data=$(vm_exec docker exec "$name" bash -c "
+    find '${config_dir}/sessions' -name '*.jsonl' 2>/dev/null | while read -r f; do cat \"\$f\"; done
+    [ -f '${config_dir}/history.jsonl' ] && cat '${config_dir}/history.jsonl' || true
+  " 2>/dev/null || true)
+
+  if [ -z "$jsonl_data" ]; then
+    warn "No session data found in $name."
+    return 0
+  fi
+
+  # Write python analyser to a temp file so we can pipe JSONL into it
+  local py_script
+  py_script=$(mktemp /tmp/agent-cost-XXXXXX.py)
+  trap 'rm -f "$py_script"' RETURN
+
+  cat >"$py_script" <<'PYEOF'
+import sys, json, re
+
+# Pricing per 1M tokens (input, output)
+PRICES = {
+    "claude-opus-4-6":    (15.0, 75.0),
+    "claude-sonnet-4-6":  (3.0,  15.0),
+    "claude-haiku-4-5":   (0.80,  4.0),
+}
+DEFAULT_PRICE = (3.0, 15.0)
+
+totals_by_model = {}
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    # Usage may be top-level or nested under payload
+    usage = obj.get("usage") or (obj.get("payload") or {}).get("usage")
+    if not usage or not isinstance(usage, dict):
+        continue
+
+    model = (
+        obj.get("model")
+        or (obj.get("payload") or {}).get("model")
+        or "unknown"
+    )
+    # Normalise model name: strip date suffixes like -20250101
+    model_key = re.sub(r"-\d{8}$", "", model)
+
+    inp = int(usage.get("input_tokens", 0))
+    out = int(usage.get("output_tokens", 0))
+
+    if model_key not in totals_by_model:
+        totals_by_model[model_key] = [0, 0]
+    totals_by_model[model_key][0] += inp
+    totals_by_model[model_key][1] += out
+
+if not totals_by_model:
+    print("No token usage found in session data.")
+    sys.exit(0)
+
+grand_in = grand_out = grand_cost = 0.0
+
+print("")
+print("  Model                      Input         Output    Est. Cost")
+print("  " + "-" * 65)
+
+for model_key in sorted(totals_by_model):
+    inp, out = totals_by_model[model_key]
+    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
+    cost = (inp / 1_000_000) * price_in + (out / 1_000_000) * price_out
+    grand_in   += inp
+    grand_out  += out
+    grand_cost += cost
+    print(f"  {model_key:<26} {inp:>12,}  {out:>12,}    ${cost:>8.4f}")
+
+print("  " + "-" * 65)
+print(f"  {'TOTAL':<26} {int(grand_in):>12,}  {int(grand_out):>12,}    ${grand_cost:>8.4f}")
+print("")
+print(f"  Note: estimates use list pricing; cache tokens billed differently.")
+print("")
+PYEOF
+
+  echo "$jsonl_data" | python3 "$py_script"
+}
+
+cmd_fleet() {
+  local topic="fleet"
+  local manifest=""
+  local dry_run=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      -*)
+        die_with_help "$topic" "Unknown flag '$1'."
+        ;;
+      *)
+        [ -z "$manifest" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        manifest="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$manifest" ] || die_with_help "$topic" "Manifest file required."
+  [ -f "$manifest" ] || die "Manifest file not found: $manifest"
+
+  local agent_bin
+  agent_bin="$(realpath "$0")"
+
+  # Parse YAML manifest using python3 (no PyYAML dependency).
+  # Outputs one spawn command per line, shell-quoted, prefixed with "CMD:".
+  local parse_output
+  parse_output=$(python3 - "$manifest" "$agent_bin" <<'PYEOF'
+import sys
+import shlex
+
+manifest_path = sys.argv[1]
+agent_bin     = sys.argv[2]
+
+agents = []
+current = None
+
+with open(manifest_path) as f:
+    for raw_line in f:
+        line = raw_line.rstrip('\n')
+        stripped = line.lstrip()
+
+        # Start of a new agent entry
+        if stripped.startswith('- name:'):
+            current = {'name': stripped[len('- name:'):].strip()}
+            agents.append(current)
+            continue
+
+        # Key-value field inside an agent entry
+        if current is not None and ':' in stripped and not stripped.startswith('-') and not stripped.startswith('#'):
+            key, _, val = stripped.partition(':')
+            key = key.strip()
+            val = val.strip()
+            if key and val:
+                # Normalise booleans
+                if val.lower() == 'true':
+                    val = True
+                elif val.lower() == 'false':
+                    val = False
+                current[key] = val
+
+for agent in agents:
+    agent_type = agent.get('type', '')
+    if not agent_type:
+        sys.stderr.write(f"[fleet] skipping entry without type: {agent}\n")
+        continue
+
+    cmd = [agent_bin, 'spawn', agent_type]
+
+    name = agent.get('name', '')
+    if name:
+        cmd += ['--name', name]
+
+    repo = agent.get('repo', '')
+    if repo:
+        cmd += ['--repo', repo]
+
+    if agent.get('ssh') is True:
+        cmd.append('--ssh')
+
+    if agent.get('reuse_auth') is True:
+        cmd.append('--reuse-auth')
+
+    if agent.get('reuse_gh_auth') is True:
+        cmd.append('--reuse-gh-auth')
+
+    if agent.get('docker') is True:
+        cmd.append('--docker')
+
+    prompt = agent.get('prompt', '')
+    if prompt:
+        cmd += ['--prompt', str(prompt)]
+
+    aws = agent.get('aws', '')
+    if aws:
+        cmd += ['--aws', str(aws)]
+
+    network = agent.get('network', '')
+    if network:
+        cmd += ['--network', str(network)]
+
+    memory = agent.get('memory', '')
+    if memory:
+        cmd += ['--memory', str(memory)]
+
+    cpus = agent.get('cpus', '')
+    if cpus:
+        cmd += ['--cpus', str(cpus)]
+
+    print('CMD:' + shlex.join(cmd))
+PYEOF
+  ) || die "Failed to parse manifest: $manifest"
+
+  local -a spawn_cmds=()
+  while IFS= read -r line; do
+    [[ "$line" == CMD:* ]] || continue
+    spawn_cmds+=("${line#CMD:}")
+  done <<< "$parse_output"
+
+  [ ${#spawn_cmds[@]} -gt 0 ] || die "No valid agent entries found in manifest: $manifest"
+
+  if $dry_run; then
+    info "Dry run — would spawn ${#spawn_cmds[@]} agent(s):"
+    local cmd_str
+    for cmd_str in "${spawn_cmds[@]}"; do
+      info "  $cmd_str"
+    done
+    return 0
+  fi
+
+  info "Spawning ${#spawn_cmds[@]} agent(s) from $manifest..."
+
+  local -a pids=()
+  local cmd_str
+  for cmd_str in "${spawn_cmds[@]}"; do
+    # Evaluate the pre-quoted command string in a subshell
+    eval "$cmd_str" &
+    pids+=($!)
+  done
+
+  local all_ok=true
+  local pid
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      all_ok=false
+    fi
+  done
+
+  $all_ok || die "One or more agents failed to spawn."
+  ok "All agents from fleet manifest spawned."
+}
+
+# ---------------------------------------------------------------------------
+# Parse a pipeline YAML file with python3 (no PyYAML required).
+# Outputs one line per step in the format:
+#   name=<val> type=<val> repo=<val> prompt=<val> ssh=<val> reuse_auth=<val>
+#   on_failure=<val> retry=<val> depends_on=<val>
+# Values are base64-encoded to survive shell word splitting.
+# ---------------------------------------------------------------------------
+parse_pipeline_yaml() {
+  local yaml_file="$1"
+
+  python3 - "$yaml_file" <<'PYEOF'
+import sys, base64, re
+
+path = sys.argv[1]
+with open(path) as f:
+    lines = f.readlines()
+
+pipeline_name = ""
+steps = []
+current_step = None
+in_steps = False
+
+for raw in lines:
+    line = raw.rstrip('\n')
+    stripped = line.lstrip()
+    if not stripped or stripped.startswith('#'):
+        continue
+
+    indent = len(line) - len(stripped)
+
+    # Top-level key: value
+    if indent == 0:
+        m = re.match(r'^(\w[\w-]*):\s*(.*)', stripped)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if key == 'name' and not in_steps:
+                pipeline_name = val
+            elif key == 'steps':
+                in_steps = True
+                if current_step is not None:
+                    steps.append(current_step)
+                    current_step = None
+        continue
+
+    if not in_steps:
+        continue
+
+    # New step entry: "  - name: value"
+    m = re.match(r'^-\s+(\w[\w_-]*):\s*(.*)', stripped)
+    if m:
+        if current_step is not None:
+            steps.append(current_step)
+        key, val = m.group(1), m.group(2).strip()
+        current_step = {key: val}
+        continue
+
+    # Continuation field inside a step: "    key: value"
+    m = re.match(r'^(\w[\w_-]*):\s*(.*)', stripped)
+    if m and current_step is not None:
+        key, val = m.group(1), m.group(2).strip()
+        current_step[key] = val
+        continue
+
+if current_step is not None:
+    steps.append(current_step)
+
+def enc(v):
+    return base64.b64encode(v.encode()).decode()
+
+print("pipeline_name=" + enc(pipeline_name))
+for step in steps:
+    parts = []
+    for field in ('name', 'type', 'repo', 'prompt', 'ssh', 'reuse_auth',
+                  'on_failure', 'retry', 'depends_on'):
+        val = step.get(field, '')
+        parts.append(field + '=' + enc(val))
+    print(' '.join(parts))
+PYEOF
+}
+
+cmd_pipeline() {
+  local topic="pipeline"
+  local yaml_file=""
+  local dry_run=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        print_help_pipeline
+        return 0
+        ;;
+      -*)
+        die_with_help "$topic" "Unknown flag '$1'."
+        ;;
+      *)
+        if [ -z "$yaml_file" ]; then
+          yaml_file="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$yaml_file" ] || die_with_help "$topic" "Pipeline YAML file required."
+  [ -f "$yaml_file" ] || die "Pipeline file not found: $yaml_file"
+
+  # Parse YAML
+  local parsed_output
+  parsed_output=$(parse_pipeline_yaml "$yaml_file") || die "Failed to parse pipeline YAML: $yaml_file"
+
+  # Extract pipeline name (first line)
+  local pipeline_name_b64 pipeline_name
+  pipeline_name_b64=$(echo "$parsed_output" | head -n1 | sed 's/^pipeline_name=//')
+  pipeline_name=$(echo "$pipeline_name_b64" | base64 -d 2>/dev/null || echo "")
+
+  # Extract step lines (remaining lines)
+  local step_lines
+  step_lines=$(echo "$parsed_output" | tail -n +2)
+
+  if [ -z "$step_lines" ]; then
+    die "Pipeline '$yaml_file' contains no steps."
+  fi
+
+  # Count steps
+  local step_count
+  step_count=$(echo "$step_lines" | grep -c .)
+
+  info "Pipeline: ${pipeline_name:-$(basename "$yaml_file")}"
+  info "Steps: $step_count"
+
+  if $dry_run; then
+    info "Dry run — execution plan:"
+    local i=0
+    while IFS= read -r step_line; do
+      [ -z "$step_line" ] && continue
+      i=$((i + 1))
+
+      local name type repo prompt ssh reuse_auth on_failure retry depends_on
+      name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "claude")
+      repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      prompt=$(     echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      ssh=$(        echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      reuse_auth=$( echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
+      depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+      [ -z "$type" ] && type="claude"
+      [ -z "$retry" ] && retry="0"
+
+      local flags=""
+      [ -n "$repo" ]       && flags="$flags --repo $repo"
+      [ -n "$prompt" ]     && flags="$flags --prompt '$prompt'"
+      [[ "$ssh" == "true" ]] && flags="$flags --ssh"
+      [[ "$reuse_auth" == "true" ]] && flags="$flags --reuse-auth"
+
+      echo "  Step $i: $name"
+      echo "    type:       $type"
+      [ -n "$repo" ]        && echo "    repo:       $repo"
+      [ -n "$prompt" ]      && echo "    prompt:     $prompt"
+      [ -n "$depends_on" ]  && echo "    depends_on: $depends_on"
+      [ -n "$on_failure" ]  && echo "    on_failure: $on_failure"
+      [ "$retry" != "0" ]   && echo "    retry:      $retry"
+      echo "    would run:  agent spawn $type$flags"
+    done <<< "$step_lines"
+    return 0
+  fi
+
+  # Execute pipeline
+  local -a completed_steps=()
+  local -a failed_steps=()
+  # Track which on_failure steps were triggered so we don't double-run them
+  local -a triggered_steps=()
+
+  # Build associative arrays from parsed lines for lookup
+  declare -A step_data
+  local idx=0
+  while IFS= read -r step_line; do
+    [ -z "$step_line" ] && continue
+    local sname
+    sname=$(echo "$step_line" | grep -o 'name=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    [ -n "$sname" ] && step_data["$sname"]="$step_line"
+    idx=$((idx + 1))
+  done <<< "$step_lines"
+
+  pipeline_run_step() {
+    local step_line="$1"
+    [ -z "$step_line" ] && return 1
+
+    local name type repo prompt ssh reuse_auth on_failure retry depends_on
+    name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    prompt=$(     echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    ssh=$(        echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    reuse_auth=$( echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
+    depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+    [ -z "$type" ]  && type="claude"
+    [ -z "$retry" ] && retry="0"
+
+    # Check depends_on
+    if [ -n "$depends_on" ]; then
+      local dep_satisfied=false
+      local c
+      for c in "${completed_steps[@]:-}"; do
+        [ "$c" = "$depends_on" ] && dep_satisfied=true && break
+      done
+      if ! $dep_satisfied; then
+        warn "Step '$name': skipping — dependency '$depends_on' not completed."
+        return 1
+      fi
+    fi
+
+    info "Step '$name': running (type=$type)"
+
+    local -a spawn_args=("$type")
+    [ -n "$repo" ]   && spawn_args+=(--repo "$repo")
+    [ -n "$prompt" ] && spawn_args+=(--prompt "$prompt")
+    [[ "$ssh" == "true" ]] && spawn_args+=(--ssh)
+    [[ "$reuse_auth" == "true" ]] && spawn_args+=(--reuse-auth)
+    spawn_args+=(--name "pipeline-${name}")
+
+    local attempt=0
+    local max_attempts=$(( retry + 1 ))
+    local step_ok=false
+
+    while [ "$attempt" -lt "$max_attempts" ]; do
+      attempt=$(( attempt + 1 ))
+      [ "$attempt" -gt 1 ] && info "Step '$name': retry $((attempt - 1))/$retry..."
+
+      if cmd_spawn "${spawn_args[@]}"; then
+        step_ok=true
+        break
+      else
+        if [ "$attempt" -lt "$max_attempts" ]; then
+          info "Step '$name': failed, waiting 5s before retry..."
+          sleep 5
+        fi
+      fi
+    done
+
+    if $step_ok; then
+      completed_steps+=("$name")
+      ok "Step '$name': completed."
+      return 0
+    else
+      failed_steps+=("$name")
+      err "Step '$name': failed after $max_attempts attempt(s)."
+
+      if [ -n "$on_failure" ]; then
+        local already_triggered=false
+        local t
+        for t in "${triggered_steps[@]:-}"; do
+          [ "$t" = "$on_failure" ] && already_triggered=true && break
+        done
+        if ! $already_triggered && [ -n "${step_data[$on_failure]:-}" ]; then
+          triggered_steps+=("$on_failure")
+          info "Step '$name': triggering on_failure step '$on_failure'..."
+          pipeline_run_step "${step_data[$on_failure]}" || true
+        fi
+      fi
+      return 1
+    fi
+  }
+
+  # Run steps in order
+  local pipeline_ok=true
+  while IFS= read -r step_line; do
+    [ -z "$step_line" ] && continue
+
+    local sname
+    sname=$(echo "$step_line" | grep -o 'name=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+    # Skip steps that were already triggered as on_failure handlers
+    local was_triggered=false
+    local t
+    for t in "${triggered_steps[@]:-}"; do
+      [ "$t" = "$sname" ] && was_triggered=true && break
+    done
+    $was_triggered && continue
+
+    pipeline_run_step "$step_line" || pipeline_ok=false
+  done <<< "$step_lines"
+
+  local completed_count=${#completed_steps[@]}
+  local failed_count=${#failed_steps[@]}
+
+  echo ""
+  info "Pipeline complete: $completed_count step(s) succeeded, $failed_count step(s) failed."
+  $pipeline_ok && ok "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished successfully."
+  $pipeline_ok || die "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished with failures."
+}
+
+cmd_pr() {
+  local topic="pr"
+  local name=""
+  local latest=false
+  local title=""
+  local base="main"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --title)
+        require_option_value "$topic" "$1" "${2:-}"
+        title="$2"
+        shift 2
+        ;;
+      --base)
+        require_option_value "$topic" "$1" "${2:-}"
+        base="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_pr
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Require SSH label for push access
+  local ssh_label
+  ssh_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.ssh"}}' "$name" 2>/dev/null || echo "")
+  [ "$(echo "$ssh_label" | tr -d '[:space:]')" = "yes" ] || die "Container $name was not spawned with --ssh. Push requires SSH access."
+
+  # Check for incomplete todos
+  local todos_check
+  todos_check=$(vm_exec docker exec "$name" bash -c '
+    f=/workspace/.safe-agentic/todos.json
+    if [ -f "$f" ]; then
+      python3 -c "
+import json, sys
+with open(\"$f\") as fh:
+    todos = json.load(fh)
+incomplete = [t for t in todos if not t.get(\"done\")]
+if incomplete:
+    print(\"incomplete\")
+    sys.exit(1)
+" 2>/dev/null
+    fi
+  ' 2>/dev/null || echo "incomplete")
+  if [ "$(echo "$todos_check" | tr -d '[:space:]')" = "incomplete" ]; then
+    die "Container $name has incomplete todos. Complete them with 'agent todo check' before creating a PR."
+  fi
+
+  # Get current branch
+  local branch
+  branch=$(vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
+  branch=$(echo "$branch" | tr -d '[:space:]')
+  [ -n "$branch" ] || die "Could not determine current branch in $name."
+  [ "$branch" != "main" ] && [ "$branch" != "master" ] || die "Container $name is on branch '$branch'. Cannot create a PR from main/master."
+
+  # Default title = branch name
+  [ -n "$title" ] || title="$branch"
+
+  info "Creating PR from $branch → $base in $name..."
+
+  # Stage and commit any uncommitted changes
+  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m 'agent work: $title'"
+
+  # Push branch
+  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git push -u origin $branch" || die "Failed to push branch '$branch' in $name."
+
+  # Create PR
+  local pr_url
+  pr_url=$(vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; gh pr create --title '$title' --body 'Created by safe-agentic agent: $name' --base '$base'" 2>/dev/null || echo "")
+  [ -n "$pr_url" ] || die "Failed to create PR from $name. Ensure gh is authenticated and the repo has a remote."
+
+  ok "PR created: $pr_url"
+}
+
 cmd_aws_refresh() {
   local topic="aws-refresh"
   local name=""
@@ -2043,6 +3023,12 @@ case "$cmd" in
   diff)       cmd_diff "$@" ;;
   checkpoint) cmd_checkpoint "$@" ;;
   todo)        cmd_todo "$@" ;;
+  review)     cmd_review "$@" ;;
+  audit)       cmd_audit "$@" ;;
+  cost)       cmd_cost "$@" ;;
+  fleet)      cmd_fleet "$@" ;;
+  pipeline)   cmd_pipeline "$@" ;;
+  pr)         cmd_pr "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"

@@ -69,6 +69,7 @@ var allShortcuts = []shortcut{
 	{"t", "Todos"},
 	{"x", "Checkpoint"},
 	{"c", "Copy"},
+	{"g", "PR"},
 	{"m", "MCP Login"},
 	{"/", "Filter"},
 	{":", "Command"},

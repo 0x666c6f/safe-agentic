@@ -681,3 +681,41 @@ func extractText(raw json.RawMessage) string {
 
 	return ""
 }
+
+// CreatePR creates a GitHub Pull Request from the agent's current branch.
+// Requires the container to have been spawned with --ssh.
+func (ac *Actions) CreatePR() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	name := agent.Name
+
+	// Check SSH label first (needed for push)
+	sshLabel, err := execOrb("docker", "inspect", "--format",
+		`{{index .Config.Labels "safe-agentic.ssh"}}`, name)
+	if err != nil || strings.TrimSpace(string(sshLabel)) != "yes" {
+		ac.app.footer.ShowStatus(fmt.Sprintf("%s was not spawned with --ssh; push requires SSH", name), true)
+		return
+	}
+
+	ac.app.footer.ShowConfirm(fmt.Sprintf("Create PR from %s?", name), func(yes bool) {
+		if !yes {
+			return
+		}
+		ac.app.footer.ShowStatus(fmt.Sprintf("Creating PR for %s...", name), false)
+		go func() {
+			cmd := exec.Command("agent", "pr", name)
+			out, err := cmd.CombinedOutput()
+			ac.app.poller.ForceRefresh()
+			ac.app.tapp.QueueUpdateDraw(func() {
+				if err != nil {
+					ac.app.footer.ShowStatus(fmt.Sprintf("PR failed: %s", strings.TrimSpace(string(out))), true)
+				} else {
+					result := strings.TrimSpace(string(out))
+					ac.app.footer.ShowStatus(result, false)
+				}
+			})
+		}()
+	})
+}
