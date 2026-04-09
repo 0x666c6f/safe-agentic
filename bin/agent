@@ -94,10 +94,14 @@ ${GREEN}Run:${NC}
 
 ${GREEN}Manage:${NC}
   agent list
+  agent tui
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
+
+${GREEN}AWS:${NC}
+  agent aws-refresh <name>|--latest [profile]
 
 ${GREEN}Maintain:${NC}
   agent update [--quick|--full]
@@ -130,12 +134,14 @@ Options:
   --cpus N
   --pids-limit N
   --prompt 'TASK'
+  --aws PROFILE
   --identity 'Name <email@example.com>'
   --dry-run
   -h, --help
 
 Notes:
   - --prompt sends an initial task to the agent (claude -p / codex positional arg)
+  - --aws injects credentials from ~/.aws/credentials for the given profile
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
   - SSH repos require --ssh; aliases auto-enable it
@@ -278,6 +284,47 @@ show_dry_run() {
   info "Would run: $(render_command orb run -m "$VM_NAME" "${docker_cmd[@]}")"
 }
 
+auto_attach_tmux_session() {
+  local name="$1"
+
+  if ! [ -t 0 ] || ! [ -t 1 ]; then
+    info "Container started detached: $name"
+    return 0
+  fi
+
+  info "Waiting for tmux session in $name..."
+  if ! wait_for_tmux_session "$name"; then
+    die "Timed out waiting for tmux session in $name. Check logs with: orb run -m $VM_NAME docker logs $name"
+  fi
+
+  info "Attaching to $name..."
+  attach_tmux_session "$name"
+}
+
+attach_container_console() {
+  local name="$1"
+  local state="$2"
+  local terminal_mode
+
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
+  if [ "$state" = "running" ] && [ "$terminal_mode" = "tmux" ] && container_has_tmux_session "$name"; then
+    attach_tmux_session "$name"
+    return 0
+  fi
+
+  case "$state" in
+    running)
+      orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+      ;;
+    exited|created)
+      orb run -m "$VM_NAME" docker start -ai "$name"
+      ;;
+    *)
+      die "Container $name is in state '$state' and cannot be attached."
+      ;;
+  esac
+}
+
 cmd_spawn() {
   local topic="spawn"
   local agent_type=""
@@ -296,6 +343,7 @@ cmd_spawn() {
   local network_name=""
   local dry_run=false
   local agent_prompt=""
+  local aws_profile=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
@@ -320,6 +368,11 @@ cmd_spawn() {
       --prompt)
         require_option_value "$topic" "--prompt" "${2:-}"
         agent_prompt="$2"
+        shift 2
+        ;;
+      --aws)
+        require_option_value "$topic" "--aws" "${2:-}"
+        aws_profile="$2"
         shift 2
         ;;
       --ssh)
@@ -435,6 +488,11 @@ cmd_spawn() {
   # Inject host agent config so MCP servers, model settings, etc. carry over
   inject_host_config "$agent_type"
 
+  # Inject AWS credentials if requested
+  if [ -n "$aws_profile" ]; then
+    inject_aws_credentials "$aws_profile"
+  fi
+
   if $reuse_auth; then
     auth_volume_name="agent-${agent_type}-auth"
     if auth_volume_exists "$auth_volume_name"; then
@@ -499,7 +557,12 @@ cmd_spawn() {
   if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
     start_internal_docker_runtime "$container_name" "$network_name"
   fi
-  run_container "$managed_network" "$network_name"
+  if [ "$agent_type" = "codex" ] || [ "$agent_type" = "claude" ]; then
+    run_container_detached
+    auto_attach_tmux_session "$container_name"
+  else
+    run_container "$managed_network" "$network_name"
+  fi
 }
 
 cmd_shell() {
@@ -793,15 +856,26 @@ cmd_attach() {
 
   # If the container is stopped, restart it; if running, exec into it.
   local state
+  local terminal_mode
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
   case "$state" in
     running)
       info "Attaching to running $name..."
-      orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+      attach_container_console "$name" "$state"
       ;;
     exited|created)
       info "Restarting stopped $name..."
-      orb run -m "$VM_NAME" docker start -ai "$name"
+      if [ "$terminal_mode" = "tmux" ]; then
+        orb run -m "$VM_NAME" docker start "$name" >/dev/null
+        if wait_for_tmux_session "$name"; then
+          attach_tmux_session "$name"
+        else
+          die "Timed out waiting for tmux session in $name after restart."
+        fi
+      else
+        attach_container_console "$name" "$state"
+      fi
       ;;
     *)
       die "Container $name is in state '$state' and cannot be attached."
@@ -1417,6 +1491,76 @@ EOF
   ok "Exported $count files to $dest"
 }
 
+cmd_aws_refresh() {
+  local topic="aws-refresh"
+  local name=""
+  local latest=false
+  local profile=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent aws-refresh <name>|--latest [profile]
+
+Refresh AWS credentials in a running container by re-reading
+~/.aws/credentials from the host and writing into the container.
+
+If profile is omitted, uses the profile from the container's AWS_PROFILE env var.
+
+Examples:
+  agent aws-refresh my-task
+  agent aws-refresh my-task perso
+  agent aws-refresh --latest morpho-infra-terraform-k8s
+EOF
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ]; then
+          name="$1"
+        elif [ -z "$profile" ]; then
+          profile="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Determine profile: explicit arg > container label > container env var
+  if [ -z "$profile" ]; then
+    profile=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.aws"}}' "$name" 2>/dev/null || echo "")
+  fi
+  [ -n "$profile" ] || die "No AWS profile specified and none found on container $name. Pass a profile name."
+
+  local aws_creds_file="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.aws/credentials}"
+  [ -f "$aws_creds_file" ] || die "AWS credentials file not found: $aws_creds_file"
+  if ! grep -q "^\[$profile\]" "$aws_creds_file"; then
+    die "AWS profile '$profile' not found in $aws_creds_file"
+  fi
+
+  local creds_b64
+  creds_b64=$(base64 < "$aws_creds_file")
+
+  vm_exec docker exec "$name" bash -c "echo '$creds_b64' | base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials"
+
+  ok "AWS credentials refreshed in $name (profile: $profile)"
+}
+
 cmd="${1:-help}"
 shift 2>/dev/null || true
 
@@ -1434,6 +1578,12 @@ case "$cmd" in
   vm)         cmd_vm "$@" ;;
   mcp-login)  cmd_mcp_login "$@" ;;
   sessions)   cmd_sessions "$@" ;;
+  aws-refresh) cmd_aws_refresh "$@" ;;
+  tui)
+    tui_bin="$REPO_DIR/tui/agent-tui"
+    [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
+    exec "$tui_bin" "$@"
+    ;;
   help|-h|--help) cmd_help "$@" ;;
   *)          die "Unknown command: $cmd. Run 'agent help' for usage." ;;
 esac

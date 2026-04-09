@@ -42,11 +42,11 @@ agent-codex git@github.com:myorg/myrepo.git
 agent-claude --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/myrepo.git
 ```
 
-That's it. The agent launches inside a hardened container with your repo cloned. On first run, you'll see an OAuth URL — open it in your browser to log in.
+That's it. The agent launches inside a hardened container with your repo cloned. Claude and Codex use `tmux` for reattach. On first run, you'll see an OAuth URL — open it in your browser to log in.
 
 ## 5. When you're done
 
-The container stops when the agent exits but persists — you can reattach with `agent attach --latest`. To remove containers:
+If you're in a tmux-backed agent session, detach and leave it running with `Ctrl-b d`. If the session exits, the container persists and you can reattach with `agent attach --latest`. To remove containers:
 
 ```bash
 agent stop --all             # stop and remove all agent containers

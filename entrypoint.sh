@@ -4,6 +4,10 @@ set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_URL_LIB="/usr/local/lib/safe-agentic/repo-url.sh"
+AGENT_SESSION_LIB="/usr/local/lib/safe-agentic/agent-session.sh"
+TMUX_SESSION_NAME="${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}"
+TMUX_HISTORY_LIMIT="${SAFE_AGENTIC_TMUX_HISTORY_LIMIT:-500000}"
+SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
 
 if [ -f "$REPO_URL_LIB" ]; then
   # shellcheck disable=SC1090,SC1091
@@ -42,8 +46,19 @@ EOF
 ensure_claude_config() {
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local claude_config="$claude_dir/settings.json"
+  local claude_legacy="$claude_dir/.claude.json"
+  local legacy_backup=""
 
   mkdir -p "$claude_dir" 2>/dev/null || return 0
+  if [ ! -f "$claude_legacy" ]; then
+    legacy_backup=$(find "$claude_dir/backups" -maxdepth 1 -name '.claude.json.backup.*' -type f 2>/dev/null | sort | tail -1 || true)
+    if [ -n "$legacy_backup" ]; then
+      cat "$legacy_backup" > "$claude_legacy" 2>/dev/null || return 0
+    else
+      printf '{\n  "firstStartTime": "%s"\n}\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$claude_legacy" 2>/dev/null || return 0
+    fi
+  fi
+
   [ -f "$claude_config" ] && return 0
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || return 0
@@ -57,6 +72,54 @@ ensure_claude_config() {
   }
 }
 EOF
+}
+
+ensure_claude_support_files() {
+  local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+  [ -n "${SAFE_AGENTIC_CLAUDE_SUPPORT_B64:-}" ] || return 0
+  mkdir -p "$claude_dir" 2>/dev/null || return 0
+  echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
+}
+
+start_tmux_session() {
+  local session_name="$1"
+  shift
+
+  tmux new-session -d -s "$session_name" "$AGENT_SESSION_LIB" "$@"
+  tmux set-option -t "$session_name" history-limit "$TMUX_HISTORY_LIMIT" >/dev/null 2>&1 || true
+}
+
+wait_for_tmux_session_start() {
+  local session_name="$1"
+  local i=0
+
+  while [ "$i" -lt 50 ]; do
+    if tmux has-session -t "$session_name" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  return 1
+}
+
+wait_for_tmux_session_exit() {
+  local session_name="$1"
+  local misses=0
+
+  while true; do
+    if tmux has-session -t "$session_name" >/dev/null 2>&1; then
+      misses=0
+    else
+      misses=$((misses + 1))
+      if [ "$misses" -ge 5 ]; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -76,10 +139,17 @@ git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
 case "${AGENT_TYPE:-}" in
-  claude) ensure_claude_config ;;
+  claude) ensure_claude_support_files; ensure_claude_config ;;
   codex)  ensure_codex_config ;;
-  *)      ensure_codex_config; ensure_claude_config ;;
+  *)      ensure_codex_config; ensure_claude_support_files; ensure_claude_config ;;
 esac
+
+# AWS credentials (written to tmpfs-backed ~/.aws)
+if [ -n "${SAFE_AGENTIC_AWS_CREDS_B64:-}" ]; then
+  mkdir -p /home/agent/.aws 2>/dev/null || true
+  echo "$SAFE_AGENTIC_AWS_CREDS_B64" | base64 -d > /home/agent/.aws/credentials 2>/dev/null || true
+  chmod 600 /home/agent/.aws/credentials 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Clone repositories
@@ -116,29 +186,48 @@ fi
 # Launch agent or interactive shell
 # ---------------------------------------------------------------------------
 AGENT_TYPE="${AGENT_TYPE:-}"
+launch_args=("$@")
+
+if [ -n "$AGENT_TYPE" ] && [ "${#launch_args[@]}" -eq 1 ] && [ "${launch_args[0]}" = "bash" ]; then
+  launch_args=()
+fi
 
 case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
     echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
-    # OAuth login: on first run, Claude will display a URL to open in your browser
-    exec claude --dangerously-skip-permissions "$@"
+    if [ "${#launch_args[@]}" -gt 0 ]; then
+      start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
+    else
+      start_tmux_session "$TMUX_SESSION_NAME"
+    fi
+    wait_for_tmux_session_start "$TMUX_SESSION_NAME" || {
+      echo "[entrypoint] tmux session failed to start" >&2
+      exit 1
+    }
+    wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     ;;
   codex)
     echo "[entrypoint] Launching Codex..."
     echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
-    # In a headless container, the localhost callback OAuth flow doesn't work.
-    # Use device-auth flow: shows a URL + code to open in your browser.
-    if [ ! -f "$HOME/.codex/auth.json" ]; then
-      echo "[entrypoint] First run — authenticating via device code flow..."
-      echo "[entrypoint] A URL will appear. Open it in your macOS browser to log in."
-      codex login --device-auth
+    if [ "${#launch_args[@]}" -gt 0 ]; then
+      start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
+    else
+      start_tmux_session "$TMUX_SESSION_NAME"
     fi
-    exec codex --yolo "$@"
+    wait_for_tmux_session_start "$TMUX_SESSION_NAME" || {
+      echo "[entrypoint] tmux session failed to start" >&2
+      exit 1
+    }
+    wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     ;;
   *)
     echo "[entrypoint] No agent type set. Starting interactive shell."
     echo "[entrypoint] All tools available. Repos in /workspace/."
-    exec bash -l "$@"
+    if [ "${#launch_args[@]}" -gt 0 ]; then
+      exec bash -l "${launch_args[@]}"
+    else
+      exec bash -l
+    fi
     ;;
 esac

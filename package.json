@@ -3,7 +3,6 @@
   "private": true,
   "description": "Pinned AI CLIs for safe-agentic",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.92",
     "@openai/codex": "0.118.0"
   }
 }

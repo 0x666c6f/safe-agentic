@@ -39,6 +39,7 @@ agent spawn <claude|codex> [options]
 | `--ssh` | Forward SSH agent for private repos | off |
 | `--reuse-auth` | Keep OAuth token + config across sessions | ephemeral |
 | `--reuse-gh-auth` | Keep GitHub CLI auth across sessions | ephemeral |
+| `--aws PROFILE` | Inject AWS credentials from `~/.aws/credentials` | off |
 | `--network NAME` | Join existing Docker network | dedicated bridge |
 | `--memory SIZE` | Memory limit | 8g |
 | `--cpus N` | CPU limit | 4 |

@@ -62,6 +62,74 @@ printf 'bash|%s|%s\n' "$PWD" "$*" >>"${TEST_EXEC_LOG:?}"
 exit 0
 EOF
 
+cat >"$FAKE_BIN/script" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+if [ "${1:-}" = "-qfc" ]; then
+  shift
+  command_string="${1:-}"
+  shift || true
+  shift || true
+  exec /bin/bash -c "$command_string"
+fi
+
+echo "unexpected script invocation: $*" >&2
+exit 1
+EOF
+
+cat >"$FAKE_BIN/tmux" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+state_dir="${TEST_TMUX_STATE_DIR:?}"
+repo_dir="${TEST_REPO_DIR:?}"
+
+case "${1:-}" in
+  start-server)
+    exit 0
+    ;;
+  set-option)
+    exit 0
+    ;;
+  new-session)
+    shift
+    [ "${1:-}" = "-d" ] || { echo "unexpected tmux new-session args: $*" >&2; exit 1; }
+    shift
+    [ "${1:-}" = "-s" ] || { echo "unexpected tmux new-session args: $*" >&2; exit 1; }
+    shift
+    session_name="${1:-}"
+    shift
+    session_file="$state_dir/tmux-$session_name"
+    printf '0\n' >"$session_file"
+    if [ "${1:-}" = "/usr/local/lib/safe-agentic/agent-session.sh" ]; then
+      shift
+      SAFE_AGENTIC_SESSION_STATE_DIR="$state_dir/session-$session_name" /bin/bash "$repo_dir/bin/agent-session.sh" "$@"
+    else
+      "$@"
+    fi
+    exit 0
+    ;;
+  has-session)
+    shift
+    [ "${1:-}" = "-t" ] || exit 1
+    shift
+    session_name="${1:-}"
+    session_file="$state_dir/tmux-$session_name"
+    [ -f "$session_file" ] || exit 1
+    checks=$(cat "$session_file")
+    if [ "$checks" -eq 0 ]; then
+      printf '1\n' >"$session_file"
+      exit 0
+    fi
+    exit 1
+    ;;
+esac
+
+echo "unexpected tmux invocation: $*" >&2
+exit 1
+EOF
+
 cat >"$FAKE_BIN/claude" <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -80,6 +148,11 @@ fi
 exit 0
 EOF
 
+cat >"$FAKE_BIN/sleep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+
 cat >"$FAKE_BIN/dockerd" <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -87,7 +160,7 @@ printf 'dockerd|%s|%s\n' "$PWD" "$*" >>"${TEST_EXEC_LOG:?}"
 exit 0
 EOF
 
-chmod +x "$FAKE_BIN/cp" "$FAKE_BIN/chmod" "$FAKE_BIN/mkdir" "$FAKE_BIN/git" "$FAKE_BIN/bash" "$FAKE_BIN/claude" "$FAKE_BIN/codex" "$FAKE_BIN/dockerd"
+chmod +x "$FAKE_BIN/cp" "$FAKE_BIN/chmod" "$FAKE_BIN/mkdir" "$FAKE_BIN/git" "$FAKE_BIN/bash" "$FAKE_BIN/script" "$FAKE_BIN/tmux" "$FAKE_BIN/claude" "$FAKE_BIN/codex" "$FAKE_BIN/sleep" "$FAKE_BIN/dockerd"
 
 pass=0
 fail=0
@@ -97,6 +170,8 @@ run_entrypoint() {
   : >"$EXEC_LOG"
   : >"$STDOUT_LOG"
   : >"$STDERR_LOG"
+  rm -f "$STATE_DIR"/tmux-* 2>/dev/null || true
+  rm -rf "$STATE_DIR"/session-* 2>/dev/null || true
 
   local status=0
   local assignment
@@ -112,6 +187,8 @@ run_entrypoint() {
     export GIT_CONFIG_GLOBAL="$TMP_DIR/gitconfig"
     export TEST_GIT_LOG="$GIT_LOG"
     export TEST_EXEC_LOG="$EXEC_LOG"
+    export TEST_REPO_DIR="$REPO_DIR"
+    export TEST_TMUX_STATE_DIR="$STATE_DIR"
     for assignment in "$@"; do
       export "$assignment"
     done
@@ -181,6 +258,7 @@ assert_contains "$(cat "$EXEC_LOG")" "bash|$RUN_DIR|-l --noprofile" "shell execs
 assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'approval_policy = "never"' "shell codex default approval"
 assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'sandbox_mode = "danger-full-access"' "shell codex default sandbox"
 assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode": "bypassPermissions"' "shell claude default config"
+assert_contains "$(cat "$HOME_DIR/.claude/.claude.json")" '"firstStartTime"' "shell claude legacy metadata created"
 
 # --- env overrides flow into git config and Claude launch ---
 rm -f "$HOME_DIR/.codex/auth.json"
@@ -276,6 +354,7 @@ RUN_ARGS=(--print foo)
 run_entrypoint AGENT_TYPE=claude "SAFE_AGENTIC_CLAUDE_CONFIG_B64=$CLAUDE_B64"
 assert_status 0 "claude config B64 seed exits cleanly"
 assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode":"ask"' "claude config created from B64 env"
+assert_contains "$(cat "$HOME_DIR/.claude/.claude.json")" '"firstStartTime"' "claude legacy metadata created from B64 seed"
 
 # =============================================================================
 # Test: SAFE_AGENTIC_CLAUDE_CONFIG_B64 does NOT overwrite existing settings.json
@@ -315,12 +394,46 @@ RUN_ARGS=(--print foo)
 run_entrypoint AGENT_TYPE=claude
 assert_status 0 "claude-only config exits cleanly"
 assert_contains "$(cat "$HOME_DIR/.claude/settings.json")" '"defaultMode": "bypassPermissions"' "claude config written for claude agent"
+assert_contains "$(cat "$HOME_DIR/.claude/.claude.json")" '"firstStartTime"' "claude legacy metadata written for claude agent"
 if [ -f "$HOME_DIR/.codex/config.toml" ]; then
   echo "FAIL: claude agent should not create .codex config" >&2
   ((++fail))
 else
   ((++pass))
 fi
+
+# =============================================================================
+# Test: SAFE_AGENTIC_CLAUDE_SUPPORT_B64 restores Claude support files
+# =============================================================================
+rm -rf "$HOME_DIR/.claude/hooks" "$HOME_DIR/.claude/commands"
+rm -f "$HOME_DIR/.claude/statusline-command.sh" "$HOME_DIR/.claude/CLAUDE.md"
+SUPPORT_DIR="$TMP_DIR/claude-support"
+mkdir -p "$SUPPORT_DIR/hooks" "$SUPPORT_DIR/commands"
+printf '#!/bin/bash\necho ok\n' >"$SUPPORT_DIR/hooks/check-linear-ticket.sh"
+printf 'status\n' >"$SUPPORT_DIR/statusline-command.sh"
+printf '# note\n' >"$SUPPORT_DIR/CLAUDE.md"
+printf '# prove\n' >"$SUPPORT_DIR/commands/prove.md"
+CLAUDE_SUPPORT_B64=$(tar -C "$SUPPORT_DIR" -czf - hooks commands statusline-command.sh CLAUDE.md | base64 | tr -d '\n')
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude "SAFE_AGENTIC_CLAUDE_SUPPORT_B64=$CLAUDE_SUPPORT_B64"
+assert_status 0 "claude support B64 exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/hooks/check-linear-ticket.sh")" 'echo ok' "claude hook restored from support B64"
+assert_contains "$(cat "$HOME_DIR/.claude/statusline-command.sh")" 'status' "claude statusline restored from support B64"
+assert_contains "$(cat "$HOME_DIR/.claude/commands/prove.md")" '# prove' "claude commands restored from support B64"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" '# note' "claude CLAUDE.md restored from support B64"
+
+# =============================================================================
+# Test: Claude legacy metadata restores from latest backup when missing
+# =============================================================================
+mkdir -p "$HOME_DIR/.claude/backups"
+cat >"$HOME_DIR/.claude/backups/.claude.json.backup.2" <<'EOF'
+{"firstStartTime":"2026-04-09T10:16:04.180Z"}
+EOF
+rm -f "$HOME_DIR/.claude/.claude.json"
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude
+assert_status 0 "claude legacy metadata backup restore exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/.claude.json")" '2026-04-09T10:16:04.180Z' "claude legacy metadata restored from backup"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

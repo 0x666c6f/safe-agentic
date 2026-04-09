@@ -29,10 +29,11 @@ Full diagrams in `docs/architecture.md`.
 - **`bin/agent-lib.sh`** — Shared functions: input validation (`validate_name_component`, `validate_network_name`), network lifecycle (`create_managed_network`, `remove_managed_network`), container runtime construction (`build_container_runtime`, `append_runtime_hardening`), volume helpers. Docker commands built as bash arrays to prevent injection.
 - **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that auto-detect SSH URLs (`git@`, `ssh://`) and delegate to `bin/agent spawn`.
 - **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`, installs socat for SSH relay and MCP bridging. Re-run on every `agent vm start`.
-- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). No `curl | bash`. Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. AI CLIs installed via `npm ci` with lockfile. Non-root `agent` user, no sudo, no supplemental groups.
-- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent or shell.
+- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Codex CLI installed via `npm ci` with lockfile; Claude Code installed via official installer (version-pinned, verified by `claude --version`). Non-root `agent` user, no sudo, no supplemental groups.
+- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, writes AWS credentials if injected, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent inside tmux or starts interactive shell.
+- **`bin/agent-session.sh`** — Agent session wrapper launched inside tmux. Handles Claude (`--dangerously-skip-permissions` via `script` PTY), Codex (`--yolo`), and shell modes. Detects resume vs fresh start via state file.
 - **`config/bashrc`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
-- **`package.json`, `package-lock.json`** — Pins Claude Code and Codex CLI versions for reproducible `npm ci` installs.
+- **`package.json`, `package-lock.json`** — Pins Codex CLI version for reproducible `npm ci` installs.
 - **`op-env.sh`** — Template for optional 1Password secret injection. Not used for base OAuth flow.
 
 ## Commands
@@ -52,6 +53,7 @@ agent-codex https://github.com/org/repo.git
 
 # Management
 agent list                     # shows running + stopped containers
+agent tui                      # k9s-style interactive dashboard (build: make -C tui)
 agent attach <name>            # reattach (restarts stopped containers)
 agent stop <name|--all>        # stop + remove
 agent cleanup                  # removes containers + managed networks (keeps auth)
@@ -63,6 +65,11 @@ agent mcp-login <container> notion
 # Export session history
 agent sessions <container>
 agent sessions --latest ~/sessions/
+
+# AWS credentials
+agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:org/repo.git
+agent aws-refresh <container>              # refresh expired credentials
+agent aws-refresh --latest perso           # refresh with different profile
 
 # Image rebuild
 agent update                   # cached build
@@ -87,6 +94,7 @@ agent spawn claude --repo https://... --network agent-isolated
 |---------|----------|
 | SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
 | Per-session auth (ephemeral volume) | `--reuse-auth` |
+| AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
 | Read-only rootfs | — |
 | cap-drop ALL + no-new-privileges | — |

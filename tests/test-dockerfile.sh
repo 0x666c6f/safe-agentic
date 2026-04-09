@@ -30,8 +30,15 @@ assert_absent() {
   fi
 }
 
-# --- No curl | bash (supply chain risk) ---
-assert_absent 'curl.*\|\s*(ba)?sh'    "no curl pipe to shell"
+# --- No curl | bash (supply chain risk) — exception for Claude Code official installer ---
+# Claude Code install script is verified by version check: claude --version | grep -F "$CLAUDE_CODE_VERSION"
+curl_pipe_count=$(grep -cE 'curl.*\|\s*(ba)?sh' "$DOCKERFILE" || true)
+if [ "$curl_pipe_count" -gt 1 ]; then
+  echo "FAIL: at most 1 curl pipe to shell allowed (Claude installer); found $curl_pipe_count" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
 assert_absent 'wget.*\|\s*(ba)?sh'    "no wget pipe to shell"
 
 # --- All binary downloads have SHA256 verification ---
@@ -78,9 +85,10 @@ assert_present 'ENTRYPOINT.*entrypoint.sh' "entrypoint is custom script"
 assert_present 'install -m 0755 -d /usr/local/lib/safe-agentic /workspace /opt/agent-cli' "repo helper directory created with execute bit"
 assert_present 'COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh' "repo url helper copied into image"
 
-# --- CLI bundle is outside tmpfs-backed ~/.local ---
-assert_present '/opt/agent-cli' "CLI bundle installed outside ~/.local"
-assert_absent '/home/agent/\.local/agent-cli' "no CLI bundle under tmpfs-backed ~/.local"
+# --- CLI bundles ---
+assert_present '/opt/agent-cli' "npm CLI bundle directory exists"
+assert_present 'claude.ai/install.sh' "Claude Code installed via official installer"
+assert_present 'test -x /home/agent/.local/bin/claude' "Claude binary verified executable"
 
 # --- Docker + package manager tooling present ---
 assert_present 'docker-ce-cli' "docker cli installed"

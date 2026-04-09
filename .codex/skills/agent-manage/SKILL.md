@@ -62,6 +62,21 @@ agent mcp-login <container> notion
 
 Runs OAuth login in a temporary container. Token persists in the auth volume for all agents using `--reuse-auth`.
 
+### Refresh AWS credentials
+
+```bash
+# Refresh from container's original profile
+agent aws-refresh <name>
+
+# Refresh with explicit profile
+agent aws-refresh <name> perso
+
+# Refresh latest container
+agent aws-refresh --latest
+```
+
+Re-reads `~/.aws/credentials` from the host and writes into the running container. No restart needed.
+
 ### Full cleanup
 
 ```bash

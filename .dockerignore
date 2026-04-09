@@ -1,6 +1,7 @@
 .git
 bin/*
 !bin/repo-url.sh
+!bin/agent-session.sh
 vm/
 README.md
 *.md

@@ -499,14 +499,23 @@ assert_contains "$cfgcodex_run" "SAFE_AGENTIC_CODEX_CONFIG_B64=" "codex config B
 # Test: Host config injection — claude settings.json injected as B64 env var
 # =============================================================================
 CLAUDE_CONFIG_HOME="$TMP_DIR/claude-home"
-mkdir -p "$CLAUDE_CONFIG_HOME"
+mkdir -p "$CLAUDE_CONFIG_HOME/hooks"
 cat >"$CLAUDE_CONFIG_HOME/settings.json" <<'JSONEOF'
 {"permissions":{"defaultMode":"bypassPermissions"}}
 JSONEOF
+cat >"$CLAUDE_CONFIG_HOME/statusline-command.sh" <<'EOF'
+#!/bin/bash
+echo status
+EOF
+cat >"$CLAUDE_CONFIG_HOME/hooks/check-linear-ticket.sh" <<'EOF'
+#!/bin/bash
+echo hook
+EOF
 CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_HOME" \
   run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name cfgclaude --repo https://github.com/a/b.git >/dev/null 2>&1
 cfgclaude_run="$(last_docker_run)"
 assert_contains "$cfgclaude_run" "SAFE_AGENTIC_CLAUDE_CONFIG_B64=" "claude config B64 env var present"
+assert_contains "$cfgclaude_run" "SAFE_AGENTIC_CLAUDE_SUPPORT_B64=" "claude support files B64 env var present"
 
 # =============================================================================
 # Test: Shell mode does NOT inject host config env vars

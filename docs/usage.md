@@ -20,6 +20,7 @@
 | `agent cleanup --auth` | Also remove shared auth volumes |
 | `agent mcp-login <server>` | MCP OAuth login (token persists in auth volume) |
 | `agent sessions <name>` | Export session history from a container |
+| `agent aws-refresh <name>` | Refresh AWS credentials in a running container |
 | `agent diagnose` | Check common setup/runtime issues |
 | `agent update` | Rebuild the Docker image |
 | `agent vm start` | Start VM and re-apply hardening |
@@ -131,6 +132,31 @@ agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
 
 Use `--docker` unless you explicitly need the VM daemon. `--docker-socket` gives the agent direct control over Docker in the VM.
 
+### AWS credentials
+
+Inject AWS credentials from your host `~/.aws/credentials` into the container:
+
+```bash
+agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:myorg/infra.git
+```
+
+This injects the specified profile and sets `AWS_PROFILE` inside the container. The credentials are written to a tmpfs at `~/.aws/credentials`.
+
+Since assumed-role sessions expire (~1 hour), refresh credentials in a running container without restarting:
+
+```bash
+# Re-reads ~/.aws/credentials from host, writes into the container
+agent aws-refresh my-task
+
+# Explicit profile override
+agent aws-refresh my-task perso
+
+# Target the latest container
+agent aws-refresh --latest
+```
+
+AWS SDKs re-read the credentials file on each call, so no container restart is needed.
+
 ### Host config injection
 
 Your host `~/.codex/config.toml` and `~/.claude/settings.json` are automatically injected into containers on first launch. MCP server definitions, model settings, and feature flags carry over. If config already exists in the auth volume (from a prior run or `mcp-login`), the host config is not re-injected — existing config is preserved.
@@ -198,7 +224,7 @@ Shows all agent containers (running and stopped) with their names, agent type, r
 
 ### Attach
 
-Attach to a running container, or restart a stopped one. Useful for resuming work, checking logs, or running tests in parallel.
+Attach to the running agent session, or restart a stopped container and reopen it. Claude and Codex containers use `tmux`; shell containers use the direct TTY path.
 
 ```bash
 agent attach api-refactor
@@ -208,6 +234,8 @@ agent attach --latest
 ```
 
 If the container is stopped (exited), `agent attach` automatically restarts it and reattaches.
+
+Claude/Codex detach without stopping the container: `Ctrl-b d`
 
 ### Copy files out
 

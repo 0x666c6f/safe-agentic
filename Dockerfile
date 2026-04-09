@@ -36,6 +36,7 @@ ARG DELTA_SHA256_AMD64=ea4f0222950ee750a3d38dd80d03bce4cee07a3f63928fc47548383bc
 ARG DELTA_SHA256_ARM64=0edc36cf514f1bd84becac3e94ee8ae9f8818c6a1f99f7b2ee67b362afa253d3
 
 ARG AWSCLI_VERSION=2.34.25
+ARG CLAUDE_CODE_VERSION=2.1.92
 ARG BUN_VERSION=1.2.23
 ARG BUN_SHA256_AMD64=cf0ed0a920799d576ffde4e0cae66d732bf23c2530407f26f59c7831dffe1f0e
 ARG BUN_SHA256_ARM64=6a7a98c546d084a845deda62eb2a5b94a6a14a63ea81cf9186d46bf55bf910a9
@@ -60,6 +61,7 @@ RUN apt-get update \
     ripgrep \
     socat \
     software-properties-common \
+    tmux \
     unzip \
     wget \
  && locale-gen en_US.UTF-8 \
@@ -253,6 +255,7 @@ RUN if id -u agent >/dev/null 2>&1; then \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 
 COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh
+COPY --chmod=755 bin/agent-session.sh /usr/local/lib/safe-agentic/agent-session.sh
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER agent
@@ -264,6 +267,10 @@ ARG CLI_CACHE_BUST=1
 RUN test -n "$CLI_CACHE_BUST" \
  && npm ci --omit=dev \
  && npm cache clean --force
+
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION" \
+ && test -x /home/agent/.local/bin/claude \
+ && /home/agent/.local/bin/claude --version | grep -F "$CLAUDE_CODE_VERSION"
 
 # Remove build-essential (gcc, make, etc.) now that native npm modules are compiled.
 # Reduces attack surface — agents work with interpreted languages and pre-compiled Go binaries.
@@ -284,6 +291,8 @@ RUN mkdir -p \
   /home/agent/.ssh \
   /home/agent/.claude \
   /home/agent/.codex
+
+RUN ln -sf /home/agent/.claude/.claude.json /home/agent/.claude.json
 
 COPY --chown=agent:agent config/bashrc /home/agent/.bashrc
 

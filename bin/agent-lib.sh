@@ -482,6 +482,47 @@ append_named_volume() {
   docker_cmd+=(--mount "type=volume,src=$source,dst=$destination")
 }
 
+tmux_session_name() {
+  printf '%s\n' "${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}"
+}
+
+container_terminal_mode() {
+  local name="$1"
+  vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.terminal"}}' "$name" 2>/dev/null || true
+}
+
+container_has_tmux_session() {
+  local name="$1"
+  local session_name
+
+  session_name=$(tmux_session_name)
+  vm_exec docker exec "$name" tmux has-session -t "$session_name" >/dev/null 2>&1
+}
+
+wait_for_tmux_session() {
+  local name="$1"
+  local attempts="${2:-300}"
+  local i=0
+
+  while [ "$i" -lt "$attempts" ]; do
+    if container_has_tmux_session "$name"; then
+      return 0
+    fi
+    sleep 0.2
+    i=$((i + 1))
+  done
+
+  return 1
+}
+
+attach_tmux_session() {
+  local name="$1"
+  local session_name
+
+  session_name=$(tmux_session_name)
+  orb run -m "$VM_NAME" docker exec -it "$name" tmux attach -t "$session_name"
+}
+
 append_runtime_hardening() {
   local network_name="$1"
   local memory="$2"
@@ -498,6 +539,11 @@ append_runtime_hardening() {
   docker_cmd+=(--label "safe-agentic.repo-display=$repo_display")
   docker_cmd+=(--label "safe-agentic.ssh=$ssh_label")
   docker_cmd+=(--label "safe-agentic.network-mode=$network_mode_label")
+  if [ "$agent_label" = "codex" ] || [ "$agent_label" = "claude" ]; then
+    docker_cmd+=(--label "safe-agentic.terminal=tmux")
+  else
+    docker_cmd+=(--label "safe-agentic.terminal=direct")
+  fi
   docker_cmd+=(--cap-drop=ALL)
   docker_cmd+=(--security-opt=no-new-privileges:true)
   docker_cmd+=(--security-opt "seccomp=/etc/safe-agentic/seccomp.json")
@@ -514,7 +560,6 @@ append_runtime_hardening() {
   append_ephemeral_volume /workspace
   docker_cmd+=(--tmpfs "/home/agent/.config:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
   docker_cmd+=(--tmpfs "/home/agent/.ssh:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
-  docker_cmd+=(--tmpfs "/home/agent/.local:rw,noexec,nosuid,uid=1000,gid=1000,size=64m")
 }
 
 append_ssh_mount() {
@@ -596,13 +641,54 @@ inject_host_config() {
       ;;
     claude)
       host_config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+      local host_claude_dir
+      local support_tar=""
+      local -a support_paths=()
+
+      host_claude_dir=$(dirname "$host_config")
       if [ -f "$host_config" ]; then
         config_b64=$(base64 < "$host_config")
         docker_cmd+=(-e "SAFE_AGENTIC_CLAUDE_CONFIG_B64=$config_b64")
         info "Host config: injected from $host_config"
       fi
+
+      [ -f "$host_claude_dir/CLAUDE.md" ] && support_paths+=("CLAUDE.md")
+      [ -f "$host_claude_dir/statusline-command.sh" ] && support_paths+=("statusline-command.sh")
+      [ -d "$host_claude_dir/hooks" ] && support_paths+=("hooks")
+      [ -d "$host_claude_dir/commands" ] && support_paths+=("commands")
+
+      if [ ${#support_paths[@]} -gt 0 ]; then
+        support_tar=$(tar -C "$host_claude_dir" -czf - "${support_paths[@]}" | base64 | tr -d '\n')
+        docker_cmd+=(-e "SAFE_AGENTIC_CLAUDE_SUPPORT_B64=$support_tar")
+        info "Host Claude support files: injected from $host_claude_dir"
+      fi
       ;;
   esac
+}
+
+inject_aws_credentials() {
+  local profile="$1"
+  local aws_creds_file="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.aws/credentials}"
+  local creds_b64
+
+  [ -f "$aws_creds_file" ] || die "AWS credentials file not found: $aws_creds_file"
+
+  # Verify the requested profile exists in the credentials file
+  if ! grep -q "^\[$profile\]" "$aws_creds_file"; then
+    die "AWS profile '$profile' not found in $aws_creds_file"
+  fi
+
+  creds_b64=$(base64 < "$aws_creds_file")
+  docker_cmd+=(-e "SAFE_AGENTIC_AWS_CREDS_B64=$creds_b64")
+  docker_cmd+=(-e "AWS_PROFILE=$profile")
+  docker_cmd+=(--tmpfs "/home/agent/.aws:rw,noexec,nosuid,uid=1000,gid=1000,size=1m")
+
+  # Forward region if set on host
+  [ -n "${AWS_DEFAULT_REGION:-}" ] && docker_cmd+=(-e "AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION")
+  [ -n "${AWS_REGION:-}" ] && docker_cmd+=(-e "AWS_REGION=$AWS_REGION")
+
+  docker_cmd+=(--label "safe-agentic.aws=$profile")
+  info "AWS: profile '$profile' injected from $aws_creds_file"
 }
 
 append_cache_mounts() {
@@ -620,6 +706,18 @@ run_container() {
   orb run -m "$VM_NAME" "${docker_cmd[@]}" || status=$?
   # Container persists after exit (no --rm). Network and sidecar cleanup
   # is deferred to 'agent stop' or 'agent cleanup'.
+  return "$status"
+}
+
+run_container_detached() {
+  local status=0
+  local -a run_cmd=("${docker_cmd[@]}")
+
+  if [ "${run_cmd[0]:-}" = "docker" ] && [ "${run_cmd[1]:-}" = "run" ] && [ "${run_cmd[2]:-}" = "-it" ]; then
+    run_cmd=(docker run -d "${run_cmd[@]:3}")
+  fi
+
+  orb run -m "$VM_NAME" "${run_cmd[@]}" || status=$?
   return "$status"
 }
 

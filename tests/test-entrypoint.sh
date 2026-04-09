@@ -4,6 +4,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENTRYPOINT="$REPO_DIR/entrypoint.sh"
+AGENT_SESSION="$REPO_DIR/bin/agent-session.sh"
 
 pass=0
 fail=0
@@ -11,6 +12,13 @@ fail=0
 assert_present() {
   local pattern="$1" label="$2"
   if grep -qE "$pattern" "$ENTRYPOINT"; then ((++pass)); else
+    echo "FAIL: $label" >&2; ((++fail))
+  fi
+}
+
+assert_present_any() {
+  local pattern="$1" label="$2"
+  if grep -qrE "$pattern" "$ENTRYPOINT" "$AGENT_SESSION"; then ((++pass)); else
     echo "FAIL: $label" >&2; ((++fail))
   fi
 }
@@ -46,13 +54,13 @@ assert_present 'SAFE_AGENTIC_INTERNAL_DOCKERD'           "internal dockerd mode"
 assert_present 'exec dockerd --group agent --host'       "internal dockerd exec"
 
 # --- Claude uses --dangerously-skip-permissions (container IS sandbox) ---
-assert_present 'exec claude --dangerously-skip-permissions'  "claude skip-permissions"
+assert_present_any 'claude --dangerously-skip-permissions'  "claude skip-permissions"
 
 # --- Codex uses yolo mode ---
-assert_present 'exec codex --yolo' "codex yolo"
+assert_present_any 'codex --yolo' "codex yolo"
 
 # --- Codex auth uses device-auth flow (headless-compatible) ---
-assert_present 'codex login --device-auth'                    "codex device-auth flow"
+assert_present_any 'codex login --device-auth'                    "codex device-auth flow"
 assert_present 'approval_policy = "never"'                    "codex default config"
 assert_present 'sandbox_mode = "danger-full-access"'          "codex sandbox default"
 assert_present '"defaultMode": "bypassPermissions"'           "claude default config"

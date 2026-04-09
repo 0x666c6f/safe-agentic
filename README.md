@@ -16,6 +16,7 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 
 **Agent Lifecycle**
 - `--prompt 'task'` — send an initial task so the agent starts working immediately
+- Tmux-backed reattach — `agent attach`/TUI resume reopen the live agent session; detach with `Ctrl-b d`
 - Container persistence — containers survive exit, `agent attach` restarts stopped ones
 - `agent list` — show running + stopped containers with metadata
 - `agent stop` / `agent cleanup` — stop, remove, and clean up resources
@@ -27,6 +28,7 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 - `--ssh` — SSH agent forwarding via socat relay (userns-remap compatible)
 - `--reuse-auth` — persist Claude/Codex OAuth tokens across sessions
 - `--reuse-gh-auth` — persist GitHub CLI auth across sessions
+- `--aws <profile>` — inject AWS credentials from `~/.aws/credentials`; refresh with `agent aws-refresh`
 - `agent mcp-login` — MCP OAuth login (Linear, Notion, etc.) with token persistence
 - Host config auto-injection: `~/.codex/config.toml` and `~/.claude/settings.json` carry MCP servers, model settings, features, and plugins into containers
 - `--identity` — explicit git author/committer attribution
@@ -57,10 +59,11 @@ agent diagnose
 - add `--reuse-auth` to keep Claude/Codex OAuth between sessions
 - add `--reuse-gh-auth` to keep `gh auth login` state between sessions
 - add `--prompt 'task'` to send an initial task to the agent
+- add `--aws <profile>` to inject AWS credentials; refresh with `agent aws-refresh <name>`
 - add `--docker` for Docker-in-Docker, or `--docker-socket` to mount the VM daemon directly
 - add `--identity 'You <you@example.com>'` to avoid `Agent <agent@localhost>` commits
 - host `~/.codex/config.toml` and `~/.claude/settings.json` are auto-injected into containers (MCP servers, model settings carry over)
-- containers persist after exit — `agent attach` restarts stopped ones, `agent stop` removes
+- containers persist after exit — `agent attach` restarts stopped ones; tmux sessions detach with `Ctrl-b d`
 - put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, Docker mode, shared auth, and git identity
   - format: simple `KEY=value` lines only; no shell snippets
 
@@ -110,6 +113,7 @@ graph TB
 - `--reuse-gh-auth` — Shares GitHub CLI auth volume across sessions. Compromised container could steal the token.
 - `--docker` — Starts a privileged Docker-in-Docker sidecar for the session. Needed only when the agent must build or run containers itself.
 - `--docker-socket` — Mounts the VM Docker socket directly. Broadest Docker access; the agent can control the VM daemon.
+- `--aws <profile>` — Injects AWS credentials from `~/.aws/credentials` into the container. Credentials are written to a tmpfs; a compromised container could use them to access AWS resources for the session duration.
 - `--network <name>` — Joins an existing Docker network in the VM and bypasses the default managed-network egress guardrails. Use only for deliberately shared or isolated networks you created.
 
 **Known limitations:**
@@ -195,7 +199,7 @@ agent shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
 
 ```bash
 agent list                  # List running + stopped agents
-agent attach <name>         # Attach (restarts stopped containers)
+agent attach <name>         # Tmux attach (restarts stopped containers)
 agent attach --latest       # Attach to newest agent
 agent cp <name> <container-path> <host-path>  # Copy files out safely
 agent cp --latest <container-path> <host-path>
@@ -206,6 +210,7 @@ agent cleanup               # Stop all + keep shared auth + prune managed networ
 agent cleanup --auth        # Also remove shared auth volumes
 agent mcp-login <server>    # MCP OAuth login (persists in auth volume)
 agent sessions <name>       # Export session history from container
+agent aws-refresh <name>    # Refresh AWS credentials in running container
 agent diagnose              # Check orb/VM/docker/image/SSH/defaults
 ```
 
@@ -217,6 +222,8 @@ agent cp --latest /workspace/dist ./dist
 ```
 
 Older `agent cleanup` removed shared auth volumes too. Full reset now needs `agent cleanup --auth`.
+
+Claude and Codex sessions run inside `tmux` in the container with a large scrollback buffer. Detach with `Ctrl-b d`; reattach later with `agent attach` or the TUI.
 
 ### Interactive shell (no agent, no auth)
 
@@ -262,6 +269,7 @@ Node.js 22, `pnpm`, Bun, Python 3.12, Go 1.23
 | SSH agent | OFF | `--ssh` (socat relay for userns-remap compat) |
 | Auth persistence | Ephemeral per-session volume | `--reuse-auth` |
 | GitHub CLI auth | Ephemeral per-session volume | `--reuse-gh-auth` |
+| AWS credentials | OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
 | Docker access | OFF | `--docker` (DinD) / `--docker-socket` |
 | Root filesystem | Read-only | — |
 | Capabilities | Dropped (`ALL`) + `no-new-privileges` | — |

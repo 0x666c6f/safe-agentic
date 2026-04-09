@@ -42,6 +42,7 @@ graph TB
 | SSH agent | OFF — no access to your keys | `--ssh` forwards 1Password agent |
 | Auth tokens | Ephemeral — discarded on exit | `--reuse-auth` persists across sessions |
 | GitHub CLI auth | Ephemeral — discarded on exit | `--reuse-gh-auth` persists across sessions |
+| AWS credentials | OFF — no access to AWS | `--aws <profile>` injects from `~/.aws/credentials` (tmpfs-backed) |
 | Docker access | OFF | `--docker` starts DinD; `--docker-socket` mounts the VM daemon |
 | Rootfs | Read-only | — |
 | Capabilities | ALL dropped + no-new-privileges | — |
@@ -102,6 +103,13 @@ Stores GitHub CLI auth in a named Docker volume (`agent-gh-auth`) that survives 
 
 **When to use:** You want `gh auth login` once and reuse it across sessions.
 **Risk:** A compromised container could steal the GitHub token from the shared volume. Run `agent cleanup --auth` to revoke.
+
+### `--aws <profile>`
+
+Injects AWS credentials from the host's `~/.aws/credentials` file into the container. Credentials are written to a tmpfs mount at `~/.aws/credentials` and `AWS_PROFILE` is set. Use `agent aws-refresh` to update expired credentials without restarting.
+
+**When to use:** The agent needs AWS access (terraform, aws-cli, boto3).
+**Risk:** A compromised container could use the injected credentials for the session duration. Assumed-role sessions expire (~1 hour), limiting the window. Credentials live on tmpfs and are not persisted to disk.
 
 ### `--docker`
 
