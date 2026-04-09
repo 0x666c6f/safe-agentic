@@ -126,10 +126,12 @@ agent sessions --latest    # export full conversation history
 
 ## What's inside the container
 
-**AI agents:** Claude Code, Codex |
-**Infra:** Terraform, kubectl, Helm, AWS CLI, Vault, Docker, Compose |
-**CLI:** ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh |
-**Runtimes:** Node.js 22, pnpm, Bun, Python 3.12, Go 1.23
+| Category | Tools |
+|----------|-------|
+| **AI agents** | Claude Code, Codex |
+| **Infra** | Terraform, kubectl, Helm, AWS CLI, Vault, Docker, Compose |
+| **CLI** | ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh |
+| **Runtimes** | Node.js 22, pnpm, Bun, Python 3.12, Go 1.23 |
 
 ---
 
