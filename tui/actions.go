@@ -302,12 +302,12 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	// Copy the entire sessions dir to a temp location in the VM,
 	// then find and read the latest file.
 	tmpDir := "/tmp/satui-sessions-" + name
-	execOrb("bash", "-c", "rm -rf "+tmpDir)
+	execOrb("rm", "-rf", tmpDir)
 	_, err := execOrbLong("docker", "cp", name+":"+sessionsDir, tmpDir+"/")
 	if err != nil {
 		return nil, err
 	}
-	defer execOrb("bash", "-c", "rm -rf "+tmpDir)
+	defer execOrb("rm", "-rf", tmpDir)
 
 	latestFile, err := execOrb("bash", "-c",
 		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' -type f 2>/dev/null | sort | tail -1", tmpDir))
