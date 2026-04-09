@@ -295,6 +295,7 @@ RUN mkdir -p \
 RUN ln -sf /home/agent/.claude/.claude.json /home/agent/.claude.json
 
 COPY --chown=agent:agent config/bashrc /home/agent/.bashrc
+COPY --chown=agent:agent config/tmux.conf /home/agent/.tmux.conf
 
 RUN mkdir -p /home/agent/.ssh.baked && { \
     echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"; \
