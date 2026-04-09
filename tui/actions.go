@@ -286,31 +286,39 @@ func (ac *Actions) Logs() {
 }
 
 func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
-	latestFile, err := execOrb("docker", "exec", name, "bash", "-c",
-		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' -type f 2>/dev/null | sort | tail -1", sessionsDir))
-	if err != nil {
-		return nil, err
+	// Search both sessions/ (codex) and projects/ (claude) directories
+	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
+	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c",
+		fmt.Sprintf("find %s/sessions/ %s/projects/ -name '*.jsonl' ! -name '._*' ! -path '*/subagents/*' -type f 2>/dev/null | sort -t/ -k$(echo %s/projects/ | tr -cd '/' | wc -c) | tail -1", configDir, configDir, configDir))
+	if err != nil || strings.TrimSpace(string(latestFile)) == "" {
+		// Fallback: search entire config dir
+		latestFile, err = execOrbLong("docker", "exec", name, "bash", "-c",
+			fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f 2>/dev/null | sort | tail -1", configDir))
+		if err != nil {
+			return nil, err
+		}
 	}
 	path := strings.TrimSpace(string(latestFile))
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrb("docker", "exec", name, "cat", path)
+	return execOrbLong("docker", "exec", name, "cat", path)
 }
 
 func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
-	// Copy the entire sessions dir to a temp location in the VM,
-	// then find and read the latest file.
+	// Copy the entire config dir to a temp location in the VM,
+	// then find and read the latest session file.
+	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
 	tmpDir := "/tmp/satui-sessions-" + name
 	execOrb("rm", "-rf", tmpDir)
-	_, err := execOrbLong("docker", "cp", name+":"+sessionsDir, tmpDir+"/")
+	_, err := execOrbLong("docker", "cp", name+":"+configDir, tmpDir+"/")
 	if err != nil {
 		return nil, err
 	}
 	defer execOrb("rm", "-rf", tmpDir)
 
-	latestFile, err := execOrb("bash", "-c",
-		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' -type f 2>/dev/null | sort | tail -1", tmpDir))
+	latestFile, err := execOrbLong("bash", "-c",
+		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f 2>/dev/null | sort | tail -1", tmpDir))
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +326,7 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrb("cat", path)
+	return execOrbLong("cat", path)
 }
 
 // Checkpoint creates a named git stash checkpoint of the agent's current working tree.
