@@ -2946,7 +2946,7 @@ cmd_orchestrate() {
   fleet_names=$(python3 -c "
 import sys
 current = None
-with open('$fleet_file') as f:
+with open(sys.argv[1]) as f:
     for line in f:
         line = line.rstrip()
         if line.strip().startswith('- name:'):
@@ -2955,7 +2955,7 @@ with open('$fleet_file') as f:
             agent_type = line.split(':', 1)[1].strip()
             print('agent-' + agent_type + '-' + current)
             current = None
-" 2>/dev/null)
+" "$fleet_file" 2>/dev/null)
 
   while IFS= read -r cname; do
     [ -n "$cname" ] && fleet_containers+=("$cname")
