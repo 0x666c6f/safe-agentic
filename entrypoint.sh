@@ -206,12 +206,12 @@ run_lifecycle_script() {
   script_cmd=$(python3 -c "
 import json, sys
 try:
-    with open('$config_file') as f:
+    with open(sys.argv[1]) as f:
         data = json.load(f)
-    print(data.get('scripts', {}).get('$script_name', ''))
-except:
+    print(data.get('scripts', {}).get(sys.argv[2], ''))
+except Exception:
     pass
-" 2>/dev/null || true)
+" "$config_file" "$script_name" 2>/dev/null || true)
 
   [ -n "$script_cmd" ] || return 0
 
