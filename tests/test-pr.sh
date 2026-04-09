@@ -43,6 +43,10 @@ case "$cmd" in
     # docker exec — handle various subcommands
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
       shift 2  # remove "docker exec"
+      # Skip -e KEY=VAL and -i flags
+      while [ "${1:-}" = "-e" ] || [ "${1:-}" = "-i" ]; do
+        [ "${1:-}" = "-e" ] && shift 2 || shift
+      done
       name="${1:-}"; shift || true
       # bash -c '...todos...' — no incomplete todos
       if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-c" ] && [[ "${3:-}" == *todos* ]]; then

@@ -780,7 +780,7 @@ print(json.dumps({
     'action': sys.argv[2],
     'container': sys.argv[3],
     'details': sys.argv[4]
-}))" "$timestamp" "$action" "$container" "$details" \
+}, separators=(',', ':')))" "$timestamp" "$action" "$container" "$details" \
     >>"$AUDIT_LOG_FILE" 2>/dev/null || true
 }
 
