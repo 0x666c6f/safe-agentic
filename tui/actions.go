@@ -270,12 +270,13 @@ func (ac *Actions) Logs() {
 
 	data := ac.fetchDockerLogs(name, state.tailLines)
 	if len(data) == 0 {
-		ac.app.footer.ShowStatus("No logs found", true)
+		ac.app.footer.ShowStatus("No session logs found", true)
 		return
 	}
 
+	rendered := renderSessionLog(data)
 	title := ac.logsTitle(name, state)
-	tv := ShowOverlayLive(ac.app, "logs", title, string(data))
+	tv := ShowOverlayLive(ac.app, "logs", title, rendered)
 
 	// Keybindings within the logs overlay:
 	//   r — toggle auto-refresh
@@ -322,9 +323,10 @@ func (ac *Actions) Logs() {
 				}
 				newData := ac.fetchDockerLogs(name, state.tailLines)
 				if len(newData) > 0 {
+					newRendered := renderSessionLog(newData)
 					ac.app.tapp.QueueUpdateDraw(func() {
 						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
-							tv.SetText(string(newData))
+							tv.SetText(newRendered)
 							tv.ScrollToEnd()
 						}
 					})
@@ -347,12 +349,53 @@ func (ac *Actions) logsTitle(name string, state *logsState) string {
 }
 
 func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
-	args := []string{"docker", "logs"}
-	if tailLines != "0" {
-		args = append(args, "--tail", tailLines)
+	// Get the container's repo label to find the right project dir
+	repoLabel, _ := execOrb("docker", "inspect", "--format",
+		`{{index .Config.Labels "safe-agentic.repo-display"}}`, name)
+	repo := strings.TrimSpace(string(repoLabel))
+
+	agentType, _ := execOrb("docker", "inspect", "--format",
+		`{{index .Config.Labels "safe-agentic.agent-type"}}`, name)
+	atype := strings.TrimSpace(string(agentType))
+
+	configDir := "/home/agent/.codex"
+	if atype == "claude" {
+		configDir = "/home/agent/.claude"
 	}
-	args = append(args, name)
-	data, _ := execOrbTimeout(60*time.Second, args...)
+
+	// Build the project directory path that Claude/Codex uses
+	// e.g. repo "0x666c6f/safe-agentic" → projects/-workspace-0x666c6f-safe-agentic/
+	var findDir string
+	if repo != "" && repo != "-" {
+		projSlug := strings.ReplaceAll(repo, "/", "-")
+		findDir = fmt.Sprintf("%s/projects/-workspace-%s", configDir, projSlug)
+	} else {
+		findDir = configDir
+	}
+
+	// Find the most recent session JSONL in this project dir
+	findCmd := fmt.Sprintf(
+		"find %s -maxdepth 1 -name '*.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
+		findDir)
+	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
+	if err != nil || strings.TrimSpace(string(latestFile)) == "" {
+		// Fallback: search entire config dir
+		findCmd = fmt.Sprintf(
+			"find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
+			configDir)
+		latestFile, _ = execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
+	}
+	path := strings.TrimSpace(string(latestFile))
+	if path == "" {
+		return nil
+	}
+
+	// Read with tail or cat
+	if tailLines == "0" {
+		data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
+		return data
+	}
+	data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
 	return data
 }
 
@@ -362,7 +405,7 @@ func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsSt
 		data := ac.fetchDockerLogs(name, state.tailLines)
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if len(data) > 0 {
-				tv.SetText(string(data))
+				tv.SetText(renderSessionLog(data))
 				tv.SetTitle(" " + ac.logsTitle(name, state) + " ")
 			}
 			ac.app.footer.Reset()
