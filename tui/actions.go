@@ -373,29 +373,61 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 		findDir = configDir
 	}
 
-	// Find the most recent session JSONL in this project dir
-	findCmd := fmt.Sprintf(
-		"find %s -maxdepth 1 -name '*.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
-		findDir)
-	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
-	if err != nil || strings.TrimSpace(string(latestFile)) == "" {
-		// Fallback: search entire config dir
-		findCmd = fmt.Sprintf(
-			"find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
-			configDir)
-		latestFile, _ = execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
+	// Check if container is running
+	stateOut, _ := execOrb("docker", "inspect", "--format", "{{.State.Status}}", name)
+	running := strings.TrimSpace(string(stateOut)) == "running"
+
+	if running {
+		// Running: use docker exec
+		findCmd := fmt.Sprintf(
+			"find %s -maxdepth 1 -name '*.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
+			findDir)
+		latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
+		if err != nil || strings.TrimSpace(string(latestFile)) == "" {
+			findCmd = fmt.Sprintf(
+				"find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
+				configDir)
+			latestFile, _ = execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
+		}
+		path := strings.TrimSpace(string(latestFile))
+		if path == "" {
+			return nil
+		}
+		if tailLines == "0" {
+			data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
+			return data
+		}
+		data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
+		return data
 	}
+
+	// Stopped: use docker cp to extract the project dir, then read locally in VM
+	tmpDir := "/tmp/satui-logs-" + name
+	execOrb("rm", "-rf", tmpDir)
+	defer execOrb("rm", "-rf", tmpDir)
+
+	_, err := execOrbLong("docker", "cp", name+":"+findDir, tmpDir+"/")
+	if err != nil {
+		// Fallback: copy entire config dir
+		_, err = execOrbTimeout(60*time.Second, "docker", "cp", name+":"+configDir, tmpDir+"/")
+		if err != nil {
+			return nil
+		}
+	}
+
+	findCmd := fmt.Sprintf(
+		"find %s -maxdepth 2 -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
+		tmpDir)
+	latestFile, _ := execOrbLong("bash", "-c", findCmd)
 	path := strings.TrimSpace(string(latestFile))
 	if path == "" {
 		return nil
 	}
-
-	// Read with tail or cat
 	if tailLines == "0" {
-		data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
+		data, _ := execOrbTimeout(60*time.Second, "cat", path)
 		return data
 	}
-	data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
+	data, _ := execOrbLong("tail", "-"+tailLines, path)
 	return data
 }
 
