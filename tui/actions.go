@@ -393,6 +393,57 @@ func (ac *Actions) Diff() {
 	}()
 }
 
+// Todo shows the todo list for the selected agent in an overlay.
+func (ac *Actions) Todo() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	if !agent.Running {
+		ac.app.footer.ShowStatus("Agent is not running", true)
+		return
+	}
+	name := agent.Name
+	ac.app.footer.ShowStatus(fmt.Sprintf("Loading todos for %s...", name), false)
+	go func() {
+		const pyScript = `
+import json, os, sys
+path = '/workspace/.safe-agentic/todos.json'
+if not os.path.exists(path):
+    print('No todos yet.')
+    sys.exit(0)
+try:
+    with open(path) as f:
+        todos = json.load(f)
+except Exception:
+    print('No todos yet.')
+    sys.exit(0)
+if not todos:
+    print('No todos yet.')
+    sys.exit(0)
+done_count = sum(1 for t in todos if t.get('done'))
+for i, t in enumerate(todos, 1):
+    mark = 'x' if t.get('done') else ' '
+    print('[{}] {}. {}'.format(mark, i, t.get('text', '')))
+print('')
+print('{}/{} complete'.format(done_count, len(todos)))
+`
+		out, err := execOrbLong("docker", "exec", name, "python3", "-c", pyScript)
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Failed to load todos", true)
+				return
+			}
+			content := strings.TrimSpace(string(out))
+			if content == "" {
+				ac.app.footer.ShowStatus("No todos yet", false)
+				return
+			}
+			ShowOverlay(ac.app, "todo", fmt.Sprintf("Todos: %s", name), content)
+		})
+	}()
+}
+
 // Describe shows docker inspect in a formatted overlay.
 func (ac *Actions) Describe() {
 	agent := ac.selectedOrWarn()

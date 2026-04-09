@@ -100,6 +100,7 @@ ${GREEN}Manage:${NC}
   agent peek <name>|--latest [--lines N]
   agent diff <name>|--latest [--stat]
   agent checkpoint <create|list|revert> <name>|--latest [...]
+  agent todo <add|list|check|uncheck> <name>|--latest [...]
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
@@ -111,7 +112,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|cp|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -281,6 +282,32 @@ Examples:
   agent checkpoint revert my-task before-refactor
   agent checkpoint create --latest
   agent checkpoint list --latest
+EOF
+}
+
+print_help_todo() {
+  cat <<EOF
+Usage: agent todo <add|list|check|uncheck> <name>|--latest [...]
+
+Track merge requirements for an agent's working tree. Todos are stored in
+/workspace/.safe-agentic/todos.json inside the container.
+
+Subcommands:
+  add     <name>|--latest <text>    Add a new todo item
+  list    <name>|--latest           List all todos with status
+  check   <name>|--latest <index>   Mark todo at 1-based index as done
+  uncheck <name>|--latest <index>   Mark todo at 1-based index as not done
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help  Show this help
+
+Examples:
+  agent todo add my-task "Add unit tests for auth module"
+  agent todo list my-task
+  agent todo check my-task 1
+  agent todo uncheck --latest 2
+  agent todo list --latest
 EOF
 }
 
@@ -1336,6 +1363,9 @@ cmd_help() {
     checkpoint)
       print_help_checkpoint
       ;;
+    todo)
+      print_help_todo
+      ;;
     stop)
       print_help_stop
       ;;
@@ -1764,6 +1794,164 @@ cmd_checkpoint() {
   esac
 }
 
+cmd_todo() {
+  local topic="todo"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_todo
+      return 0
+      ;;
+    add|list|check|uncheck)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (add|list|check|uncheck)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use add, list, check, or uncheck."
+      ;;
+  esac
+
+  local name=""
+  local latest=false
+  local text=""
+  local index=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_todo
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ "$subcmd" = "add" ]; then
+          if [ -z "$text" ]; then
+            text="$1"
+          else
+            text="$text $1"
+          fi
+        elif [ "$subcmd" = "check" ] || [ "$subcmd" = "uncheck" ]; then
+          [ -z "$index" ] || die_with_help "$topic" "Unexpected argument '$1'."
+          index="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  if [ "$subcmd" = "add" ] && [ -z "$text" ]; then
+    die_with_help "$topic" "Todo text required for add."
+  fi
+
+  if { [ "$subcmd" = "check" ] || [ "$subcmd" = "uncheck" ]; } && [ -z "$index" ]; then
+    die_with_help "$topic" "Index required for $subcmd."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  local todos_file="/workspace/.safe-agentic/todos.json"
+
+  case "$subcmd" in
+    add)
+      # Ensure directory exists
+      vm_exec docker exec "$name" mkdir -p /workspace/.safe-agentic
+      # JSON-encode the text on the host to pass safely into the container
+      local escaped_text
+      escaped_text=$(python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' <<< "$text")
+      # Pipe python script via stdin to avoid quoting issues with multiline -c
+      vm_exec docker exec -i "$name" python3 - \
+        "$todos_file" "$escaped_text" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+text_json = sys.argv[2]
+text = json.loads(text_json)
+todos = []
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            todos = json.load(f)
+    except Exception:
+        todos = []
+todos.append({'text': text, 'done': False})
+with open(path, 'w') as f:
+    json.dump(todos, f, indent=2)
+print('Added todo #{}: {}'.format(len(todos), text))
+PYEOF
+      ;;
+    list)
+      # Pipe python script via stdin to avoid quoting issues
+      vm_exec docker exec -i "$name" python3 - "$todos_file" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+if not os.path.exists(path):
+    print('No todos yet.')
+    sys.exit(0)
+try:
+    with open(path) as f:
+        todos = json.load(f)
+except Exception:
+    print('No todos yet.')
+    sys.exit(0)
+if not todos:
+    print('No todos yet.')
+    sys.exit(0)
+done_count = sum(1 for t in todos if t.get('done'))
+for i, t in enumerate(todos, 1):
+    mark = 'x' if t.get('done') else ' '
+    print('[{}] {}. {}'.format(mark, i, t.get('text', '')))
+print('')
+print('{}/{} complete'.format(done_count, len(todos)))
+PYEOF
+      ;;
+    check|uncheck)
+      local done_flag
+      [ "$subcmd" = "check" ] && done_flag="1" || done_flag="0"
+      # Pipe python script via stdin to avoid quoting issues
+      vm_exec docker exec -i "$name" python3 - \
+        "$todos_file" "$index" "$done_flag" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+idx = int(sys.argv[2]) - 1
+done = sys.argv[3] == '1'
+if not os.path.exists(path):
+    print('No todos found.', file=sys.stderr)
+    sys.exit(1)
+with open(path) as f:
+    todos = json.load(f)
+if idx < 0 or idx >= len(todos):
+    print('Index {} out of range (1-{}).'.format(idx + 1, len(todos)), file=sys.stderr)
+    sys.exit(1)
+todos[idx]['done'] = done
+with open(path, 'w') as f:
+    json.dump(todos, f, indent=2)
+label = 'done' if done else 'not done'
+print('Todo #{} marked as {}.'.format(idx + 1, label))
+PYEOF
+      ;;
+  esac
+}
+
 cmd_aws_refresh() {
   local topic="aws-refresh"
   local name=""
@@ -1854,6 +2042,7 @@ case "$cmd" in
   peek)       cmd_peek "$@" ;;
   diff)       cmd_diff "$@" ;;
   checkpoint) cmd_checkpoint "$@" ;;
+  todo)        cmd_todo "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"

@@ -223,6 +223,9 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		case 'x':
 			a.actions.Checkpoint()
 			return nil
+		case 't':
+			a.actions.Todo()
+			return nil
 		case 'm':
 			a.actions.McpLogin()
 			return nil

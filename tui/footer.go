@@ -66,6 +66,7 @@ var allShortcuts = []shortcut{
 	{"p", "Preview"},
 	{"e", "Export"},
 	{"f", "Diff"},
+	{"t", "Todos"},
 	{"x", "Checkpoint"},
 	{"c", "Copy"},
 	{"m", "MCP Login"},
