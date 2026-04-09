@@ -2,6 +2,45 @@
 
 Review, checkpoint, track, and ship agent work.
 
+## Output — extract agent results
+
+```bash
+agent output api-refactor          # last agent message
+agent output --latest              # latest container
+agent output --diff api-refactor   # git diff
+agent output --files api-refactor  # list changed files
+agent output --commits api-refactor # git log
+agent output --json api-refactor   # all of the above as JSON
+```
+
+Useful for piping into CI, scripts, or `--on-exit` callbacks.
+
+```bash
+# Capture result as JSON after a background agent finishes
+agent spawn claude --background --ssh --repo git@github.com:org/api.git \
+  --prompt "Fix tests" \
+  --on-exit "agent output --latest --json > /tmp/fix-result.json"
+```
+
+## Summary — one-screen overview
+
+```bash
+agent summary api-refactor
+agent summary --latest
+```
+
+Prints a compact overview: agent type, repo, status, activity, elapsed time, cost estimate, last message, and changed files. Good for a quick status check before reviewing or creating a PR.
+
+## Retry — re-run with the same config
+
+```bash
+agent retry api-refactor                       # re-run with same config
+agent retry --latest                           # retry latest container
+agent retry --latest --feedback "Focus only on src/, skip test files"
+```
+
+`agent retry` stops the container, respawns it with the original spawn flags, and optionally appends feedback to the original prompt.
+
 ## Diff — review changes
 
 ```bash
@@ -86,15 +125,21 @@ agent spawn claude --ssh --reuse-auth \
 # 2. Monitor progress
 agent peek --latest
 
-# 3. Review changes
+# 3. Quick status check
+agent summary --latest
+
+# 4. Review changes
 agent diff --latest
 agent review --latest
 
-# 4. Track remaining work
+# 5. Extract last message to see what was done
+agent output --latest
+
+# 6. Track remaining work
 agent todo add --latest "Verify on staging"
 agent todo check --latest 1
 
-# 5. Ship it
+# 7. Ship it
 agent pr --latest --title "fix: resolve CI failures"
 ```
 

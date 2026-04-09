@@ -87,6 +87,58 @@ agent peek <name> --lines 50   # more lines
 
 Shows what the agent is currently doing without attaching. Only works on running tmux containers.
 
+### Output — extract agent results
+
+```bash
+agent output <name>            # last agent message
+agent output --latest          # latest container
+agent output --diff <name>     # git diff
+agent output --files <name>    # list changed files
+agent output --commits <name>  # git log
+agent output --json <name>     # all of the above as JSON
+```
+
+Use `--json` to pipe results into scripts or `--on-exit` callbacks.
+
+### Summary — one-screen overview
+
+```bash
+agent summary <name>
+agent summary --latest
+```
+
+Compact overview: type, status, repo, branch, elapsed time, cost estimate, last agent message, changed files. Use before reviewing or creating a PR.
+
+### Retry — re-run with original config
+
+```bash
+agent retry <name>
+agent retry --latest
+agent retry --latest --feedback "Focus only on the auth module"
+```
+
+Stops the container, respawns with the same flags, and optionally appends feedback to the original prompt.
+
+### Config — manage defaults
+
+```bash
+agent config show                          # show all current defaults
+agent config get memory                    # get one value
+agent config set memory 16g                # set a value
+agent config reset memory                  # reset to built-in default
+agent config reset --all                   # reset everything
+```
+
+### Template — manage prompt templates
+
+```bash
+agent template list                        # list built-in + custom templates
+agent template show security-audit         # preview a template
+agent template create my-template          # create custom template ($EDITOR opens)
+```
+
+Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependency-update`, `bug-fix`, `docs-review`.
+
 ### Diff — review agent's changes
 
 ```bash
@@ -189,6 +241,7 @@ This:
 | `n` | Spawn new agent |
 | `e` | Export sessions |
 | `/` | Filter agents |
+| `?` | Help overlay (all keybindings) |
 | `:fleet <file>` | Spawn from manifest |
 | `:pipeline <file>` | Run pipeline |
 

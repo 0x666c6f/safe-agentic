@@ -33,6 +33,13 @@ agent spawn <claude|codex> [options]
 | `--memory SIZE` | Memory limit | 8g |
 | `--cpus N` | CPU limit | 4 |
 | `--pids-limit N` | PID limit | 512 |
+| `--template NAME` | Use a built-in prompt template | none |
+| `--instructions 'TEXT'` | Inject agent role context (prepended to prompt) | none |
+| `--instructions-file PATH` | Load role context from a file | none |
+| `--on-exit 'CMD'` | Run a command on the host when agent finishes | none |
+| `--max-cost N` | Cost budget label (informational) | none |
+| `--background` | Headless mode — detach immediately after spawn | off |
+| `--auto-trust` | Skip the trust prompt on first run | off |
 | `--dry-run` | Show docker command without running | -- |
 
 ## Examples
@@ -134,3 +141,87 @@ agent spawn claude \
   --network agent-isolated \
   --prompt "Review this codebase for malicious code, backdoors, or security issues. Do not run any scripts."
 ```
+
+## Templates
+
+Built-in prompt templates let you run standard tasks without writing prompts.
+
+```bash
+# List available templates
+agent template list
+
+# Preview a template
+agent template show security-audit
+
+# Use a template
+agent spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+
+# Create a custom template
+agent template create my-template
+```
+
+### Built-in templates
+
+| Name | Purpose |
+|------|---------|
+| `security-audit` | OWASP top-10, secrets, SQL injection, IAM |
+| `code-review` | Best practices, bugs, test coverage gaps |
+| `test-coverage` | Identify untested paths, write tests |
+| `dependency-update` | Update deps, fix breaking changes |
+| `bug-fix` | Investigate and fix a reported bug |
+| `docs-review` | Audit docs for accuracy and completeness |
+
+### Template examples
+
+```bash
+# Security audit on infrastructure repo
+agent spawn claude --ssh --aws my-profile \
+  --repo git@github.com:org/infra.git \
+  --template security-audit
+
+# Test coverage pass on a feature branch
+agent spawn codex --ssh --reuse-auth \
+  --repo git@github.com:org/api.git \
+  --template test-coverage \
+  --name coverage-run
+
+# Combine template with extra instructions
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --template code-review \
+  --instructions "Focus on the auth module only. Skip generated files."
+```
+
+## Instructions
+
+Inject role context that prepends to the prompt (or replaces the prompt when used without `--prompt`).
+
+```bash
+# Inline instructions
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --instructions "You are a senior Go engineer. Follow the project's error handling conventions."
+
+# From a file
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --instructions-file ./prompts/backend-engineer.md \
+  --prompt "Refactor the auth middleware"
+```
+
+## Background mode and on-exit callbacks
+
+```bash
+# Headless — spawn and return immediately (no interactive attach)
+agent spawn claude --background --ssh --repo git@github.com:org/api.git \
+  --prompt "Update all dependencies and create a PR"
+
+# Run a script when the agent finishes
+agent spawn claude --background --ssh --repo git@github.com:org/api.git \
+  --prompt "Fix the failing tests" \
+  --on-exit "agent output --latest --json >> /tmp/results.json"
+
+# Cost budget label (pipeline tooling can check this)
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --max-cost 5 \
+  --prompt "Refactor the payment module"
+```
+
+`--auto-trust` skips the interactive trust prompt — useful in CI or fleet manifests where the agent must start without user input.

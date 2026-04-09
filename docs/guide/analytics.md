@@ -2,6 +2,25 @@
 
 Track costs and audit agent operations.
 
+## Summary — one-screen overview
+
+```bash
+agent summary api-refactor
+agent summary --latest
+```
+
+Prints a compact overview of a single agent:
+
+- Agent type, container name, status
+- Repo URL and active branch
+- Elapsed time since spawn
+- Activity (Working / Idle / Stopped)
+- Cost estimate (same as `agent cost`)
+- Last agent message (from session JSONL)
+- List of changed files (`git diff --name-only`)
+
+Useful as a quick pre-PR sanity check or to get context before reattaching.
+
 ## Cost estimation
 
 ```bash

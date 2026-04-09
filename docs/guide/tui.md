@@ -84,8 +84,13 @@ Three zones:
 | `1`-`9` | Sort | Sort by column N (toggles ascending/descending) |
 | `/` | Filter | Filter agents by substring match on any field |
 | `:` | Command | Open command bar |
+| `?` | Help | Toggle the full keybinding help overlay |
 | `Esc` | Back | Close overlay, filter, command, or modal |
 | `q` / `Ctrl-c` | Quit | Exit the TUI |
+
+## Help overlay
+
+Press `?` at any time to open a scrollable overlay listing every keybinding. Press `?` or `Esc` to close it.
 
 ## Command bar
 

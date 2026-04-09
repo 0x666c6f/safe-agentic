@@ -43,16 +43,24 @@ Three isolation boundaries separate your machine from the agent. The agent has f
 ## Spawn, work, review, merge
 
 ```bash
-# Spawn an agent with a task
+# Spawn with a task or a built-in template
 agent spawn claude --ssh --repo git@github.com:org/api.git \
   --prompt "Fix the failing CI tests"
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --template security-audit
 
 # Check what it's doing
 agent peek --latest
 
+# Quick status overview
+agent summary --latest
+
 # Review its changes
 agent diff --latest
 agent review --latest
+
+# Extract the last agent message
+agent output --latest
 
 # Track what's left before merging
 agent todo add --latest "Run integration tests"
@@ -79,6 +87,14 @@ agents:
     repo: git@github.com:org/api.git
     ssh: true
     prompt: "Fix failing tests"
+
+  - name: security-audit
+    type: claude
+    repo: git@github.com:org/api.git
+    ssh: true
+    template: security-audit   # built-in template, no prompt needed
+    background: true
+    auto_trust: true
 
   - name: frontend-lint
     type: codex

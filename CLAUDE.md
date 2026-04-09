@@ -46,6 +46,9 @@ agent setup
 agent spawn claude --ssh --repo git@github.com:org/repo.git
 agent spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
 agent spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
+agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+agent spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
+agent spawn claude --background --auto-trust --on-exit 'agent output --latest --json > out.json' --repo ...
 
 # Quick aliases (auto-detect SSH from URL)
 agent-claude git@github.com:org/repo.git
@@ -103,6 +106,25 @@ agent todo list <name>                     # show todos
 agent todo check <name> <index>            # mark done
 agent pr <name> [--title T --base B]       # create GitHub PR
 agent review <name> [--base B]             # AI code review
+
+# Output & inspection
+agent output <name>|--latest              # last agent message
+agent output --diff <name>                # git diff
+agent output --files <name>               # list changed files
+agent output --commits <name>             # git log
+agent output --json <name>                # all as JSON
+agent summary <name>|--latest             # one-screen overview
+
+# Retry
+agent retry <name>|--latest [--feedback "text"]  # re-run with same config
+
+# Templates
+agent template list                       # list built-in + custom templates
+agent template show <name>                # print template prompt
+agent template create <name>              # create custom template
+
+# Config
+agent config set|get|show|reset           # manage defaults
 
 # Fleet & Pipelines
 agent fleet manifest.yaml [--dry-run]      # spawn agents from manifest

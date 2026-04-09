@@ -17,6 +17,54 @@ SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
 
 Simple `KEY=value` lines only. Not sourced as shell.
 
+## Config command
+
+`agent config` manages defaults from the command line instead of editing the defaults file directly.
+
+```bash
+# Show all current defaults
+agent config show
+
+# Get a single value
+agent config get memory
+
+# Set a value
+agent config set memory 16g
+agent config set cpus 8
+agent config set reuse_auth true
+agent config set identity "Your Name <you@example.com>"
+
+# Reset to built-in defaults
+agent config reset memory
+agent config reset --all
+```
+
+Changes write to `~/.config/safe-agentic/defaults.sh` and take effect on the next `agent` command.
+
+## Template command
+
+`agent template` manages built-in and custom prompt templates.
+
+```bash
+# List all templates (built-in + custom)
+agent template list
+
+# Preview a template's prompt
+agent template show security-audit
+agent template show my-custom-template
+
+# Create a new custom template (opens $EDITOR)
+agent template create backend-engineer
+```
+
+Custom templates are stored in `~/.config/safe-agentic/templates/`. Built-in templates (`security-audit`, `code-review`, `test-coverage`, `dependency-update`, `bug-fix`, `docs-review`) are read-only and cannot be overwritten.
+
+Use templates at spawn time:
+
+```bash
+agent spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+```
+
 ## MCP OAuth login
 
 ```bash

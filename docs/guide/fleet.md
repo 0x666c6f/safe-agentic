@@ -47,6 +47,13 @@ agents:
 | `network` | string | Docker network name |
 | `memory` | string | Memory limit (e.g., `16g`) |
 | `cpus` | string | CPU limit |
+| `template` | string | Built-in prompt template name |
+| `instructions` | string | Agent role context (prepended to prompt) |
+| `instructions_file` | string | Path to role context file |
+| `on_exit` | string | Host command to run when agent finishes |
+| `max_cost` | number | Cost budget label |
+| `background` | bool | Headless mode, no interactive attach |
+| `auto_trust` | bool | Skip trust prompt on first run |
 
 Agents spawn in parallel. Monitor them with `agent tui`.
 
@@ -90,6 +97,13 @@ All fleet fields plus:
 | `depends_on` | string | Only run after this step completes |
 | `retry` | int | Re-attempt up to N times (5s delay) |
 | `on_failure` | string | Trigger this step on failure |
+| `template` | string | Built-in prompt template name |
+| `instructions` | string | Agent role context (prepended to prompt) |
+| `instructions_file` | string | Path to role context file |
+| `on_exit` | string | Host command to run when step finishes |
+| `max_cost` | number | Cost budget label |
+| `background` | bool | Headless mode |
+| `auto_trust` | bool | Skip trust prompt |
 
 ### Execution model
 
@@ -120,6 +134,37 @@ agent pipeline examples/pipeline-consolidate-and-fix.yaml
 This gives you parallel review speed with coordinated follow-up action.
 
 ## Real-world examples
+
+### Example 0: Template-based security audit fleet
+
+```yaml
+# security-audit-fleet.yaml
+agents:
+  - name: audit-api
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    reuse_auth: true
+    template: security-audit
+    background: true
+    auto_trust: true
+    on_exit: "agent output --latest --json >> /tmp/audit-results.json"
+
+  - name: audit-web
+    type: claude
+    repo: git@github.com:myorg/web.git
+    ssh: true
+    reuse_auth: true
+    template: security-audit
+    background: true
+    auto_trust: true
+    on_exit: "agent output --latest --json >> /tmp/audit-results.json"
+```
+
+```bash
+agent fleet security-audit-fleet.yaml
+agent tui  # monitor both audits
+```
 
 ### Example 1: Parallel dependency updates across repos
 

@@ -44,6 +44,13 @@ agent spawn <claude|codex> [options]
 | `--memory SIZE` | Memory limit | 8g |
 | `--cpus N` | CPU limit | 4 |
 | `--pids-limit N` | PID limit | 512 |
+| `--template NAME` | Use a built-in prompt template | none |
+| `--instructions 'TEXT'` | Inject agent role context (prepended to prompt) | none |
+| `--instructions-file PATH` | Load role context from a file | none |
+| `--on-exit 'CMD'` | Run a host command when agent finishes | none |
+| `--max-cost N` | Cost budget label | none |
+| `--background` | Headless mode — detach immediately after spawn | off |
+| `--auto-trust` | Skip the trust prompt on first run | off |
 
 ## Examples
 
@@ -72,6 +79,36 @@ agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.
 
 # Untrusted code (no SSH, no internet)
 agent spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
+```
+
+## Templates
+
+```bash
+# List available templates
+agent template list
+
+# Preview a template
+agent template show security-audit
+
+# Use a template (no --prompt needed)
+agent spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+
+# Combine template with extra instructions
+agent spawn claude --ssh --repo git@github.com:org/api.git \
+  --template code-review \
+  --instructions "Focus on the auth module only."
+```
+
+Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependency-update`, `bug-fix`, `docs-review`.
+
+## Background and callbacks
+
+```bash
+# Headless — spawn and return immediately
+agent spawn claude --background --auto-trust --ssh \
+  --repo git@github.com:org/api.git \
+  --prompt "Fix the failing tests" \
+  --on-exit "agent output --latest --json > /tmp/result.json"
 ```
 
 ## Getting the repo URL from the current directory
@@ -116,7 +153,7 @@ agents:
     repo: https://github.com/org/frontend.git
 ```
 
-Supported fields per agent: `name`, `type`, `repo`, `ssh`, `reuse_auth`, `reuse_gh_auth`, `docker`, `prompt`, `aws`, `network`, `memory`, `cpus`.
+Supported fields per agent: `name`, `type`, `repo`, `ssh`, `reuse_auth`, `reuse_gh_auth`, `docker`, `prompt`, `aws`, `network`, `memory`, `cpus`, `template`, `instructions`, `instructions_file`, `on_exit`, `max_cost`, `background`, `auto_trust`.
 
 ## Pipeline — multi-step agent workflows
 
