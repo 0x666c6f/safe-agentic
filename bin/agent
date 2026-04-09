@@ -2725,31 +2725,36 @@ cmd_pipeline() {
   # Track which on_failure steps were triggered so we don't double-run them
   local -a triggered_steps=()
 
-  # Build associative arrays from parsed lines for lookup
-  declare -A step_data
-  local idx=0
-  while IFS= read -r step_line; do
-    [ -z "$step_line" ] && continue
-    local sname
-    sname=$(echo "$step_line" | grep -o 'name=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    [ -n "$sname" ] && step_data["$sname"]="$step_line"
-    idx=$((idx + 1))
-  done <<< "$step_lines"
+  # Lookup a step line by name from step_lines (bash 3.2 compatible, no assoc arrays)
+  lookup_step_by_name() {
+    local target_name="$1"
+    local target_b64
+    target_b64=$(printf '%s' "$target_name" | base64 2>/dev/null)
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      if [[ "$line" == *"name=$target_b64"* ]]; then
+        echo "$line"
+        return 0
+      fi
+    done <<< "$step_lines"
+    return 1
+  }
 
   pipeline_run_step() {
     local step_line="$1"
     [ -z "$step_line" ] && return 1
 
-    local name type repo prompt ssh reuse_auth on_failure retry depends_on
-    name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    prompt=$(     echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    ssh=$(        echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    reuse_auth=$( echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
-    retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
-    depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    local name type repo prompt ssh reuse_auth auto_trust on_failure retry depends_on
+    name=$(        echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    type=$(        echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    repo=$(        echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    prompt=$(      echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    ssh=$(         echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    reuse_auth=$(  echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    auto_trust=$(  echo "$step_line" | grep -o 'auto_trust=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    retry=$(       echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
+    depends_on=$(  echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
 
     [ -z "$type" ]  && type="claude"
     [ -z "$retry" ] && retry="0"
@@ -2774,6 +2779,7 @@ cmd_pipeline() {
     [ -n "$prompt" ] && spawn_args+=(--prompt "$prompt")
     [[ "$ssh" == "true" ]] && spawn_args+=(--ssh)
     [[ "$reuse_auth" == "true" ]] && spawn_args+=(--reuse-auth)
+    [[ "$auto_trust" == "true" ]] && spawn_args+=(--auto-trust)
     spawn_args+=(--name "pipeline-${name}")
 
     local attempt=0
@@ -2809,10 +2815,12 @@ cmd_pipeline() {
         for t in "${triggered_steps[@]:-}"; do
           [ "$t" = "$on_failure" ] && already_triggered=true && break
         done
-        if ! $already_triggered && [ -n "${step_data[$on_failure]:-}" ]; then
+        local failure_line
+        failure_line=$(lookup_step_by_name "$on_failure" || echo "")
+        if ! $already_triggered && [ -n "$failure_line" ]; then
           triggered_steps+=("$on_failure")
           info "Step '$name': triggering on_failure step '$on_failure'..."
-          pipeline_run_step "${step_data[$on_failure]}" || true
+          pipeline_run_step "$failure_line" || true
         fi
       fi
       return 1
@@ -2845,6 +2853,116 @@ cmd_pipeline() {
   info "Pipeline complete: $completed_count step(s) succeeded, $failed_count step(s) failed."
   $pipeline_ok && ok "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished successfully."
   $pipeline_ok || die "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished with failures."
+}
+
+print_help_orchestrate() {
+  cat <<EOF
+Usage: agent orchestrate <fleet.yaml> <pipeline.yaml> [--poll N]
+
+Run a fleet of agents in parallel, wait for all to finish, then
+automatically run a follow-up pipeline.
+
+Options:
+  --poll N    Poll interval in seconds (default: 30)
+
+The orchestrator:
+  1. Spawns all agents from the fleet manifest
+  2. Polls 'agent list' every N seconds until all fleet agents exit
+  3. Runs the pipeline manifest (consolidate, fix, create PR, etc.)
+
+Examples:
+  agent orchestrate examples/fleet-review-and-fix.yaml examples/pipeline-consolidate-and-fix.yaml
+  agent orchestrate fleet.yaml pipeline.yaml --poll 15
+EOF
+}
+
+cmd_orchestrate() {
+  local topic="orchestrate"
+  local fleet_file=""
+  local pipeline_file=""
+  local poll_interval=30
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --poll)
+        require_option_value "$topic" "--poll" "${2:-}"
+        poll_interval="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_orchestrate
+        return 0
+        ;;
+      *)
+        if [ -z "$fleet_file" ]; then
+          fleet_file="$1"
+        elif [ -z "$pipeline_file" ]; then
+          pipeline_file="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$fleet_file" ] || die_with_help "$topic" "Fleet manifest required."
+  [ -n "$pipeline_file" ] || die_with_help "$topic" "Pipeline manifest required."
+  [ -f "$fleet_file" ] || die "Fleet manifest not found: $fleet_file"
+  [ -f "$pipeline_file" ] || die "Pipeline manifest not found: $pipeline_file"
+
+  # Phase 1: spawn fleet
+  info "Phase 1: spawning fleet from $fleet_file..."
+  cmd_fleet "$fleet_file" || die "Fleet spawn failed."
+
+  # Collect fleet agent container names
+  local -a fleet_containers=()
+  local fleet_names
+  fleet_names=$(python3 -c "
+import sys
+current = None
+with open('$fleet_file') as f:
+    for line in f:
+        line = line.rstrip()
+        if line.strip().startswith('- name:'):
+            current = line.split(':', 1)[1].strip()
+        elif current and line.strip().startswith('type:'):
+            agent_type = line.split(':', 1)[1].strip()
+            print('agent-' + agent_type + '-' + current)
+            current = None
+" 2>/dev/null)
+
+  while IFS= read -r cname; do
+    [ -n "$cname" ] && fleet_containers+=("$cname")
+  done <<< "$fleet_names"
+
+  local fleet_count=${#fleet_containers[@]}
+  info "Waiting for $fleet_count fleet agent(s) to finish (polling every ${poll_interval}s)..."
+
+  # Phase 2: wait for all fleet agents to exit
+  while true; do
+    local still_running=0
+    local c
+    for c in "${fleet_containers[@]}"; do
+      local state
+      state=$(vm_exec docker inspect --format '{{.State.Status}}' "$c" 2>/dev/null || echo "gone")
+      if [ "$state" = "running" ]; then
+        still_running=$((still_running + 1))
+      fi
+    done
+
+    if [ "$still_running" -eq 0 ]; then
+      ok "All $fleet_count fleet agents finished."
+      break
+    fi
+
+    info "$still_running/$fleet_count agent(s) still running..."
+    sleep "$poll_interval"
+  done
+
+  # Phase 3: run pipeline
+  info "Phase 3: running pipeline from $pipeline_file..."
+  cmd_pipeline "$pipeline_file"
 }
 
 cmd_pr() {
@@ -3045,6 +3163,7 @@ case "$cmd" in
   cost)       cmd_cost "$@" ;;
   fleet)      cmd_fleet "$@" ;;
   pipeline)   cmd_pipeline "$@" ;;
+  orchestrate) cmd_orchestrate "$@" ;;
   pr)         cmd_pr "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
