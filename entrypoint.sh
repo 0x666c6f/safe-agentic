@@ -236,7 +236,7 @@ fi
 # Short-circuit for --help: run the CLI directly without tmux (needed for CI smoke tests)
 if [ "${#launch_args[@]}" -ge 1 ] && [ "${launch_args[0]}" = "--help" ]; then
   case "$AGENT_TYPE" in
-    claude) exec claude "${launch_args[@]}" ;;
+    claude) exec claude "${launch_args[@]}" 2>&1 ;;
     codex)  exec codex "${launch_args[@]}" ;;
     *)      exec bash -l "${launch_args[@]}" ;;
   esac
