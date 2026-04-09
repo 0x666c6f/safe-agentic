@@ -188,5 +188,41 @@ run_fails "unknown flag rejected" \
 err="$(cat "$ERR_LOG")"
 assert_contains "$err" "Unexpected argument" "unknown flag error"
 
+# --- review listed in general help ---
+help_out="$(TEST_ORB_LOG="$ORB_LOG" PATH="$FAKE_BIN:$PATH" \
+  bash "$REPO_DIR/bin/agent" help 2>&1 || true)"
+assert_contains "$help_out" "review" "general help lists review command"
+
+# --- -h shorthand works ---
+h_output="$(TEST_ORB_LOG="$ORB_LOG" PATH="$FAKE_BIN:$PATH" \
+  bash "$REPO_DIR/bin/agent" review -h 2>&1 || true)"
+assert_contains "$h_output" "agent review" "review -h shows usage"
+
+# --- container not running → error ---
+cat >"$FAKE_BIN/orb" <<'ORBEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+log_file="${TEST_ORB_LOG:?}"
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  list) echo "safe-agentic" ;;
+  run)
+    [ "${1:-}" = "-m" ] && shift 2
+    printf '%s\n' "$*" >>"$log_file"
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
+      echo "exited"; exit 0
+    fi
+    exit 0 ;;
+  *)
+    echo "unexpected orb command: $cmd" >&2; exit 1 ;;
+esac
+ORBEOF
+chmod +x "$FAKE_BIN/orb"
+
+: >"$ORB_LOG"
+run_fails "review container not running" \
+  bash "$REPO_DIR/bin/agent" review my-task
+assert_contains "$(cat "$ERR_LOG")" "not running" "review container not running shows error"
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

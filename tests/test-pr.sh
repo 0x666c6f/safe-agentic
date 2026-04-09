@@ -212,5 +212,56 @@ chmod +x "$FAKE_BIN/orb"
 run_fails "pr no-ssh fails" bash "$REPO_DIR/bin/agent" pr agent-claude-my-task
 assert_output_contains "ssh" "pr no-ssh mentions ssh requirement"
 
+# =============================================================================
+# -h flag prints usage
+# =============================================================================
+run_ok "pr -h flag" bash "$REPO_DIR/bin/agent" pr -h
+assert_output_contains "Usage: agent pr" "pr -h shows usage"
+
+# =============================================================================
+# pr listed in general help
+# =============================================================================
+run_ok "general help shows pr" bash "$REPO_DIR/bin/agent" help
+assert_output_contains "pr" "general help lists pr command"
+
+# =============================================================================
+# unknown flag rejected
+# =============================================================================
+run_fails "pr unknown flag" bash "$REPO_DIR/bin/agent" pr agent-claude-my-task --frobnicate
+assert_output_contains "agent help pr" "pr unknown flag shows usage pointer"
+
+# =============================================================================
+# name + --latest both given → rejected
+# =============================================================================
+run_fails "pr name and --latest rejected" bash "$REPO_DIR/bin/agent" pr agent-claude-my-task --latest
+assert_output_contains "not both" "pr name+--latest shows mutual exclusion error"
+
+# =============================================================================
+# container not running → error
+# =============================================================================
+cat >"$FAKE_BIN/orb" <<'ORBEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+log_file="${TEST_ORB_LOG:?}"
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  list) echo "safe-agentic" ;;
+  run)
+    [ "${1:-}" = "-m" ] && shift 2
+    printf '%s\n' "$*" >>"$log_file"
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
+      echo "exited"; exit 0
+    fi
+    exit 0 ;;
+  push|start|stop|create|ssh) ;;
+  *) echo "unexpected orb command: $cmd" >&2; exit 1 ;;
+esac
+ORBEOF
+chmod +x "$FAKE_BIN/orb"
+
+: >"$ORB_LOG"
+run_fails "pr container not running" bash "$REPO_DIR/bin/agent" pr agent-claude-my-task
+assert_output_contains "not running" "pr container not running shows error"
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
