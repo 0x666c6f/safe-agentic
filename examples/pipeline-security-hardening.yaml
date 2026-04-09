@@ -1,0 +1,25 @@
+# Pipeline: security audit → fix findings → verify fixes
+# Usage: agent pipeline examples/pipeline-security-hardening.yaml
+
+name: security-hardening
+steps:
+  - name: audit
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    prompt: "Perform a security audit of this repository. Check bash scripts for command injection, path traversal, unsafe quoting, TOCTOU races, and missing input validation. Check the Dockerfile for supply chain issues. Check the VM setup for hardening gaps. Write your findings to /workspace/safe-agentic/SECURITY-FINDINGS.md with severity ratings."
+
+  - name: fix
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    prompt: "Read SECURITY-FINDINGS.md and fix all critical and high severity issues. Run the test suite after each fix to ensure nothing breaks. Commit each fix separately with a descriptive message."
+    depends_on: audit
+    retry: 2
+
+  - name: verify
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    prompt: "Run the full test suite with 'bash tests/run-all.sh'. Then re-audit the codebase focusing on the issues listed in SECURITY-FINDINGS.md. Confirm each fix is effective. Report any remaining issues."
+    depends_on: fix
