@@ -75,7 +75,7 @@ agent aws-refresh <name> perso
 agent aws-refresh --latest
 ```
 
-Re-reads `~/.aws/credentials` from the host and writes into the running container. No restart needed.
+Re-reads `~/.aws/credentials` from the host and writes into the running container. No restart needed — AWS SDKs re-read the file automatically.
 
 ### Peek at agent output
 
@@ -86,6 +86,72 @@ agent peek <name> --lines 50   # more lines
 ```
 
 Shows what the agent is currently doing without attaching. Only works on running tmux containers.
+
+### Diff — review agent's changes
+
+```bash
+agent diff <name>              # full git diff
+agent diff --latest --stat     # diffstat summary
+```
+
+Shows the git diff from the agent's working tree inside the container.
+
+### Checkpoints — snapshot and revert
+
+```bash
+agent checkpoint create <name> "before refactor"
+agent checkpoint list <name>
+agent checkpoint revert <name> checkpoint-1712678400
+```
+
+Snapshots the working tree using git stash refs. Revert restores code without polluting branch history.
+
+### Todos — track merge requirements
+
+```bash
+agent todo add <name> "Run tests"
+agent todo list <name>
+agent todo check <name> 1
+agent todo uncheck <name> 1
+```
+
+JSON-based todo list inside the container. `agent pr` blocks if incomplete todos exist.
+
+### PR creation
+
+```bash
+agent pr <name> --title "feat: add caching" --base dev
+agent pr --latest
+```
+
+Commits, pushes, and creates a GitHub PR via `gh pr create`. Requires `--ssh` on the container. Blocked by incomplete todos.
+
+### Code review
+
+```bash
+agent review <name>                # codex review --uncommitted (or git diff fallback)
+agent review --latest --base main  # codex review --base main
+```
+
+Runs `codex review` inside the container if available, otherwise shows raw `git diff`.
+
+### Cost estimation
+
+```bash
+agent cost <name>
+agent cost --latest
+```
+
+Parses session JSONL for token usage and estimates API spend per model.
+
+### Audit log
+
+```bash
+agent audit               # last 50 entries
+agent audit --lines 100
+```
+
+Shows the append-only operation log (`~/.config/safe-agentic/audit.jsonl`). Every spawn, stop, and attach is recorded.
 
 ### Full cleanup
 
@@ -100,6 +166,31 @@ This:
 3. Removes managed per-container networks
 4. Prunes dangling images
 5. With `--auth`: also removes shared auth volumes
+
+## TUI keybindings
+
+`agent tui` provides a k9s-style interactive dashboard. Key keybindings:
+
+| Key | Action |
+|-----|--------|
+| `a` / `Enter` | Attach to agent |
+| `r` | Resume agent |
+| `s` | Stop agent |
+| `l` | View logs |
+| `d` | Describe (docker inspect) |
+| `f` | Diff overlay |
+| `R` | Code review overlay |
+| `t` | Todos overlay |
+| `x` | Create checkpoint |
+| `g` | Create PR |
+| `$` | Cost estimation overlay |
+| `A` | Audit log overlay |
+| `p` | Toggle preview pane |
+| `n` | Spawn new agent |
+| `e` | Export sessions |
+| `/` | Filter agents |
+| `:fleet <file>` | Spawn from manifest |
+| `:pipeline <file>` | Run pipeline |
 
 ## Workflow
 

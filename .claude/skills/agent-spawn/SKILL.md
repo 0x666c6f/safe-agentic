@@ -95,6 +95,73 @@ agent mcp-login notion
 
 The token persists in the auth volume for all agents using `--reuse-auth`.
 
+## Fleet — spawn multiple agents from manifest
+
+```bash
+agent fleet fleet.yaml
+agent fleet fleet.yaml --dry-run
+```
+
+YAML manifest format:
+```yaml
+agents:
+  - name: api-worker
+    type: claude
+    repo: git@github.com:org/api.git
+    ssh: true
+    reuse_auth: true
+    prompt: "Fix the failing tests"
+  - name: frontend
+    type: codex
+    repo: https://github.com/org/frontend.git
+```
+
+Supported fields per agent: `name`, `type`, `repo`, `ssh`, `reuse_auth`, `reuse_gh_auth`, `docker`, `prompt`, `aws`, `network`, `memory`, `cpus`.
+
+## Pipeline — multi-step agent workflows
+
+```bash
+agent pipeline pipeline.yaml
+agent pipeline pipeline.yaml --dry-run
+```
+
+Pipeline format:
+```yaml
+name: test-and-fix
+steps:
+  - name: run-tests
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Run all tests and report results"
+    on_failure: fix-tests
+  - name: fix-tests
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Fix the failing tests"
+    retry: 2
+  - name: create-pr
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Create a PR with the fixes"
+    depends_on: fix-tests
+```
+
+Steps run sequentially. `depends_on` skips if dependency hasn't completed. `retry` re-attempts. `on_failure` triggers a handler step.
+
+## Lifecycle scripts (safe-agentic.json)
+
+Repos can include a `safe-agentic.json` at root for automatic setup:
+
+```json
+{
+  "scripts": {
+    "setup": "npm install && cp .env.example .env"
+  }
+}
+```
+
+The `setup` script runs automatically after the repo is cloned inside the container.
+
 ## After spawning
 
 The agent opens interactively. On first run, an OAuth URL appears — the user opens it in their browser. After auth, the agent is ready to use.
