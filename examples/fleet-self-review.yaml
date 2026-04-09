@@ -7,6 +7,7 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "Perform a thorough code review of this repository. Focus on: code quality, error handling, edge cases, consistency between bin/agent and bin/agent-lib.sh, proper quoting in bash, and whether the TUI Go code follows best practices. Report findings as a structured list with severity (critical/high/medium/low)."
 
   - name: security-audit
@@ -14,6 +15,7 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "Perform a security audit of this repository. Check for: command injection in bash scripts (especially docker command construction), path traversal in repo URL parsing, unsafe eval/exec patterns, secrets in code, TOCTOU races, insecure tmpfs permissions, missing input validation, and whether the isolation boundaries (VM hardening, container flags, network filtering) have any gaps. Report each finding with severity and a suggested fix."
 
   - name: pentest
@@ -21,6 +23,7 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "You are a penetration tester. Your target is the safe-agentic sandboxing system. Try to find ways to: escape the container, access the host filesystem, bypass network egress filtering, steal SSH keys or auth tokens, escalate privileges, communicate between containers, or persist after container removal. For each attack vector, explain the technique, whether it works against the current defenses, and what mitigation exists. Be thorough and creative."
 
   - name: feature-exploration
@@ -28,6 +31,7 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "Explore this repository thoroughly and produce a feature gap analysis. Compare the current implementation against competitors like Conductor.build and Cursor. Identify: missing features that users would expect, UX improvements for the CLI and TUI, documentation gaps, onboarding friction, and opportunities for better defaults. Prioritize by user impact."
 
   - name: test-coverage
@@ -35,6 +39,7 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "Analyze the test suite in tests/. For each test file, identify: untested code paths in the corresponding source file, missing edge cases, assertions that could be stronger, and features with no tests at all. Compare bin/agent functions vs test coverage. Produce a coverage gap report with specific suggestions for new test cases."
 
   - name: doc-review
@@ -42,4 +47,5 @@ agents:
     repo: git@github.com:0x666c6f/safe-agentic.git
     ssh: true
     reuse_auth: true
+    auto_trust: true
     prompt: "Review all documentation in docs/, README.md, CLAUDE.md, and AGENTS.md. Check for: accuracy against the actual code (do documented flags/commands match the implementation?), outdated information, broken internal links, missing examples, unclear explanations, and inconsistencies between docs. Report each issue with the file, line, and suggested fix."

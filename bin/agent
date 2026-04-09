@@ -156,11 +156,13 @@ Options:
   --prompt 'TASK'
   --aws PROFILE
   --identity 'Name <email@example.com>'
+  --auto-trust
   --dry-run
   -h, --help
 
 Notes:
   - --prompt sends an initial task to the agent (claude -p / codex positional arg)
+  - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
   - --aws injects credentials from ~/.aws/credentials for the given profile
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
@@ -578,6 +580,7 @@ cmd_spawn() {
   local managed_network=true
   local network_name=""
   local dry_run=false
+  local auto_trust=false
   local agent_prompt=""
   local aws_profile=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
@@ -657,6 +660,10 @@ cmd_spawn() {
         require_option_value "$topic" "--identity" "${2:-}"
         apply_identity "$2"
         shift 2
+        ;;
+      --auto-trust)
+        auto_trust=true
+        shift
         ;;
       --dry-run)
         dry_run=true
@@ -773,6 +780,10 @@ cmd_spawn() {
     fi
   fi
   docker_cmd+=(--label "safe-agentic.docker=$docker_label")
+
+  if $auto_trust; then
+    docker_cmd+=(-e "SAFE_AGENTIC_AUTO_TRUST=1")
+  fi
 
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
 
@@ -2466,6 +2477,9 @@ for agent in agents:
 
     if agent.get('docker') is True:
         cmd.append('--docker')
+
+    if agent.get('auto_trust') is True:
+        cmd.append('--auto-trust')
 
     prompt = agent.get('prompt', '')
     if prompt:

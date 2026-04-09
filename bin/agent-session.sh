@@ -25,6 +25,7 @@ quote_cmd() {
 }
 
 launch_codex() {
+  trust_workspace
   if [ ! -f "$HOME/.codex/auth.json" ]; then
     echo "[entrypoint] First run — authenticating via device code flow..."
     echo "[entrypoint] A URL will appear. Open it in your macOS browser to log in."
@@ -45,7 +46,53 @@ launch_codex() {
   exec codex --yolo
 }
 
+trust_workspace() {
+  # Auto-trust the current workspace so Claude doesn't prompt
+  # "Do you trust this project?" which blocks non-interactive sessions.
+  # Only enabled when SAFE_AGENTIC_AUTO_TRUST=1 (set via --auto-trust flag).
+  [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || return 0
+  local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  local settings_local="$claude_dir/settings.local.json"
+  local cwd
+  cwd="$(pwd)"
+
+  mkdir -p "$claude_dir" 2>/dev/null || return 0
+
+  python3 -c "
+import json, sys, os, glob
+
+path = '$settings_local'
+cwd = '$cwd'
+
+try:
+    with open(path) as f:
+        data = json.load(f)
+except:
+    data = {}
+
+trusted = data.get('trustedDirectories', [])
+changed = False
+
+# Trust the current directory
+if cwd not in trusted:
+    trusted.append(cwd)
+    changed = True
+
+# Trust /workspace and all immediate subdirectories (cloned repos)
+for d in ['/workspace'] + glob.glob('/workspace/*/*'):
+    if os.path.isdir(d) and d not in trusted:
+        trusted.append(d)
+        changed = True
+
+if changed:
+    data['trustedDirectories'] = trusted
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+" 2>/dev/null || true
+}
+
 launch_claude() {
+  trust_workspace
   local -a cmd=(claude --dangerously-skip-permissions)
   local rendered has_prompt=false
 
