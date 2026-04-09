@@ -41,3 +41,26 @@ Every `agent spawn`, `agent stop`, and `agent attach` is recorded in an append-o
 ```
 
 The audit log is never modified or truncated — it's append-only by design.
+
+## Examples
+
+```bash
+# Check cost of a long-running agent
+agent cost my-agent
+#   Total tokens: 1,234,567
+#     Input:  987,654
+#     Output: 246,913
+#
+#   claude-sonnet-4-6: 1,234,567 tokens (~$6.67)
+#
+#   Estimated total: ~$6.67
+
+# View recent operations
+agent audit --lines 10
+#   2026-04-09T14:01  spawn       agent-claude-api-refactor       type=claude ssh=true auth=shared
+#   2026-04-09T14:30  attach      agent-claude-api-refactor
+#   2026-04-09T16:45  stop        agent-claude-api-refactor
+
+# Full audit history export
+agent audit --lines 1000 > audit-export.jsonl
+```

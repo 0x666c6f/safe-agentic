@@ -98,3 +98,96 @@ Steps run **sequentially**. Each step spawns an agent, waits for it to finish, t
 - **`depends_on`**: Skip if the named step hasn't completed successfully
 - **`retry`**: On failure, wait 5 seconds and re-run (up to N times)
 - **`on_failure`**: When a step fails (after retries), jump to the named handler step
+
+## Real-world examples
+
+### Example 1: Parallel dependency updates across repos
+
+```yaml
+# fix-all-deps.yaml
+agents:
+  - name: api-deps
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    reuse_auth: true
+    prompt: "Update all npm dependencies to latest stable versions, fix any breaking changes, ensure tests pass"
+
+  - name: web-deps
+    type: claude
+    repo: git@github.com:myorg/web.git
+    ssh: true
+    reuse_auth: true
+    prompt: "Update all npm dependencies to latest stable versions, fix any breaking changes, ensure tests pass"
+
+  - name: docs-deps
+    type: codex
+    repo: git@github.com:myorg/docs.git
+    prompt: "Update Python dependencies in requirements.txt to latest versions"
+```
+
+```bash
+agent fleet fix-all-deps.yaml
+agent tui  # monitor all 3 agents
+```
+
+### Example 2: Security audit fleet
+
+```yaml
+# security-audit.yaml
+agents:
+  - name: audit-api
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    prompt: "Perform a security audit: check for SQL injection, XSS, CSRF, auth bypass, and secrets in code"
+
+  - name: audit-infra
+    type: claude
+    repo: git@github.com:myorg/infra.git
+    ssh: true
+    aws: my-aws-profile
+    prompt: "Audit Terraform configs for: overly permissive IAM, public S3 buckets, missing encryption, open security groups"
+```
+
+```bash
+agent fleet security-audit.yaml
+agent tui  # watch both audits run in parallel
+```
+
+### Example 3: CI-like pipeline
+
+```yaml
+# ci-pipeline.yaml
+name: ci-fix-deploy
+steps:
+  - name: run-tests
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    prompt: "Run the full test suite. Report which tests pass and which fail."
+
+  - name: fix-failures
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    prompt: "Fix all failing tests. Do not skip or delete tests."
+    retry: 3
+    depends_on: run-tests
+
+  - name: create-pr
+    type: claude
+    repo: git@github.com:myorg/api.git
+    ssh: true
+    reuse_auth: true
+    prompt: "Commit all changes, push to a new branch, create a PR titled 'fix: resolve test failures'"
+    depends_on: fix-failures
+```
+
+```bash
+# Dry run first to see the plan
+agent pipeline ci-pipeline.yaml --dry-run
+
+# Run it
+agent pipeline ci-pipeline.yaml
+```

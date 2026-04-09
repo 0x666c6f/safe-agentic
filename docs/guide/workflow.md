@@ -97,3 +97,76 @@ agent todo check --latest 1
 # 5. Ship it
 agent pr --latest --title "fix: resolve CI failures"
 ```
+
+## Real-world examples
+
+### Example 1: Bug fix workflow
+
+```bash
+# 1. Spawn agent with the bug description
+agent spawn claude --ssh --reuse-auth \
+  --repo git@github.com:myorg/api.git \
+  --prompt "Fix issue #42: users get 500 error on /api/profile when name contains unicode"
+
+# 2. Monitor progress
+agent peek --latest
+
+# 3. Create checkpoint before agent makes changes
+agent checkpoint create --latest "before-fix"
+
+# 4. Review what the agent changed
+agent diff --latest
+agent diff --latest --stat
+
+# 5. Not happy? Revert and let it try again
+agent checkpoint revert --latest before-fix
+
+# 6. Happy with the fix? Track remaining work
+agent todo add --latest "Verify fix handles emoji names"
+agent todo add --latest "Add regression test"
+agent todo add --latest "Update API docs"
+
+# 7. Check off items as the agent completes them
+agent todo check --latest 1
+agent todo check --latest 2
+agent todo check --latest 3
+
+# 8. Run AI code review
+agent review --latest
+
+# 9. Create the PR
+agent pr --latest --title "fix: handle unicode in user profile names" --base main
+```
+
+### Example 2: Refactoring with checkpoints
+
+```bash
+agent spawn claude --ssh --reuse-auth \
+  --repo git@github.com:myorg/monorepo.git \
+  --name refactor-auth \
+  --prompt "Refactor the auth middleware to use the new JWT library"
+
+# Checkpoint at key milestones
+agent checkpoint create refactor-auth "step-1-extract-interface"
+agent checkpoint create refactor-auth "step-2-new-jwt-impl"
+agent checkpoint create refactor-auth "step-3-migrate-tests"
+
+# List all checkpoints
+agent checkpoint list refactor-auth
+
+# Something went wrong in step 3? Go back to step 2
+agent checkpoint revert refactor-auth step-2-new-jwt-impl
+```
+
+### Example 3: Code review before PR
+
+```bash
+# Review uncommitted changes
+agent review my-feature
+
+# Review against a specific branch
+agent review my-feature --base develop
+
+# Check the cost so far
+agent cost my-feature
+```

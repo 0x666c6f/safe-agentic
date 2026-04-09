@@ -105,3 +105,32 @@ Or set in defaults file (`~/.config/safe-agentic/defaults.sh`):
 ```bash
 SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
 ```
+
+## More examples
+
+### Parallel development sessions
+
+```bash
+# Work on 3 features simultaneously
+agent spawn claude --ssh --reuse-auth --name feature-auth --repo git@github.com:myorg/api.git \
+  --prompt "Implement OAuth2 PKCE flow for the mobile app"
+
+agent spawn claude --ssh --reuse-auth --name feature-search --repo git@github.com:myorg/api.git \
+  --prompt "Add full-text search to the /api/products endpoint using PostgreSQL tsvector"
+
+agent spawn codex --ssh --reuse-auth --name fix-tests --repo git@github.com:myorg/api.git \
+  --prompt "Fix all failing tests in the test suite"
+
+# Monitor all 3
+agent tui
+```
+
+### Untrusted code review
+
+```bash
+# Review a suspicious PR without giving it any access
+agent spawn claude \
+  --repo https://github.com/unknown-contributor/their-fork.git \
+  --network agent-isolated \
+  --prompt "Review this codebase for malicious code, backdoors, or security issues. Do not run any scripts."
+```
