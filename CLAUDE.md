@@ -135,7 +135,7 @@ Unsafe Docker flags (`--privileged`, `host` network, `--` passthrough) are block
 ## Testing
 
 ```bash
-# Run all tests (14 suites, 200+ assertions)
+# Run all tests (27 suites, 714 assertions)
 bash tests/run-all.sh
 
 # Run a single suite
@@ -152,11 +152,26 @@ Test files in `tests/`:
 - `test-docker-cmd.sh` — security flags, volumes, SSH, git identity
 - `test-dockerfile.sh` — checksums, no curl|bash, non-root user
 - `test-entrypoint.sh` — git config, clone validation, agent launch
+- `test-entrypoint-runtime.sh` — runtime entrypoint behavior
 - `test-vm-setup.sh` — mount blocking, userns-remap, fstab
 - `test-cli-dispatch.sh` — help, errors, aliases, multi-repo
 - `test-agent-lifecycle.sh` — attach, stop, cleanup, custom networks
+- `test-management-commands.sh` — management command coverage
 - `test-update.sh` — tracked-only build context, --quick/--full
+- `test-audit.sh` — audit logging
+- `test-checkpoint.sh` — checkpoint create/list/revert
+- `test-copy-command.sh` — file copy commands
+- `test-cost.sh` — cost estimation
+- `test-diagnose.sh` — diagnostic commands
+- `test-diff.sh` — diff display
+- `test-fleet.sh` — fleet manifest parsing and spawning
+- `test-lifecycle-scripts.sh` — safe-agentic.json lifecycle scripts
+- `test-pipeline.sh` — pipeline YAML parsing and execution
+- `test-pr.sh` — PR creation
+- `test-review.sh` — code review command
+- `test-todo.sh` — todo management
 - `test-live-integration.sh` — real VM/Docker smoke tests (optional, skip-aware)
+- `test-live-agent-clis.sh` — live agent CLI tests (optional)
 - `agent-cli-security.sh` — end-to-end security regressions
 
 Tests use a fake `orb` binary to capture docker commands without a real VM.
