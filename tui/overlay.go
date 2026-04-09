@@ -92,7 +92,7 @@ func ShowSpawnForm(app *App) {
 		AddDropDown("Type:", []string{"claude", "codex"}, 0, func(option string, index int) {
 			agentType = option
 		}).
-		AddInputField("Repo URL:", "", 50, nil, nil).
+		AddInputField("Repo URL (optional):", "", 50, nil, nil).
 		AddInputField("Name (optional):", "", 30, nil, nil).
 		AddInputField("Prompt (optional):", "", 50, nil, nil).
 		AddCheckbox("SSH:", true, nil).
@@ -103,7 +103,7 @@ func ShowSpawnForm(app *App) {
 		AddInputField("Identity (optional):", "", 40, nil, nil)
 
 	form.AddButton("Spawn", func() {
-		repoURL := form.GetFormItemByLabel("Repo URL:").(*tview.InputField).GetText()
+		repoURL := form.GetFormItemByLabel("Repo URL (optional):").(*tview.InputField).GetText()
 		name := form.GetFormItemByLabel("Name (optional):").(*tview.InputField).GetText()
 		prompt := form.GetFormItemByLabel("Prompt (optional):").(*tview.InputField).GetText()
 		ssh := form.GetFormItemByLabel("SSH:").(*tview.Checkbox).IsChecked()
