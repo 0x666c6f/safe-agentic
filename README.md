@@ -210,6 +210,8 @@ agent cleanup               # Stop all + keep shared auth + prune managed networ
 agent cleanup --auth        # Also remove shared auth volumes
 agent mcp-login <server>    # MCP OAuth login (persists in auth volume)
 agent sessions <name>       # Export session history from container
+agent peek <name>            # Show last 30 lines of agent's tmux pane
+agent peek --latest --lines 50
 agent aws-refresh <name>    # Refresh AWS credentials in running container
 agent diagnose              # Check orb/VM/docker/image/SSH/defaults
 ```

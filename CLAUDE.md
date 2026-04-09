@@ -66,6 +66,10 @@ agent mcp-login <container> notion
 agent sessions <container>
 agent sessions --latest ~/sessions/
 
+# Peek at agent output without attaching
+agent peek <container>                 # last 30 lines of tmux pane
+agent peek --latest --lines 50         # more lines
+
 # AWS credentials
 agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:org/repo.git
 agent aws-refresh <container>              # refresh expired credentials

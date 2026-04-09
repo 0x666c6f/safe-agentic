@@ -20,6 +20,7 @@
 | `agent cleanup --auth` | Also remove shared auth volumes |
 | `agent mcp-login <server>` | MCP OAuth login (token persists in auth volume) |
 | `agent sessions <name>` | Export session history from a container |
+| `agent peek <name>` | Show last 30 lines of agent's tmux pane output |
 | `agent aws-refresh <name>` | Refresh AWS credentials in a running container |
 | `agent diagnose` | Check common setup/runtime issues |
 | `agent update` | Rebuild the Docker image |
@@ -324,6 +325,17 @@ agent sessions --latest ~/my-sessions/
 ```
 
 Default destination: `./agent-sessions/<container-name>/`. Works on both running and stopped containers.
+
+## Peek at agent output
+
+See what an agent is doing without attaching:
+
+```bash
+agent peek api-refactor           # last 30 lines
+agent peek --latest --lines 50    # more lines from the latest container
+```
+
+Only works on running containers with tmux sessions (Claude/Codex agents). For shell containers or stopped agents, use `agent attach` instead.
 
 ## Interactive shell
 

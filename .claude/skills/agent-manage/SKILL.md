@@ -77,6 +77,16 @@ agent aws-refresh --latest
 
 Re-reads `~/.aws/credentials` from the host and writes into the running container. No restart needed — AWS SDKs re-read the file automatically.
 
+### Peek at agent output
+
+```bash
+agent peek <name>              # last 30 lines of tmux pane
+agent peek --latest            # latest container
+agent peek <name> --lines 50   # more lines
+```
+
+Shows what the agent is currently doing without attaching. Only works on running tmux containers.
+
 ### Full cleanup
 
 ```bash
