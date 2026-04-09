@@ -25,7 +25,7 @@ case "$cmd" in
     [ "${1:-}" = "-m" ] && shift 2
     printf '%s\n' "$*" >>"$log_file"
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
-      echo "running"; exit 0
+      echo "${TEST_CONTAINER_STATE:-running}"; exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *latest* ]]; then
       echo "agent-claude-my-task"; exit 0
@@ -33,8 +33,19 @@ case "$cmd" in
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-a" ] && [ "${4:-}" = "--latest" ]; then
       echo "agent-claude-my-task"; exit 0
     fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "ps" ] && [[ "$*" == *"--latest"* ]]; then
+      echo "agent-claude-my-task"; exit 0
+    fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
-      # Print simulated git diff output
+      # Print simulated git diff output (empty when TEST_EMPTY_DIFF is set)
+      if [ "${TEST_EMPTY_DIFF:-}" = "1" ]; then
+        exit 0
+      fi
+      if [ "${TEST_STAT_DIFF:-}" = "1" ]; then
+        echo " foo.py | 2 +-"
+        echo " 1 file changed, 1 insertion(+), 1 deletion(-)"
+        exit 0
+      fi
       echo "diff --git a/foo.py b/foo.py"
       echo "index 1234567..abcdefg 100644"
       echo "--- a/foo.py"
@@ -64,7 +75,11 @@ fail=0
 
 run_ok() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     TEST_EMPTY_DIFF="${TEST_EMPTY_DIFF:-}" \
+     TEST_STAT_DIFF="${TEST_STAT_DIFF:-}" \
+     "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     ((++pass))
   else
     echo "FAIL: $label: expected zero exit" >&2
@@ -75,7 +90,11 @@ run_ok() {
 
 run_fails() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_VERIFY_STATE="$VERIFY_STATE" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     TEST_EMPTY_DIFF="${TEST_EMPTY_DIFF:-}" \
+     TEST_STAT_DIFF="${TEST_STAT_DIFF:-}" \
+     "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
   else
@@ -142,6 +161,65 @@ assert_log_contains "git diff --stat" "diff --stat uses --stat flag"
 : >"$ORB_LOG"
 run_ok "diff --latest" bash "$REPO_DIR/bin/agent" diff --latest
 assert_log_contains "docker exec" "diff --latest runs docker exec"
+
+# =============================================================================
+# -h is equivalent to --help
+# =============================================================================
+run_ok   "diff -h flag"  bash "$REPO_DIR/bin/agent" diff -h
+assert_output_contains "Usage: agent diff" "diff -h shows usage"
+
+# =============================================================================
+# Unknown flag rejected (treated as invalid container name)
+# =============================================================================
+run_fails "diff unknown flag" bash "$REPO_DIR/bin/agent" diff --bogus
+assert_output_contains "invalid characters" "diff unknown flag shows invalid chars error"
+
+# =============================================================================
+# Multiple positional args rejected
+# =============================================================================
+run_fails "diff multiple args" bash "$REPO_DIR/bin/agent" diff name1 name2
+assert_output_contains "agent help diff" "diff multiple args shows usage pointer"
+
+# =============================================================================
+# --latest and --stat combined
+# =============================================================================
+: >"$ORB_LOG"
+TEST_STAT_DIFF=1
+run_ok "diff --latest --stat" bash "$REPO_DIR/bin/agent" diff --latest --stat
+assert_log_contains "git diff --stat" "diff --latest --stat uses --stat flag"
+TEST_STAT_DIFF=
+
+# =============================================================================
+# --stat output contains stat-style content (not full diff)
+# =============================================================================
+: >"$ORB_LOG"
+TEST_STAT_DIFF=1
+run_ok "diff --stat output" bash "$REPO_DIR/bin/agent" diff agent-claude-my-task --stat
+assert_output_contains "file changed" "diff --stat output shows stat summary"
+TEST_STAT_DIFF=
+
+# =============================================================================
+# Container not running → error
+# =============================================================================
+: >"$ORB_LOG"
+TEST_CONTAINER_STATE=exited
+run_fails "diff container not running" bash "$REPO_DIR/bin/agent" diff agent-claude-my-task
+assert_output_contains "not running" "diff container not running shows error"
+TEST_CONTAINER_STATE=running
+
+# =============================================================================
+# Empty diff → command succeeds (zero exit), no output required
+# =============================================================================
+: >"$ORB_LOG"
+TEST_EMPTY_DIFF=1
+run_ok "diff empty output succeeds" bash "$REPO_DIR/bin/agent" diff agent-claude-my-task
+TEST_EMPTY_DIFF=
+
+# =============================================================================
+# diff listed in general help
+# =============================================================================
+run_ok "diff in general help" bash "$REPO_DIR/bin/agent" help
+assert_output_contains "agent diff" "diff listed in general help"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

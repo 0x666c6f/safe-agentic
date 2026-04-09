@@ -25,7 +25,7 @@ case "$cmd" in
     printf '%s\n' "$*" >>"$log_file"
     # docker inspect for State.Status
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *State.Status* ]]; then
-      echo "running"; exit 0
+      echo "${TEST_CONTAINER_STATE:-running}"; exit 0
     fi
     # docker inspect for agent-type label
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *agent-type* ]]; then
@@ -52,7 +52,9 @@ fail=0
 
 run_ok() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     ((++pass))
   else
     echo "FAIL: $label: expected zero exit" >&2
@@ -64,7 +66,9 @@ run_ok() {
 
 run_fails() {
   local label="$1"; shift
-  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
+  if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
   else
@@ -127,6 +131,53 @@ assert_output_contains "2,000" "nested input tokens shown"
 TEST_JSONL_DATA=""
 run_ok "cost no session data" bash "$REPO_DIR/bin/agent" cost agent-claude-test-task
 assert_output_contains "No session data" "cost warns when no data"
+
+# ---------------------------------------------------------------------------
+# -h is equivalent to --help
+# ---------------------------------------------------------------------------
+run_ok "cost -h flag" bash "$REPO_DIR/bin/agent" cost -h
+assert_output_contains "agent cost" "cost -h shows command name"
+
+# ---------------------------------------------------------------------------
+# Unknown flag rejected (treated as invalid container name)
+# ---------------------------------------------------------------------------
+run_fails "cost unknown flag" bash "$REPO_DIR/bin/agent" cost --bogus
+assert_output_contains "invalid characters" "cost unknown flag error shown"
+
+# ---------------------------------------------------------------------------
+# --latest resolves to newest container and runs cost analysis
+# ---------------------------------------------------------------------------
+: >"$ORB_LOG"
+TEST_JSONL_DATA='{"model":"claude-sonnet-4-6-20250219","usage":{"input_tokens":500,"output_tokens":100}}'
+run_ok "cost --latest" bash "$REPO_DIR/bin/agent" cost --latest
+assert_output_contains "TOTAL" "cost --latest shows total row"
+TEST_JSONL_DATA=
+
+# ---------------------------------------------------------------------------
+# Container not running: cost starts it and proceeds gracefully
+# ---------------------------------------------------------------------------
+: >"$ORB_LOG"
+TEST_CONTAINER_STATE=exited
+TEST_JSONL_DATA=""
+run_ok "cost exited container starts gracefully" bash "$REPO_DIR/bin/agent" cost agent-claude-test-task
+assert_output_contains "Starting container" "cost starts stopped container"
+TEST_CONTAINER_STATE=running
+TEST_JSONL_DATA=
+
+# ---------------------------------------------------------------------------
+# cost listed in general help
+# ---------------------------------------------------------------------------
+run_ok "cost in general help" bash "$REPO_DIR/bin/agent" help
+assert_output_contains "agent cost" "cost listed in general help"
+
+# ---------------------------------------------------------------------------
+# No session data (empty JSONL) → graceful message not a crash
+# ---------------------------------------------------------------------------
+: >"$ORB_LOG"
+TEST_JSONL_DATA=""
+run_ok "cost empty JSONL graceful" bash "$REPO_DIR/bin/agent" cost agent-claude-test-task
+assert_output_contains "No session data" "cost empty JSONL shows graceful message"
+TEST_JSONL_DATA=
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
