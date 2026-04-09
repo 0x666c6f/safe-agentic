@@ -127,13 +127,12 @@ func probeActivities(agents []Agent) {
 // probeProcessActivity checks if the agent process (codex or claude) consumed
 // any CPU ticks in a 1-second window. Returns "Working" or "Idle".
 func probeProcessActivity(name, agentType string) string {
-	// Codex: Rust binary, shows as "codex" in process list → pgrep -x codex
-	// Claude: Node.js script, shows as "node .../claude ..." → pgrep -f "bin/claude"
+	// Both Claude and Codex are native binaries: pgrep -x matches the process name.
 	// We sum CPU ticks across ALL matching pids (agent + child processes).
 	var pgrepCmd string
 	switch agentType {
 	case "claude":
-		pgrepCmd = `pgrep -f "bin/claude" 2>/dev/null`
+		pgrepCmd = `pgrep -x claude 2>/dev/null`
 	default:
 		pgrepCmd = `pgrep -x codex 2>/dev/null`
 	}
