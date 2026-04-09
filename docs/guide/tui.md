@@ -8,20 +8,19 @@ agent tui
 
 ## Layout
 
-```
-+-----------------------------------------------------------------------+
-|  safe-agentic        ctx: safe-agentic VM    2s    agents: 2/3        |
-+-----------------------------------------------------------------------+
-| NAME              TYPE   REPO         SSH  STATUS    ACTIVITY CPU MEM |
-| > agent-claude-r  claude org/repo     on   Up 2h     Working  12% 1G |
-|   agent-codex-o   codex  org/other    off  Up 30m    Idle      8% 0G |
-|   agent-shell-x   shell  -            off  Exited    Stopped   -   - |
-+-----------------------------------------------------------------------+
-| [a]ttach [r]esume [s]top [l]ogs [f]Diff [R]eview [t]odos [x]Chkpt   |
-| [g]PR [$]Cost [A]udit [n]ew [p]review [e]xport [c]opy [q]uit       |
-| [/] Filter  [:] Command  [ctrl-k] Kill All                           |
-+-----------------------------------------------------------------------+
-```
+The TUI has three zones stacked vertically:
+
+**Header** — app title, VM context, refresh interval (2s), running/total agent count
+
+**Table** — one row per agent, sortable by any column:
+
+| NAME | TYPE | REPO | SSH | STATUS | ACTIVITY | CPU | MEM |
+|------|------|------|-----|--------|----------|-----|-----|
+| **agent-claude-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
+| agent-codex-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
+| agent-shell-debug | shell | — | off | Exited | Stopped | — | — |
+
+**Footer** — shortcut hints, replaced by filter input, command bar, or confirmation prompts during those modes
 
 Three zones:
 
