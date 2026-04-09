@@ -37,6 +37,7 @@ nav:
   - Guide:
     - Spawning Agents: guide/spawning.md
     - Managing Agents: guide/managing.md
+    - Terminal UI (TUI): guide/tui.md
     - Developer Workflow: guide/workflow.md
     - Fleet & Orchestration: guide/fleet.md
     - Analytics: guide/analytics.md
