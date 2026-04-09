@@ -1,8 +1,8 @@
 site_name: safe-agentic
 site_description: Isolated environment for running AI coding agents safely
-site_url: https://morpho-labs.github.io/safe-agentic/
-repo_url: https://github.com/morpho-labs/safe-agentic
-repo_name: morpho-labs/safe-agentic
+site_url: https://0x666c6f.github.io/safe-agentic/
+repo_url: https://github.com/0x666c6f/safe-agentic
+repo_name: 0x666c6f/safe-agentic
 
 theme:
   name: material
@@ -73,4 +73,4 @@ extra_css:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/morpho-labs/safe-agentic
+      link: https://github.com/0x666c6f/safe-agentic
