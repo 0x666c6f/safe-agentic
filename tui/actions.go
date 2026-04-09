@@ -321,6 +321,48 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	return execOrb("cat", path)
 }
 
+// Checkpoint creates a named git stash checkpoint of the agent's current working tree.
+func (ac *Actions) Checkpoint() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	if !agent.Running {
+		ac.app.footer.ShowStatus("Agent is not running", true)
+		return
+	}
+	name := agent.Name
+	label := fmt.Sprintf("checkpoint-%d", time.Now().Unix())
+	ac.app.footer.ShowStatus(fmt.Sprintf("Creating checkpoint %s...", label), false)
+	go func() {
+		// Stage all changes and create a stash object without modifying the working tree.
+		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
+			"cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create")
+		if err != nil {
+			ac.app.tapp.QueueUpdateDraw(func() {
+				ac.app.footer.ShowStatus("Checkpoint failed: could not create stash", true)
+			})
+			return
+		}
+		stashSHA := strings.TrimSpace(string(out))
+		if stashSHA == "" {
+			ac.app.tapp.QueueUpdateDraw(func() {
+				ac.app.footer.ShowStatus("No changes to checkpoint", false)
+			})
+			return
+		}
+		_, err = execOrbLong("docker", "exec", name, "bash", "-c",
+			fmt.Sprintf("cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/%s %s", label, stashSHA))
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint failed: could not save ref %s", label), true)
+			} else {
+				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint '%s' created (%s)", label, stashSHA[:7]), false)
+			}
+		})
+	}()
+}
+
 // Diff shows the git diff from the agent's working tree in an overlay.
 func (ac *Actions) Diff() {
 	agent := ac.selectedOrWarn()

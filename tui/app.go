@@ -220,6 +220,9 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		case 'f':
 			a.actions.Diff()
 			return nil
+		case 'x':
+			a.actions.Checkpoint()
+			return nil
 		case 'm':
 			a.actions.McpLogin()
 			return nil

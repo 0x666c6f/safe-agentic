@@ -99,6 +99,7 @@ ${GREEN}Manage:${NC}
   agent cp <name>|--latest <container-path> <host-path>
   agent peek <name>|--latest [--lines N]
   agent diff <name>|--latest [--stat]
+  agent checkpoint <create|list|revert> <name>|--latest [...]
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
@@ -110,7 +111,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|cp|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|diff|checkpoint|cp|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -255,6 +256,31 @@ Examples:
   agent diff api-refactor
   agent diff --latest
   agent diff --latest --stat
+EOF
+}
+
+print_help_checkpoint() {
+  cat <<EOF
+Usage: agent checkpoint <create|list|revert> <name>|--latest [...]
+
+Snapshot and revert an agent's working tree using git stash objects stored
+as named refs under refs/safe-agentic/checkpoints/.
+
+Subcommands:
+  create <name>|--latest [label]   Snapshot current changes (default label: checkpoint-<epoch>)
+  list   <name>|--latest           List all checkpoints for the container
+  revert <name>|--latest <ref>     Restore a checkpoint (discards current changes)
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help  Show this help
+
+Examples:
+  agent checkpoint create my-task before-refactor
+  agent checkpoint list my-task
+  agent checkpoint revert my-task before-refactor
+  agent checkpoint create --latest
+  agent checkpoint list --latest
 EOF
 }
 
@@ -1307,6 +1333,9 @@ cmd_help() {
     diff)
       print_help_diff
       ;;
+    checkpoint)
+      print_help_checkpoint
+      ;;
     stop)
       print_help_stop
       ;;
@@ -1621,6 +1650,120 @@ cmd_diff() {
   fi
 }
 
+cmd_checkpoint() {
+  local topic="checkpoint"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_checkpoint
+      return 0
+      ;;
+    create|list|revert)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (create|list|revert)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, or revert."
+      ;;
+  esac
+
+  local name=""
+  local latest=false
+  local label=""
+  local ref=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_checkpoint
+        return 0
+        ;;
+      *)
+        if [ "$subcmd" = "revert" ]; then
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$ref" ]; then
+            ref="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        else
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$label" ]; then
+            label="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  if [ "$subcmd" = "revert" ] && [ -z "$ref" ]; then
+    die_with_help "$topic" "Checkpoint ref required for revert."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  case "$subcmd" in
+    create)
+      [ -z "$label" ] && label="checkpoint-$(date +%s)"
+      local stash_sha
+      stash_sha=$(vm_exec docker exec "$name" bash -c \
+        'cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
+      stash_sha=$(echo "$stash_sha" | tr -d '[:space:]')
+      if [ -z "$stash_sha" ]; then
+        info "No changes to checkpoint."
+        return 0
+      fi
+      vm_exec docker exec "$name" bash -c \
+        "cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/$label $stash_sha"
+      ok "Checkpoint '$label' created ($stash_sha) in $name."
+      ;;
+    list)
+      vm_exec docker exec "$name" bash -c \
+        'cd /workspace/* 2>/dev/null || cd /workspace; git for-each-ref --format="%(objectname:short) %(creatordate:unix) %(refname:lstrip=3)" refs/safe-agentic/checkpoints/' \
+        | while IFS= read -r line; do
+            local sha epoch lbl
+            sha=$(echo "$line" | awk '{print $1}')
+            epoch=$(echo "$line" | awk '{print $2}')
+            lbl=$(echo "$line" | awk '{$1=$2=""; print}' | sed 's/^ *//')
+            if [ -n "$epoch" ] && [ "$epoch" -gt 0 ] 2>/dev/null; then
+              ts=$(date -r "$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d "@$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$epoch")
+            else
+              ts="$epoch"
+            fi
+            printf '%s  %s  %s\n' "$sha" "$ts" "$lbl"
+          done
+      ;;
+    revert)
+      vm_exec docker exec "$name" bash -c \
+        "cd /workspace/* 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply refs/safe-agentic/checkpoints/$ref"
+      ok "Reverted $name to checkpoint '$ref'."
+      ;;
+  esac
+}
+
 cmd_aws_refresh() {
   local topic="aws-refresh"
   local name=""
@@ -1710,6 +1853,7 @@ case "$cmd" in
   sessions)   cmd_sessions "$@" ;;
   peek)       cmd_peek "$@" ;;
   diff)       cmd_diff "$@" ;;
+  checkpoint) cmd_checkpoint "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"
