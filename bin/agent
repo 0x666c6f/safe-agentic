@@ -98,6 +98,7 @@ ${GREEN}Manage:${NC}
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
   agent peek <name>|--latest [--lines N]
+  agent diff <name>|--latest [--stat]
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
@@ -109,7 +110,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|cp|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|diff|cp|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -238,6 +239,22 @@ EOF
 print_help_vm() {
   cat <<EOF
 Usage: agent vm <ssh|stop|start>
+EOF
+}
+
+print_help_diff() {
+  cat <<EOF
+Usage: agent diff <name>|--latest [--stat]
+
+Show the git diff from an agent's working tree inside its Docker container.
+
+Options:
+  --stat    Show a diffstat summary instead of the full diff
+
+Examples:
+  agent diff api-refactor
+  agent diff --latest
+  agent diff --latest --stat
 EOF
 }
 
@@ -1287,6 +1304,9 @@ cmd_help() {
     peek)
       print_help_peek
       ;;
+    diff)
+      print_help_diff
+      ;;
     stop)
       print_help_stop
       ;;
@@ -1553,6 +1573,54 @@ cmd_peek() {
   vm_exec docker exec "$name" tmux capture-pane -t "${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}" -p -S "-${lines}"
 }
 
+cmd_diff() {
+  local topic="diff"
+  local name=""
+  local latest=false
+  local stat=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --stat)
+        stat=true
+        shift
+        ;;
+      -h|--help)
+        print_help_diff
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  if $stat; then
+    vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git diff --stat'
+  else
+    vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git diff'
+  fi
+}
+
 cmd_aws_refresh() {
   local topic="aws-refresh"
   local name=""
@@ -1641,6 +1709,7 @@ case "$cmd" in
   mcp-login)  cmd_mcp_login "$@" ;;
   sessions)   cmd_sessions "$@" ;;
   peek)       cmd_peek "$@" ;;
+  diff)       cmd_diff "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"

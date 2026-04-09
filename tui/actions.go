@@ -321,6 +321,36 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	return execOrb("cat", path)
 }
 
+// Diff shows the git diff from the agent's working tree in an overlay.
+func (ac *Actions) Diff() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	if !agent.Running {
+		ac.app.footer.ShowStatus("Agent is not running", true)
+		return
+	}
+	name := agent.Name
+	ac.app.footer.ShowStatus(fmt.Sprintf("Loading diff for %s...", name), false)
+	go func() {
+		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
+			"cd /workspace/* 2>/dev/null || cd /workspace; git diff")
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Failed to get diff", true)
+				return
+			}
+			content := strings.TrimSpace(string(out))
+			if content == "" {
+				ac.app.footer.ShowStatus("No changes", false)
+				return
+			}
+			ShowOverlay(ac.app, "diff", fmt.Sprintf("Diff: %s", name), content)
+		})
+	}()
+}
+
 // Describe shows docker inspect in a formatted overlay.
 func (ac *Actions) Describe() {
 	agent := ac.selectedOrWarn()
