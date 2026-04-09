@@ -97,6 +97,7 @@ ${GREEN}Manage:${NC}
   agent tui
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
+  agent peek <name>|--latest [--lines N]
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
 
@@ -108,7 +109,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|cp|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|cp|stop|cleanup|update|vm|diagnose]
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -178,6 +179,19 @@ Examples:
   agent attach api-refactor
   agent attach agent-claude-api-refactor
   agent attach --latest
+EOF
+}
+
+print_help_peek() {
+  cat <<EOF
+Usage: agent peek <name>|--latest [--lines N]
+
+Show the last N lines (default 30) of a running agent's tmux pane.
+
+Examples:
+  agent peek api-refactor
+  agent peek --latest
+  agent peek --latest --lines 50
 EOF
 }
 
@@ -1270,6 +1284,9 @@ cmd_help() {
     cp)
       print_help_cp
       ;;
+    peek)
+      print_help_peek
+      ;;
     stop)
       print_help_stop
       ;;
@@ -1491,6 +1508,51 @@ EOF
   ok "Exported $count files to $dest"
 }
 
+cmd_peek() {
+  local topic="peek"
+  local name=""
+  local latest=false
+  local lines=30
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --lines)
+        require_option_value "$topic" "--lines" "${2:-}"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_peek
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  local terminal_mode
+  terminal_mode=$(trim_whitespace "$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.terminal"}}' "$name" 2>/dev/null || echo "")")
+  [ "$terminal_mode" = "tmux" ] || die "No tmux session in $name."
+
+  vm_exec docker exec "$name" tmux capture-pane -t "${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}" -p -S "-${lines}"
+}
+
 cmd_aws_refresh() {
   local topic="aws-refresh"
   local name=""
@@ -1578,6 +1640,7 @@ case "$cmd" in
   vm)         cmd_vm "$@" ;;
   mcp-login)  cmd_mcp_login "$@" ;;
   sessions)   cmd_sessions "$@" ;;
+  peek)       cmd_peek "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"

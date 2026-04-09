@@ -149,6 +149,11 @@ run_ok "help cp topic" bash "$REPO_DIR/bin/agent" help cp
 assert_output_contains "Usage: agent cp" "cp help topic"
 assert_output_contains "--latest" "cp help shows latest"
 
+run_ok "help peek topic" bash "$REPO_DIR/bin/agent" help peek
+assert_output_contains "Usage: agent peek" "peek help topic"
+assert_output_contains "--lines" "peek help shows lines flag"
+assert_output_contains "--latest" "peek help shows latest"
+
 # =============================================================================
 # agent-codex alias: correct agent type and SSH detection
 # =============================================================================
