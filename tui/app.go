@@ -60,11 +60,11 @@ func NewApp() *App {
 	a.header.ShowLoading()
 	a.table.ShowLoading()
 
-	// Main layout: header (1 row) + table (flex) + footer (shortcutRows)
+	// Main layout: header (1 row) + table (flex) + footer (dynamic rows)
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.header.Primitive(), 1, 0, false).
 		AddItem(a.table.Primitive(), 0, 1, true).
-		AddItem(a.footer.Primitive(), shortcutRows, 0, false)
+		AddItem(a.footer.Primitive(), a.footer.Rows(), 0, false)
 
 	a.pages.AddPage("main", mainLayout, true, true)
 
@@ -306,7 +306,8 @@ func (a *App) rebuildLayout() {
 		mainLayout.AddItem(a.table.Primitive(), 0, 1, true)
 	}
 
-	mainLayout.AddItem(a.footer.Primitive(), shortcutRows, 0, false)
+	a.footer.showShortcuts() // recalc for current width
+	mainLayout.AddItem(a.footer.Primitive(), a.footer.Rows(), 0, false)
 
 	a.pages.RemovePage("main")
 	a.pages.AddPage("main", mainLayout, true, true)

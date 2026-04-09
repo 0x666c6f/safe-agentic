@@ -25,6 +25,7 @@ type Footer struct {
 	hints     *tview.TextView
 	input     *tview.InputField
 	mode      FooterMode
+	rows      int
 	onFilter  func(string)
 	onCommand func(string)
 	onConfirm func(bool)
@@ -43,7 +44,7 @@ func NewFooter() *Footer {
 	input.SetBackgroundColor(tcell.ColorDefault)
 
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(hints, shortcutRows, 0, false)
+		AddItem(hints, 3, 0, false)
 
 	f := &Footer{
 		layout: layout,
@@ -79,20 +80,42 @@ var allShortcuts = []shortcut{
 	{"q", "Quit"},
 }
 
-const shortcutCellWidth = 15 // fixed column width per shortcut
-const shortcutRows = 3
-
-func (f *Footer) showShortcuts() {
-	f.hints.SetText(renderShortcutGrid(allShortcuts, shortcutRows))
-}
+const shortcutCellWidth = 14 // min column width per shortcut
 
 type shortcut struct {
 	key  string
 	desc string
 }
 
-func renderShortcutGrid(shortcuts []shortcut, rows int) string {
-	cols := (len(shortcuts) + rows - 1) / rows
+func (f *Footer) showShortcuts() {
+	_, _, width, _ := f.hints.GetInnerRect()
+	if width < 20 {
+		width = 120 // fallback before first draw
+	}
+	text, rows := renderShortcutGrid(allShortcuts, width)
+	f.hints.SetText(text)
+	f.rows = rows
+}
+
+// Rows returns the current footer height.
+func (f *Footer) Rows() int {
+	if f.rows < 1 {
+		return 3
+	}
+	return f.rows
+}
+
+func renderShortcutGrid(shortcuts []shortcut, termWidth int) (string, int) {
+	// Compute how many columns fit
+	cols := termWidth / shortcutCellWidth
+	if cols < 1 {
+		cols = 1
+	}
+	rows := (len(shortcuts) + cols - 1) / cols
+
+	// Distribute cell width evenly
+	cellWidth := termWidth / cols
+
 	kt := colorToTag(colorShortcutKey)
 	var b strings.Builder
 
@@ -107,17 +130,15 @@ func renderShortcutGrid(shortcuts []shortcut, rows int) string {
 				break
 			}
 			s := shortcuts[idx]
-			// Render: <key> Desc padded to fixed width
 			entry := fmt.Sprintf("<%s> %s", s.key, s.desc)
-			// Pad to cellWidth (but the color tags don't count for display width)
-			pad := shortcutCellWidth - len(entry)
+			pad := cellWidth - len(entry) - 1
 			if pad < 1 {
 				pad = 1
 			}
 			fmt.Fprintf(&b, "[%s]<%s>[white] %s%*s", kt, s.key, s.desc, pad, "")
 		}
 	}
-	return b.String()
+	return b.String(), rows
 }
 
 // ShowFilter switches to filter input mode.
@@ -183,9 +204,9 @@ func (f *Footer) Reset() {
 	f.onFilter = nil
 	f.onCommand = nil
 	f.onConfirm = nil
-	f.layout.Clear()
-	f.layout.AddItem(f.hints, shortcutRows, 0, false)
 	f.showShortcuts()
+	f.layout.Clear()
+	f.layout.AddItem(f.hints, f.Rows(), 0, false)
 }
 
 // HandleConfirmKey processes y/n input during confirm mode. Returns true if handled.
