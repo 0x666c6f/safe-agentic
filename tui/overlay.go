@@ -94,16 +94,24 @@ func ShowSpawnForm(app *App) {
 		}).
 		AddInputField("Repo URL:", "", 50, nil, nil).
 		AddInputField("Name (optional):", "", 30, nil, nil).
+		AddInputField("Prompt (optional):", "", 50, nil, nil).
 		AddCheckbox("SSH:", true, nil).
 		AddCheckbox("Reuse auth:", true, nil).
-		AddCheckbox("Reuse GH auth:", false, nil)
+		AddCheckbox("Reuse GH auth:", false, nil).
+		AddInputField("AWS profile (optional):", "", 30, nil, nil).
+		AddCheckbox("Docker:", false, nil).
+		AddInputField("Identity (optional):", "", 40, nil, nil)
 
 	form.AddButton("Spawn", func() {
 		repoURL := form.GetFormItemByLabel("Repo URL:").(*tview.InputField).GetText()
 		name := form.GetFormItemByLabel("Name (optional):").(*tview.InputField).GetText()
+		prompt := form.GetFormItemByLabel("Prompt (optional):").(*tview.InputField).GetText()
 		ssh := form.GetFormItemByLabel("SSH:").(*tview.Checkbox).IsChecked()
 		reuseAuth := form.GetFormItemByLabel("Reuse auth:").(*tview.Checkbox).IsChecked()
 		reuseGHAuth := form.GetFormItemByLabel("Reuse GH auth:").(*tview.Checkbox).IsChecked()
+		awsProfile := form.GetFormItemByLabel("AWS profile (optional):").(*tview.InputField).GetText()
+		docker := form.GetFormItemByLabel("Docker:").(*tview.Checkbox).IsChecked()
+		identity := form.GetFormItemByLabel("Identity (optional):").(*tview.InputField).GetText()
 
 		app.pages.SwitchToPage("main")
 		app.pages.RemovePage("spawn")
@@ -123,6 +131,9 @@ func ShowSpawnForm(app *App) {
 		if name != "" {
 			args = append(args, "--name", name)
 		}
+		if prompt != "" {
+			args = append(args, "--prompt", prompt)
+		}
 		if ssh {
 			args = append(args, "--ssh")
 		}
@@ -131,6 +142,15 @@ func ShowSpawnForm(app *App) {
 		}
 		if reuseGHAuth {
 			args = append(args, "--reuse-gh-auth")
+		}
+		if awsProfile != "" {
+			args = append(args, "--aws", awsProfile)
+		}
+		if docker {
+			args = append(args, "--docker")
+		}
+		if identity != "" {
+			args = append(args, "--identity", identity)
 		}
 
 		// Spawn detached: use dry-run to get the docker command, run it with
@@ -221,7 +241,7 @@ func ShowSpawnForm(app *App) {
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(form, 20, 0, true).
+			AddItem(form, 28, 0, true).
 			AddItem(nil, 0, 1, false),
 			70, 0, true).
 		AddItem(nil, 0, 1, false)
