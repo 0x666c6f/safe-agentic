@@ -27,6 +27,24 @@ func ShowOverlay(app *App, name string, title string, content string) {
 	app.tapp.SetFocus(tv)
 }
 
+// ShowOverlayLive is like ShowOverlay but returns the TextView for live updates.
+func ShowOverlayLive(app *App, name string, title string, content string) *tview.TextView {
+	tv := tview.NewTextView().
+		SetText(content).
+		SetScrollable(true).
+		SetDynamicColors(false)
+	tv.SetBorder(true).
+		SetTitle(" " + title + " ").
+		SetTitleColor(colorTitle).
+		SetBorderColor(colorBorder).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	app.pages.AddAndSwitchToPage(name, tv, true)
+	app.tapp.SetFocus(tv)
+	tv.ScrollToEnd()
+	return tv
+}
+
 // ShowCopyForm shows a modal form for copying files from a container.
 func ShowCopyForm(app *App, containerName string) {
 	form := tview.NewForm().

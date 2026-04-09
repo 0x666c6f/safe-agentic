@@ -282,7 +282,30 @@ func (ac *Actions) Logs() {
 	}
 
 	rendered := renderSessionLog(data)
-	ShowOverlay(ac.app, "logs", fmt.Sprintf("Session: %s", name), rendered)
+	tv := ShowOverlayLive(ac.app, "logs", fmt.Sprintf("Session: %s (auto-refresh 3s, Esc to close)", name), rendered)
+
+	// Auto-refresh logs every 3 seconds while the overlay is open
+	if agent.Running {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if frontPage, _ := ac.app.pages.GetFrontPage(); frontPage != "logs" {
+					return
+				}
+				newData, _ := readSessionViaExec(name, sessionsDir)
+				if len(newData) > 0 {
+					newRendered := renderSessionLog(newData)
+					ac.app.tapp.QueueUpdateDraw(func() {
+						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
+							tv.SetText(newRendered)
+							tv.ScrollToEnd()
+						}
+					})
+				}
+			}
+		}()
+	}
 }
 
 func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
@@ -297,8 +320,8 @@ func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	// Read only the last 500 lines — session files can be multi-MB
-	return execOrbLong("docker", "exec", name, "tail", "-500", path)
+	// Read the last 2000 lines — session files can be multi-MB, scrollable in the overlay
+	return execOrbLong("docker", "exec", name, "tail", "-2000", path)
 }
 
 func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
@@ -325,8 +348,8 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	// Read only the last 500 lines
-	return execOrbLong("bash", "-c", fmt.Sprintf("tail -500 '%s'", path))
+	// Read the last 2000 lines
+	return execOrbLong("bash", "-c", fmt.Sprintf("tail -2000 '%s'", path))
 }
 
 // Checkpoint creates a named git stash checkpoint of the agent's current working tree.
@@ -601,14 +624,16 @@ type eventMsg struct {
 
 // claudeEntry represents a Claude Code session JSONL line
 type claudeEntry struct {
-	Type    string          `json:"type"`
-	Message json.RawMessage `json:"message"`
+	Type      string          `json:"type"`
+	Timestamp string          `json:"timestamp"`
+	Message   json.RawMessage `json:"message"`
 }
 
 // claudeMessage is the message field in a Claude Code entry
 type claudeMessage struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role      string          `json:"role"`
+	Content   json.RawMessage `json:"content"`
+	Timestamp string          `json:"timestamp"`
 }
 
 func renderSessionLog(data []byte) string {
@@ -640,7 +665,23 @@ func renderSessionLog(data []byte) string {
 					case "system":
 						label = "SYS"
 					}
-					fmt.Fprintf(&b, "── %s ──\n%s\n\n", label, text)
+					// Pick timestamp from entry or nested message
+					ts := ce.Timestamp
+					if ts == "" {
+						ts = msg.Timestamp
+					}
+					if len(ts) > 19 {
+						ts = ts[:19]
+					}
+					if ts != "" {
+						// Show just HH:MM:SS for compactness
+						if len(ts) >= 19 {
+							ts = ts[11:19]
+						}
+						fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
+					} else {
+						fmt.Fprintf(&b, "── %s ──\n%s\n\n", label, text)
+					}
 					continue
 				}
 			}
