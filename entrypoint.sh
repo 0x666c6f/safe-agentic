@@ -265,7 +265,8 @@ case "$AGENT_TYPE" in
           [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || sleep 5
           prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
           rm -f "$SESSION_STATE_DIR/pending-prompt"
-          tmux send-keys -t "$TMUX_SESSION_NAME" "$prompt" Enter
+          tmux send-keys -t "$TMUX_SESSION_NAME" -l "$prompt"
+          tmux send-keys -t "$TMUX_SESSION_NAME" Enter
         fi
       ) &
     fi
