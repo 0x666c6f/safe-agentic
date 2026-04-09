@@ -52,7 +52,7 @@ trust_workspace() {
   # Only enabled when SAFE_AGENTIC_AUTO_TRUST=1 (set via --auto-trust flag).
   [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || return 0
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  local settings_local="$claude_dir/settings.local.json"
+  local settings_local="$claude_dir/settings.json"
   local cwd
   cwd="$(pwd)"
 
