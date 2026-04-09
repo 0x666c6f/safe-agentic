@@ -297,20 +297,24 @@ func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrbLong("docker", "exec", name, "cat", path)
+	// Read only the last 500 lines — session files can be multi-MB
+	return execOrbLong("docker", "exec", name, "tail", "-500", path)
 }
 
 func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
-	// Copy the entire config dir to a temp location in the VM,
-	// then find and read the latest session file.
+	// For stopped containers: start briefly, read, then let it re-stop.
+	// docker cp of the entire config dir is too slow for large sessions.
 	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
+
+	// Find latest file via docker cp of just the directory listing
 	tmpDir := "/tmp/satui-sessions-" + name
 	execOrb("rm", "-rf", tmpDir)
+	defer execOrb("rm", "-rf", tmpDir)
+
 	_, err := execOrbLong("docker", "cp", name+":"+configDir, tmpDir+"/")
 	if err != nil {
 		return nil, err
 	}
-	defer execOrb("rm", "-rf", tmpDir)
 
 	latestFile, err := execOrbLong("bash", "-c",
 		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", tmpDir))
@@ -321,7 +325,8 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrbLong("cat", path)
+	// Read only the last 500 lines
+	return execOrbLong("bash", "-c", fmt.Sprintf("tail -500 '%s'", path))
 }
 
 // Checkpoint creates a named git stash checkpoint of the agent's current working tree.
@@ -594,6 +599,18 @@ type eventMsg struct {
 	Msg string `json:"msg"`
 }
 
+// claudeEntry represents a Claude Code session JSONL line
+type claudeEntry struct {
+	Type    string          `json:"type"`
+	Message json.RawMessage `json:"message"`
+}
+
+// claudeMessage is the message field in a Claude Code entry
+type claudeMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
 func renderSessionLog(data []byte) string {
 	var b strings.Builder
 	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
@@ -602,6 +619,34 @@ func renderSessionLog(data []byte) string {
 		if len(line) == 0 {
 			continue
 		}
+
+		// Try Claude Code format first (type: user/assistant/system with message field)
+		var ce claudeEntry
+		if err := json.Unmarshal(line, &ce); err == nil {
+			switch ce.Type {
+			case "user", "assistant", "system":
+				var msg claudeMessage
+				if err := json.Unmarshal(ce.Message, &msg); err == nil {
+					text := extractText(msg.Content)
+					if text == "" {
+						continue
+					}
+					label := "???"
+					switch ce.Type {
+					case "user":
+						label = "USER"
+					case "assistant":
+						label = "AGENT"
+					case "system":
+						label = "SYS"
+					}
+					fmt.Fprintf(&b, "── %s ──\n%s\n\n", label, text)
+					continue
+				}
+			}
+		}
+
+		// Fall back to Codex format (type: session_meta/response_item with payload)
 		var entry sessionLogEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
