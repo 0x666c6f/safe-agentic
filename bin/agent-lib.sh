@@ -572,7 +572,7 @@ append_ssh_mount() {
     vm_ssh_sock=$(vm_exec bash -c 'echo $SSH_AUTH_SOCK' 2>/dev/null || echo "")
     if [ -n "$vm_ssh_sock" ]; then
       # With userns-remap the container's uid maps to an unprivileged VM uid
-      # that cannot read the OrbStack SSH socket (owned florian:orbstack 660).
+      # that cannot read the OrbStack SSH socket (owned <user>:orbstack 660).
       # Relay via socat to a world-accessible socket so the remapped uid works.
       local relay_sock="/tmp/safe-agentic-ssh-agent.sock"
       local relay_script="/tmp/safe-agentic-ssh-relay.sh"

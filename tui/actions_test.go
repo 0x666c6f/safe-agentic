@@ -50,12 +50,12 @@ func TestBuildResumeExecArgsDefaultsCWD(t *testing.T) {
 }
 
 func TestParseSessionMeta(t *testing.T) {
-	data := []byte(`{"timestamp":"2026-04-09T07:32:05.051Z","type":"session_meta","payload":{"cwd":"/workspace/morpho-org/morpho-infra","cli_version":"0.118.0","originator":"codex-tui"}}` + "\n")
+	data := []byte(`{"timestamp":"2026-04-09T07:32:05.051Z","type":"session_meta","payload":{"cwd":"/workspace/myorg/myrepo","cli_version":"0.118.0","originator":"codex-tui"}}` + "\n")
 	got, err := parseSessionMeta(data)
 	if err != nil {
 		t.Fatalf("parseSessionMeta() error = %v", err)
 	}
-	if got.CWD != "/workspace/morpho-org/morpho-infra" {
+	if got.CWD != "/workspace/myorg/myrepo" {
 		t.Fatalf("parseSessionMeta().CWD = %q", got.CWD)
 	}
 	if got.CLIVersion != "0.118.0" {

@@ -68,7 +68,7 @@ agent-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
 agent spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monorepo.git
 
 # With AWS credentials for infrastructure work
-agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:myorg/infra.git
+agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 
 # Untrusted code (no SSH, no internet)
 agent spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated

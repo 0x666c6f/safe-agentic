@@ -62,7 +62,7 @@ Each cloned to `/workspace/org/repo` inside the container.
 ### With AWS credentials
 
 ```bash
-agent spawn claude --ssh --aws morpho-infra --repo git@github.com:myorg/infra.git
+agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 ```
 
 Credentials injected to tmpfs. Refresh without restarting: `agent aws-refresh <name>`.

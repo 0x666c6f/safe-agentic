@@ -31,11 +31,11 @@ Tokens persist in the auth volume. One-time setup per MCP server.
 
 ```bash
 # Inject at spawn time
-agent spawn claude --ssh --aws morpho-infra --repo ...
+agent spawn claude --ssh --aws my-aws-profile --repo ...
 
 # Refresh in a running container
 agent aws-refresh api-refactor
-agent aws-refresh --latest perso
+agent aws-refresh --latest my-profile
 ```
 
 Credentials stored on tmpfs. AWS SDKs re-read automatically — no restart needed.

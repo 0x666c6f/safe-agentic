@@ -154,7 +154,7 @@ Use `--docker` unless you explicitly need the VM daemon. `--docker-socket` gives
 Inject AWS credentials from your host `~/.aws/credentials` into the container:
 
 ```bash
-agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:myorg/infra.git
+agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 ```
 
 This injects the specified profile and sets `AWS_PROFILE` inside the container. The credentials are written to a tmpfs at `~/.aws/credentials`.
@@ -166,7 +166,7 @@ Since assumed-role sessions expire (~1 hour), refresh credentials in a running c
 agent aws-refresh my-task
 
 # Explicit profile override
-agent aws-refresh my-task perso
+agent aws-refresh my-task my-profile
 
 # Target the latest container
 agent aws-refresh --latest

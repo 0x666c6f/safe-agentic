@@ -69,7 +69,7 @@ Runs OAuth login in a temporary container. Token persists in the auth volume for
 agent aws-refresh <name>
 
 # Refresh with explicit profile
-agent aws-refresh <name> perso
+agent aws-refresh <name> my-profile
 
 # Refresh latest container
 agent aws-refresh --latest

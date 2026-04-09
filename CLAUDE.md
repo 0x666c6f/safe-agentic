@@ -71,9 +71,9 @@ agent peek <container>                 # last 30 lines of tmux pane
 agent peek --latest --lines 50         # more lines
 
 # AWS credentials
-agent spawn claude --ssh --aws morpho-infra-terraform-k8s --repo git@github.com:org/repo.git
+agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:org/repo.git
 agent aws-refresh <container>              # refresh expired credentials
-agent aws-refresh --latest perso           # refresh with different profile
+agent aws-refresh --latest my-profile      # refresh with different profile
 
 # Image rebuild
 agent update                   # cached build

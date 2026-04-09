@@ -2958,8 +2958,8 @@ If profile is omitted, uses the profile from the container's AWS_PROFILE env var
 
 Examples:
   agent aws-refresh my-task
-  agent aws-refresh my-task perso
-  agent aws-refresh --latest morpho-infra-terraform-k8s
+  agent aws-refresh my-task my-profile
+  agent aws-refresh --latest other-profile
 EOF
         return 0
         ;;
