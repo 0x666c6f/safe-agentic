@@ -3068,8 +3068,8 @@ if incomplete:
   fi
 
   # Get current branch
-  # shellcheck disable=SC2016
   local branch
+  # shellcheck disable=SC2016
   branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
   branch=$(echo "$branch" | tr -d '[:space:]')
   [ -n "$branch" ] || die "Could not determine current branch in $name."
@@ -3092,9 +3092,9 @@ if incomplete:
   vm_exec docker exec -e SA_BRANCH="$branch" "$name" bash -c \
     'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git push -u origin "$SA_BRANCH"' || die "Failed to push branch '$branch' in $name."
 
-  # shellcheck disable=SC2016
   # Create PR
   local pr_url
+  # shellcheck disable=SC2016
   pr_url=$(vm_exec docker exec -e SA_TITLE="$title" -e SA_BASE="$base" -e SA_NAME="$name" "$name" bash -c \
     'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; gh pr create --title "$SA_TITLE" --body "Created by safe-agentic agent: $SA_NAME" --base "$SA_BASE"' 2>/dev/null || echo "")
   [ -n "$pr_url" ] || die "Failed to create PR from $name. Ensure gh is authenticated and the repo has a remote."
