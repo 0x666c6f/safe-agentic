@@ -47,7 +47,11 @@ nav:
     - Isolation Boundaries: architecture/isolation.md
     - Networking: architecture/networking.md
     - Container Internals: architecture/container.md
-  - Security: security.md
+  - Security:
+    - Defaults: security/defaults.md
+    - Threat Surface per Flag: security/threat-surface.md
+    - Supply Chain: security/supply-chain.md
+    - Threat Model: security/threat-model.md
 
 markdown_extensions:
   - admonition
