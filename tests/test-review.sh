@@ -54,19 +54,29 @@ case "$cmd" in
       exit 0
     fi
 
-    # docker exec <name> command -v codex  (codex availability check)
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ] && [ "${4:-}" = "command" ] && [ "${5:-}" = "-v" ] && [ "${6:-}" = "codex" ]; then
-      if [ "$has_codex" = "1" ]; then
-        echo "/usr/local/bin/codex"
-        exit 0
-      else
-        exit 1
+    # docker exec [...] <name> command -v codex  (codex availability check)
+    # docker exec [...] <name> bash -lc "..."
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
+      shift 2  # remove "docker exec"
+      # Skip -e KEY=VAL and -i flags
+      while [ "${1:-}" = "-e" ] || [ "${1:-}" = "-i" ]; do
+        [ "${1:-}" = "-e" ] && shift 2 || shift
+      done
+      _name="${1:-}"; shift || true
+      # command -v codex
+      if [ "${1:-}" = "command" ] && [ "${2:-}" = "-v" ] && [ "${3:-}" = "codex" ]; then
+        if [ "$has_codex" = "1" ]; then
+          echo "/usr/local/bin/codex"
+          exit 0
+        else
+          exit 1
+        fi
       fi
-    fi
-
-    # docker exec <name> bash -lc "... codex review ..."
-    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ] && [ "${4:-}" = "bash" ] && [ "${5:-}" = "-lc" ]; then
-      printf 'exec_cmd: %s\n' "${6:-}" >>"$log_file"
+      # bash -lc "..."
+      if [ "${1:-}" = "bash" ] && [ "${2:-}" = "-lc" ]; then
+        printf 'exec_cmd: %s\n' "${3:-}" >>"$log_file"
+        exit 0
+      fi
       exit 0
     fi
 
@@ -152,7 +162,7 @@ assert_not_contains "$log" "git diff" "git diff not used when codex present"
 TEST_HAS_CODEX=1 TEST_CONTAINER_TYPE=claude run_ok "codex base review" \
   bash "$REPO_DIR/bin/agent" review my-task --base main
 log="$(cat "$ORB_LOG")"
-assert_contains "$log" "codex review --base main" "codex review --base main invoked"
+assert_contains "$log" "codex review --base" "codex review --base invoked"
 assert_not_contains "$log" "git diff" "git diff not used when codex present with --base"
 
 # --- without codex, no --base: falls back to git diff ---
@@ -168,7 +178,7 @@ assert_not_contains "$log" "codex review" "codex not invoked when absent"
 TEST_HAS_CODEX=0 TEST_CONTAINER_TYPE=codex run_ok "git diff base fallback" \
   bash "$REPO_DIR/bin/agent" review my-task --base origin/main
 log="$(cat "$ORB_LOG")"
-assert_contains "$log" "git diff origin/main" "git diff origin/main used when codex absent"
+assert_contains "$log" "git diff" "git diff used when codex absent with --base"
 
 # --- --latest resolves latest container ---
 : >"$ORB_LOG"

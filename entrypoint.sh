@@ -206,12 +206,12 @@ run_lifecycle_script() {
   script_cmd=$(python3 -c "
 import json, sys
 try:
-    with open('$config_file') as f:
+    with open(sys.argv[1]) as f:
         data = json.load(f)
-    print(data.get('scripts', {}).get('$script_name', ''))
-except:
+    print(data.get('scripts', {}).get(sys.argv[2], ''))
+except Exception:
     pass
-" 2>/dev/null || true)
+" "$config_file" "$script_name" 2>/dev/null || true)
 
   [ -n "$script_cmd" ] || return 0
 
@@ -231,6 +231,15 @@ launch_args=("$@")
 
 if [ -n "$AGENT_TYPE" ] && [ "${#launch_args[@]}" -eq 1 ] && [ "${launch_args[0]}" = "bash" ]; then
   launch_args=()
+fi
+
+# Short-circuit for --help: run the CLI directly without tmux (needed for CI smoke tests)
+if [ "${#launch_args[@]}" -ge 1 ] && [ "${launch_args[0]}" = "--help" ]; then
+  case "$AGENT_TYPE" in
+    claude) exec claude "${launch_args[@]}" 2>&1 ;;
+    codex)  exec codex "${launch_args[@]}" ;;
+    *)      exec bash -l "${launch_args[@]}" ;;
+  esac
 fi
 
 case "$AGENT_TYPE" in
@@ -265,7 +274,8 @@ case "$AGENT_TYPE" in
           [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || sleep 5
           prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
           rm -f "$SESSION_STATE_DIR/pending-prompt"
-          tmux send-keys -t "$TMUX_SESSION_NAME" "$prompt" Enter
+          tmux send-keys -t "$TMUX_SESSION_NAME" -l "$prompt"
+          tmux send-keys -t "$TMUX_SESSION_NAME" Enter
         fi
       ) &
     fi

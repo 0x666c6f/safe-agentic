@@ -36,6 +36,10 @@ case "$cmd" in
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
       # Determine what command is being run
       shift 2  # remove "docker exec"
+      # Skip -e KEY=VAL and -i flags
+      while [ "${1:-}" = "-e" ] || [ "${1:-}" = "-i" ]; do
+        [ "${1:-}" = "-e" ] && shift 2 || shift
+      done
       name="$1"; shift  # container name
       # Join remaining args to inspect
       full_cmd="$*"
@@ -249,6 +253,10 @@ case "$cmd" in
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
       shift 2  # remove "docker exec"
+      # Skip -e KEY=VAL and -i flags
+      while [ "${1:-}" = "-e" ] || [ "${1:-}" = "-i" ]; do
+        [ "${1:-}" = "-e" ] && shift 2 || shift
+      done
       name="$1"; shift  # container name
       full_cmd="$*"
       if echo "$full_cmd" | grep -q "git stash create"; then

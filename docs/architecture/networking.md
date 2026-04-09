@@ -37,7 +37,7 @@ When you spawn an agent without `--network`, safe-agentic creates a dedicated br
 
 - Is created before the container starts
 - Is removed when the container is stopped
-- Has iptables rules blocking private/local egress (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, link-local)
+- Has iptables rules blocking private/local/reserved egress (0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10 CGNAT, 127.0.0.0/8, 169.254.0.0/16 link-local, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 multicast, 240.0.0.0/4 reserved)
 - Allows only outbound TCP on ports 22 (SSH/git), 80 (HTTP), and 443 (HTTPS)
 
 This means agents can clone repos, fetch packages, and call APIs — but cannot reach your local network, other containers, or host services.

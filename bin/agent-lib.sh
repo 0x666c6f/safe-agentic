@@ -773,8 +773,14 @@ audit_log() {
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   mkdir -p "$(dirname "$AUDIT_LOG_FILE")" 2>/dev/null || return 0
-  printf '{"timestamp":"%s","action":"%s","container":"%s","details":"%s"}\n' \
-    "$timestamp" "$action" "$container" "$details" \
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'timestamp': sys.argv[1],
+    'action': sys.argv[2],
+    'container': sys.argv[3],
+    'details': sys.argv[4]
+}, separators=(',', ':')))" "$timestamp" "$action" "$container" "$details" \
     >>"$AUDIT_LOG_FILE" 2>/dev/null || true
 }
 

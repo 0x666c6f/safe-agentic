@@ -15,12 +15,12 @@ graph TD
     end
 
     subgraph tmpfs["tmpfs (RAM, discarded on exit)"]
-        tmp["/tmp (noexec)"]
-        var_tmp["/var/tmp (noexec)"]
-        run["/run (noexec)"]
-        ssh_live["/home/agent/.ssh"]
-        config["/home/agent/.config"]
-        local["/home/agent/.local"]
+        tmp["/tmp (noexec, 512m)"]
+        var_tmp["/var/tmp (noexec, 256m)"]
+        run["/run (noexec, 16m)"]
+        shm["/dev/shm (noexec, 64m)"]
+        ssh_live["/home/agent/.ssh (1m)"]
+        config["/home/agent/.config (32m)"]
     end
 
     subgraph volumes["Docker volumes (ephemeral by default)"]

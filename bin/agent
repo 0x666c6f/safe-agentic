@@ -1872,10 +1872,11 @@ cmd_diff() {
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
+  # shellcheck disable=SC2016
   if $stat; then
-    vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git diff --stat'
+    vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff --stat'
   else
-    vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git diff'
+    vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff'
   fi
 }
 
@@ -1954,24 +1955,26 @@ cmd_checkpoint() {
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
+  # shellcheck disable=SC2016
   case "$subcmd" in
     create)
       [ -z "$label" ] && label="checkpoint-$(date +%s)"
+      validate_name_component "$label" "Checkpoint label"
       local stash_sha
       stash_sha=$(vm_exec docker exec "$name" bash -c \
-        'cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
       stash_sha=$(echo "$stash_sha" | tr -d '[:space:]')
       if [ -z "$stash_sha" ]; then
         info "No changes to checkpoint."
         return 0
       fi
-      vm_exec docker exec "$name" bash -c \
-        "cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/$label $stash_sha"
+      vm_exec docker exec -e SA_LABEL="$label" -e SA_SHA="$stash_sha" "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git update-ref "refs/safe-agentic/checkpoints/$SA_LABEL" "$SA_SHA"'
       ok "Checkpoint '$label' created ($stash_sha) in $name."
       ;;
     list)
       vm_exec docker exec "$name" bash -c \
-        'cd /workspace/* 2>/dev/null || cd /workspace; git for-each-ref --format="%(objectname:short) %(creatordate:unix) %(refname:lstrip=3)" refs/safe-agentic/checkpoints/' \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git for-each-ref --format="%(objectname:short) %(creatordate:unix) %(refname:lstrip=3)" refs/safe-agentic/checkpoints/' \
         | while IFS= read -r line; do
             local sha epoch lbl
             sha=$(echo "$line" | awk '{print $1}')
@@ -1986,8 +1989,9 @@ cmd_checkpoint() {
           done
       ;;
     revert)
-      vm_exec docker exec "$name" bash -c \
-        "cd /workspace/* 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply refs/safe-agentic/checkpoints/$ref"
+      validate_name_component "$ref" "Checkpoint ref"
+      vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
       ok "Reverted $name to checkpoint '$ref'."
       ;;
   esac
@@ -2190,13 +2194,14 @@ cmd_review() {
   [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
 
   # Detect workspace directory inside container
-  local workspace_cd="cd /workspace/* 2>/dev/null || cd /workspace"
+  # shellcheck disable=SC2016
+  local workspace_cd='cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace'
 
   # Check if codex is available in the container
   if vm_exec docker exec "$name" command -v codex >/dev/null 2>&1; then
     if [ -n "$base" ]; then
       info "Running codex review --base $base in $name..."
-      vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --base $base"
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && codex review --base \"\$SA_BASE\""
     else
       info "Running codex review --uncommitted in $name..."
       vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --uncommitted"
@@ -2204,7 +2209,7 @@ cmd_review() {
   else
     if [ -n "$base" ]; then
       info "Running git diff against $base in $name (codex not available)..."
-      vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff $base"
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && git diff \"\$SA_BASE\""
     else
       info "Running git diff in $name (codex not available)..."
       vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff"
@@ -2544,8 +2549,12 @@ PYEOF
   local -a pids=()
   local cmd_str
   for cmd_str in "${spawn_cmds[@]}"; do
-    # Evaluate the pre-quoted command string in a subshell
-    eval "$cmd_str" &
+    # Parse the shlex-quoted command back into an array safely (no eval)
+    local -a cmd_array=()
+    while IFS= read -r -d '' arg; do
+      cmd_array+=("$arg")
+    done < <(python3 -c "import shlex,sys; [sys.stdout.buffer.write(a.encode()+b'\x00') for a in shlex.split(sys.stdin.read())]" <<< "$cmd_str")
+    "${cmd_array[@]}" &
     pids+=($!)
   done
 
@@ -2940,7 +2949,7 @@ cmd_orchestrate() {
   fleet_names=$(python3 -c "
 import sys
 current = None
-with open('$fleet_file') as f:
+with open(sys.argv[1]) as f:
     for line in f:
         line = line.rstrip()
         if line.strip().startswith('- name:'):
@@ -2949,7 +2958,7 @@ with open('$fleet_file') as f:
             agent_type = line.split(':', 1)[1].strip()
             print('agent-' + agent_type + '-' + current)
             current = None
-" 2>/dev/null)
+" "$fleet_file" 2>/dev/null)
 
   while IFS= read -r cname; do
     [ -n "$cname" ] && fleet_containers+=("$cname")
@@ -3060,7 +3069,8 @@ if incomplete:
 
   # Get current branch
   local branch
-  branch=$(vm_exec docker exec "$name" bash -c 'cd /workspace/* 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
+  # shellcheck disable=SC2016
+  branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
   branch=$(echo "$branch" | tr -d '[:space:]')
   [ -n "$branch" ] || die "Could not determine current branch in $name."
   if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
@@ -3072,15 +3082,21 @@ if incomplete:
 
   info "Creating PR from $branch → $base in $name..."
 
+  # shellcheck disable=SC2016
   # Stage and commit any uncommitted changes
-  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m 'agent work: $title'"
+  vm_exec docker exec -e SA_TITLE="$title" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m "agent work: $SA_TITLE"'
 
+  # shellcheck disable=SC2016
   # Push branch
-  vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; git push -u origin $branch" || die "Failed to push branch '$branch' in $name."
+  vm_exec docker exec -e SA_BRANCH="$branch" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git push -u origin "$SA_BRANCH"' || die "Failed to push branch '$branch' in $name."
 
   # Create PR
   local pr_url
-  pr_url=$(vm_exec docker exec "$name" bash -c "cd /workspace/* 2>/dev/null || cd /workspace; gh pr create --title '$title' --body 'Created by safe-agentic agent: $name' --base '$base'" 2>/dev/null || echo "")
+  # shellcheck disable=SC2016
+  pr_url=$(vm_exec docker exec -e SA_TITLE="$title" -e SA_BASE="$base" -e SA_NAME="$name" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; gh pr create --title "$SA_TITLE" --body "Created by safe-agentic agent: $SA_NAME" --base "$SA_BASE"' 2>/dev/null || echo "")
   [ -n "$pr_url" ] || die "Failed to create PR from $name. Ensure gh is authenticated and the repo has a remote."
 
   ok "PR created: $pr_url"
@@ -3151,7 +3167,7 @@ EOF
   local creds_b64
   creds_b64=$(base64 < "$aws_creds_file")
 
-  vm_exec docker exec "$name" bash -c "echo '$creds_b64' | base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials"
+  echo "$creds_b64" | vm_exec docker exec -i "$name" bash -c 'base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials'
 
   ok "AWS credentials refreshed in $name (profile: $profile)"
 }

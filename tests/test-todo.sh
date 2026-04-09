@@ -40,12 +40,13 @@ case "$cmd" in
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
       shift 2  # remove "docker exec"
-      # Handle -i flag (stdin pipe for python scripts)
+      # Handle -i and -e flags
       interactive=false
-      if [ "${1:-}" = "-i" ]; then
-        interactive=true
-        shift
-      fi
+      while [ "${1:-}" = "-i" ] || [ "${1:-}" = "-e" ]; do
+        if [ "${1:-}" = "-i" ]; then interactive=true; shift
+        elif [ "${1:-}" = "-e" ]; then shift 2
+        fi
+      done
       name="$1"; shift  # container name
 
       if [ "${1:-}" = "mkdir" ]; then
