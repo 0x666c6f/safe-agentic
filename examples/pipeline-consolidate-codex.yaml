@@ -8,7 +8,7 @@
 #   agent pipeline examples/pipeline-consolidate-and-fix.yaml
 #   OR: agent orchestrate examples/fleet-review-and-fix.yaml examples/pipeline-consolidate-and-fix.yaml
 
-name: consolidate-and-fix
+name: consolidate-and-fix-codex
 steps:
   - name: consolidate-fix-pr
     type: claude
