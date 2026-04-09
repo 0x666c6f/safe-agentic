@@ -1,0 +1,44 @@
+# Fleet + Pipeline: parallel review → consolidate → fix → PR
+#
+# This is a two-step workflow:
+#   1. Run the fleet to spawn parallel review agents
+#   2. Run the pipeline to consolidate findings, fix issues, and create a PR
+#
+# Usage:
+#   agent fleet examples/fleet-review-and-fix.yaml
+#   # Wait for agents to finish (monitor with: agent tui)
+#   # Then run the consolidation pipeline:
+#   agent pipeline examples/pipeline-consolidate-and-fix.yaml
+
+agents:
+  - name: review-code
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    prompt: "Perform a thorough code review. Focus on code quality, error handling, edge cases, bash quoting, and Go best practices. Write your findings to REVIEW-CODE.md at the repo root with severity ratings (critical/high/medium/low). Then: git checkout -b review/code-quality, git add REVIEW-CODE.md, git commit -m 'review: code quality findings', git push origin review/code-quality"
+
+  - name: review-security
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    prompt: "Perform a security audit. Check for command injection, path traversal, unsafe eval/exec, TOCTOU races, missing input validation, and isolation boundary gaps. Write findings to REVIEW-SECURITY.md at the repo root with severity ratings. Then: git checkout -b review/security-audit, git add REVIEW-SECURITY.md, git commit -m 'review: security audit findings', git push origin review/security-audit"
+
+  - name: review-tests
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    prompt: "Analyze test coverage. For each source file, identify untested code paths, missing edge cases, and features with no tests. Write findings to REVIEW-TESTS.md at the repo root with specific test case suggestions. Then: git checkout -b review/test-coverage, git add REVIEW-TESTS.md, git commit -m 'review: test coverage findings', git push origin review/test-coverage"
+
+  - name: review-docs
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    prompt: "Review all documentation for accuracy against code, outdated info, broken links, missing examples, and inconsistencies. Write findings to REVIEW-DOCS.md at the repo root with file/line references. Then: git checkout -b review/docs-audit, git add REVIEW-DOCS.md, git commit -m 'review: documentation findings', git push origin review/docs-audit"

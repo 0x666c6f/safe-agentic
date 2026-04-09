@@ -99,6 +99,26 @@ Steps run **sequentially**. Each step spawns an agent, waits for it to finish, t
 - **`retry`**: On failure, wait 5 seconds and re-run (up to N times)
 - **`on_failure`**: When a step fails (after retries), jump to the named handler step
 
+## Fleet + Pipeline: artifact passing
+
+Fleet agents run in separate containers and can't share files directly. The pattern for coordination is:
+
+1. **Fleet agents write findings to files and push to branches**
+2. **A pipeline agent fetches those branches, consolidates, and acts**
+
+```bash
+# Phase 1: parallel review (each agent pushes to a review/* branch)
+agent fleet examples/fleet-review-and-fix.yaml
+
+# Monitor with TUI — wait for all agents to finish
+agent tui
+
+# Phase 2: consolidate findings → fix critical issues → create PR
+agent pipeline examples/pipeline-consolidate-and-fix.yaml
+```
+
+This gives you parallel review speed with coordinated follow-up action.
+
 ## Real-world examples
 
 ### Example 1: Parallel dependency updates across repos

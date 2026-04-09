@@ -1,0 +1,109 @@
+# Pipeline: consolidate review findings → fix → PR
+#
+# Run AFTER fleet-review-and-fix.yaml agents have finished.
+# The fleet agents push their findings to review/* branches.
+# This pipeline fetches those branches, consolidates, fixes, and creates a PR.
+#
+# Usage:
+#   agent pipeline examples/pipeline-consolidate-and-fix.yaml
+
+name: consolidate-and-fix
+steps:
+  - name: consolidate
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    prompt: |
+      Collect findings from all review branches and consolidate them.
+
+      1. Fetch all review branches:
+         git fetch origin review/code-quality review/security-audit review/test-coverage review/docs-audit
+
+      2. For each branch, extract the REVIEW-*.md file:
+         git show origin/review/code-quality:REVIEW-CODE.md > /tmp/review-code.md
+         git show origin/review/security-audit:REVIEW-SECURITY.md > /tmp/review-security.md
+         git show origin/review/test-coverage:REVIEW-TESTS.md > /tmp/review-tests.md
+         git show origin/review/docs-audit:REVIEW-DOCS.md > /tmp/review-docs.md
+
+      3. Read all four files and create a consolidated REVIEW-CONSOLIDATED.md that:
+         - Deduplicates findings across reviews
+         - Sorts by severity (critical first)
+         - Groups by category (security, code quality, tests, docs)
+         - Marks each finding as "actionable" or "informational"
+
+      4. Create a branch, commit, and push:
+         git checkout -b fix/consolidated-review
+         Write REVIEW-CONSOLIDATED.md to the repo root
+         git add REVIEW-CONSOLIDATED.md
+         git commit -m "review: consolidated findings from parallel review fleet"
+         git push origin fix/consolidated-review
+
+  - name: fix-critical
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    depends_on: consolidate
+    retry: 2
+    prompt: |
+      You are fixing issues found by a review fleet.
+
+      1. Fetch and checkout the consolidated review branch:
+         git fetch origin fix/consolidated-review
+         git checkout fix/consolidated-review
+
+      2. Read REVIEW-CONSOLIDATED.md
+
+      3. Fix ALL critical and high severity actionable findings:
+         - For each fix, run the relevant tests to verify
+         - Commit each fix separately with a descriptive message
+         - Do NOT fix informational or low-severity items
+
+      4. After all fixes, run the full test suite:
+         bash tests/run-all.sh
+         If tests fail, fix them.
+
+      5. Push all commits:
+         git push origin fix/consolidated-review
+
+  - name: create-pr
+    type: claude
+    repo: git@github.com:0x666c6f/safe-agentic.git
+    ssh: true
+    reuse_auth: true
+    auto_trust: true
+    depends_on: fix-critical
+    prompt: |
+      Create a pull request from the fix/consolidated-review branch.
+
+      1. Fetch and checkout:
+         git fetch origin fix/consolidated-review
+         git checkout fix/consolidated-review
+
+      2. Read REVIEW-CONSOLIDATED.md to understand what was found and fixed.
+
+      3. Create a PR:
+         gh pr create \
+           --title "fix: address critical/high findings from parallel review fleet" \
+           --base main \
+           --body "## Review Fleet Findings
+
+      This PR addresses critical and high severity findings from a parallel review fleet:
+      - Code quality review
+      - Security audit
+      - Test coverage analysis
+      - Documentation review
+
+      See REVIEW-CONSOLIDATED.md for the full findings report.
+
+      ## Changes
+      $(git log origin/main..HEAD --oneline)
+      "
+
+      4. Clean up review branches to avoid polluting the repo:
+         git push origin --delete review/code-quality review/security-audit review/test-coverage review/docs-audit 2>/dev/null || true
+
+      5. Print the PR URL.
