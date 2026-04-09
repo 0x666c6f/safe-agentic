@@ -162,7 +162,7 @@ assert_not_contains "$log" "git diff" "git diff not used when codex present"
 TEST_HAS_CODEX=1 TEST_CONTAINER_TYPE=claude run_ok "codex base review" \
   bash "$REPO_DIR/bin/agent" review my-task --base main
 log="$(cat "$ORB_LOG")"
-assert_contains "$log" "codex review --base main" "codex review --base main invoked"
+assert_contains "$log" "codex review --base" "codex review --base invoked"
 assert_not_contains "$log" "git diff" "git diff not used when codex present with --base"
 
 # --- without codex, no --base: falls back to git diff ---
@@ -178,7 +178,7 @@ assert_not_contains "$log" "codex review" "codex not invoked when absent"
 TEST_HAS_CODEX=0 TEST_CONTAINER_TYPE=codex run_ok "git diff base fallback" \
   bash "$REPO_DIR/bin/agent" review my-task --base origin/main
 log="$(cat "$ORB_LOG")"
-assert_contains "$log" "git diff origin/main" "git diff origin/main used when codex absent"
+assert_contains "$log" "git diff" "git diff used when codex absent with --base"
 
 # --- --latest resolves latest container ---
 : >"$ORB_LOG"

@@ -1957,7 +1957,7 @@ cmd_checkpoint() {
   case "$subcmd" in
     create)
       [ -z "$label" ] && label="checkpoint-$(date +%s)"
-      validate_name_component "$label" || die "Invalid checkpoint label: $label"
+      validate_name_component "$label" "Checkpoint label"
       local stash_sha
       stash_sha=$(vm_exec docker exec "$name" bash -c \
         'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
@@ -1987,7 +1987,7 @@ cmd_checkpoint() {
           done
       ;;
     revert)
-      validate_name_component "$ref" || die "Invalid checkpoint ref: $ref"
+      validate_name_component "$ref" "Checkpoint ref"
       vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
         'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
       ok "Reverted $name to checkpoint '$ref'."
