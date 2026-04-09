@@ -183,6 +183,44 @@ if [ -n "${REPOS:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Run setup script from safe-agentic.json (if present)
+# ---------------------------------------------------------------------------
+run_lifecycle_script() {
+  local script_name="$1"
+  local config_file=""
+
+  # Find safe-agentic.json in any cloned repo
+  for dir in /workspace/*/; do
+    if [ -f "${dir}safe-agentic.json" ]; then
+      config_file="${dir}safe-agentic.json"
+      break
+    fi
+  done
+
+  [ -n "$config_file" ] || return 0
+
+  local script_cmd
+  script_cmd=$(python3 -c "
+import json, sys
+try:
+    with open('$config_file') as f:
+        data = json.load(f)
+    print(data.get('scripts', {}).get('$script_name', ''))
+except:
+    pass
+" 2>/dev/null || true)
+
+  [ -n "$script_cmd" ] || return 0
+
+  echo "[entrypoint] Running $script_name script from safe-agentic.json..."
+  (cd "$(dirname "$config_file")" && bash -c "$script_cmd") || {
+    echo "[entrypoint] WARNING: $script_name script failed (exit $?)" >&2
+  }
+}
+
+run_lifecycle_script "setup"
+
+# ---------------------------------------------------------------------------
 # Launch agent or interactive shell
 # ---------------------------------------------------------------------------
 AGENT_TYPE="${AGENT_TYPE:-}"
