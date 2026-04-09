@@ -286,17 +286,12 @@ func (ac *Actions) Logs() {
 }
 
 func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
-	// Search both sessions/ (codex) and projects/ (claude) directories
+	// Find the most recently modified session JSONL (by mtime, not name)
 	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
 	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c",
-		fmt.Sprintf("find %s/sessions/ %s/projects/ -name '*.jsonl' ! -name '._*' ! -path '*/subagents/*' -type f 2>/dev/null | sort -t/ -k$(echo %s/projects/ | tr -cd '/' | wc -c) | tail -1", configDir, configDir, configDir))
-	if err != nil || strings.TrimSpace(string(latestFile)) == "" {
-		// Fallback: search entire config dir
-		latestFile, err = execOrbLong("docker", "exec", name, "bash", "-c",
-			fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f 2>/dev/null | sort | tail -1", configDir))
-		if err != nil {
-			return nil, err
-		}
+		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", configDir))
+	if err != nil {
+		return nil, err
 	}
 	path := strings.TrimSpace(string(latestFile))
 	if path == "" {
@@ -318,7 +313,7 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	defer execOrb("rm", "-rf", tmpDir)
 
 	latestFile, err := execOrbLong("bash", "-c",
-		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f 2>/dev/null | sort | tail -1", tmpDir))
+		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", tmpDir))
 	if err != nil {
 		return nil, err
 	}
