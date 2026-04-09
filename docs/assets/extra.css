@@ -1,0 +1,46 @@
+/* Hero section */
+.hero {
+  text-align: center;
+  padding: 2rem 1rem 1rem;
+}
+
+.hero h1 {
+  font-size: 2.8rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.hero-subtitle {
+  max-width: 42rem;
+  margin: 0 auto 1.5rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+
+.hero .highlight {
+  margin: 1.5rem auto;
+  max-width: 38rem;
+  text-align: left;
+}
+
+.hero .md-button {
+  margin: 0.4rem 0.3rem;
+}
+
+/* Feature grid card icons */
+.grid.cards .card > :first-child {
+  font-size: 1.4rem;
+}
+
+/* Security defaults table */
+.md-typeset table:not([class]) th {
+  white-space: nowrap;
+}
+
+/* Tighten command reference table */
+.md-typeset table:not([class]) td:first-child {
+  white-space: nowrap;
+  font-family: var(--md-code-font-family);
+  font-size: 0.82rem;
+}
