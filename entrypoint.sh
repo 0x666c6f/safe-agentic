@@ -224,6 +224,20 @@ except Exception:
 run_lifecycle_script "setup"
 
 # ---------------------------------------------------------------------------
+# Inject agent instructions (AGENT-INSTRUCTIONS.md)
+# ---------------------------------------------------------------------------
+if [ -n "${SAFE_AGENTIC_INSTRUCTIONS_B64:-}" ]; then
+  echo "[entrypoint] Writing AGENT-INSTRUCTIONS.md to /workspace..."
+  mkdir -p /workspace 2>/dev/null || true
+  if [ -w /workspace ]; then
+    printf '%s' "$SAFE_AGENTIC_INSTRUCTIONS_B64" | base64 -d > /workspace/AGENT-INSTRUCTIONS.md 2>/dev/null || true
+    echo "[entrypoint] AGENT-INSTRUCTIONS.md written."
+  else
+    echo "[entrypoint] WARNING: /workspace not writable, cannot write AGENT-INSTRUCTIONS.md" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Launch agent or interactive shell
 # ---------------------------------------------------------------------------
 AGENT_TYPE="${AGENT_TYPE:-}"
@@ -309,3 +323,16 @@ case "$AGENT_TYPE" in
     fi
     ;;
 esac
+
+# ---------------------------------------------------------------------------
+# On-exit callback (runs after agent exits; not for interactive shell which exec'd)
+# ---------------------------------------------------------------------------
+if [ -n "${SAFE_AGENTIC_ON_EXIT_B64:-}" ]; then
+  on_exit_cmd=$(printf '%s' "$SAFE_AGENTIC_ON_EXIT_B64" | base64 -d 2>/dev/null || true)
+  if [ -n "$on_exit_cmd" ]; then
+    echo "[entrypoint] Running on-exit callback..."
+    bash -c "$on_exit_cmd" || {
+      echo "[entrypoint] WARNING: on-exit callback exited with status $?" >&2
+    }
+  fi
+fi

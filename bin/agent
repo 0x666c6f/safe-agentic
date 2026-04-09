@@ -125,12 +125,17 @@ ${GREEN}Workflow:${NC}
 ${GREEN}AWS:${NC}
   agent aws-refresh <name>|--latest [profile]
 
+${GREEN}Templates:${NC}
+  agent template list
+  agent template show <name>
+  agent template create <name>
+
 ${GREEN}Maintain:${NC}
   agent update [--quick|--full]
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary]
+  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
   agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
@@ -139,6 +144,7 @@ ${GREEN}Examples:${NC}
   agent shell --dry-run --repo https://github.com/myorg/myrepo.git
   agent fleet agents.yaml --dry-run
   agent pipeline my-workflow.yaml --dry-run
+  agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
 EOF
 }
 
@@ -159,6 +165,7 @@ Options:
   --cpus N
   --pids-limit N
   --prompt 'TASK'
+  --template NAME
   --instructions 'TEXT'
   --instructions-file PATH
   --on-exit 'COMMAND'
@@ -172,6 +179,7 @@ Options:
 
 Notes:
   - --prompt sends an initial task to the agent (claude -p / codex positional arg)
+  - --template loads a pre-built prompt by name (see 'agent template list'); --prompt takes precedence
   - --instructions injects text as /workspace/AGENT-INSTRUCTIONS.md (Claude picks it up automatically)
   - --instructions-file reads instructions from a local file
   - --on-exit runs a shell command after the agent exits (e.g. webhook notification)
@@ -774,6 +782,11 @@ cmd_spawn() {
       --prompt)
         require_option_value "$topic" "--prompt" "${2:-}"
         agent_prompt="$2"
+        shift 2
+        ;;
+      --template)
+        require_option_value "$topic" "--template" "${2:-}"
+        agent_prompt=$(resolve_template "$2")
         shift 2
         ;;
       --aws)
