@@ -28,7 +28,7 @@ graph TB
                 entrypoint["entrypoint.sh"]
                 agent["Claude Code<br/>--dangerously-skip-permissions"]
                 workspace["/workspace/org/repo"]
-                tmpfs_home["tmpfs: .ssh, .config, .local"]
+                tmpfs_home["tmpfs: .ssh, .config"]
                 volumes["Ephemeral volumes:<br/>auth, caches, workspace"]
             end
         end
