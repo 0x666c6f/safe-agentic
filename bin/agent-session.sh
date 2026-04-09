@@ -37,8 +37,11 @@ launch_codex() {
   fi
 
   if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-    # Background mode: run directly, output to stdout (docker logs).
-    exec codex --yolo "$@"
+    # Background mode: run via script PTY (needed for auth refresh).
+    # Output goes to stdout → docker logs. No tmux.
+    local rendered
+    rendered=$(quote_cmd codex --yolo "$@")
+    exec script -qfc "$rendered" /dev/null
   fi
 
   if [ $# -gt 0 ]; then
@@ -115,9 +118,10 @@ launch_claude() {
   fi
 
   if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-    # Background mode: run directly with -p, output to stdout (docker logs).
-    # No tmux, no script PTY wrapper needed.
-    exec "${cmd[@]}"
+    # Background mode: run with -p via script PTY (needed for OAuth refresh).
+    # Output goes to stdout → docker logs. No tmux.
+    rendered=$(quote_cmd "${cmd[@]}")
+    exec script -qfc "$rendered" /dev/null
   fi
 
   if $has_prompt; then
