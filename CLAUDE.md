@@ -92,6 +92,27 @@ agent spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
 agent spawn claude --repo https://... --network agent-isolated
 ```
 
+```bash
+# Workflow
+agent diff <name>|--latest [--stat]       # show git diff from agent working tree
+agent checkpoint create <name> [label]     # snapshot working tree
+agent checkpoint list <name>               # list snapshots
+agent checkpoint revert <name> <ref>       # revert to snapshot
+agent todo add <name> "text"               # add merge requirement
+agent todo list <name>                     # show todos
+agent todo check <name> <index>            # mark done
+agent pr <name> [--title T --base B]       # create GitHub PR
+agent review <name> [--base B]             # AI code review
+
+# Fleet & Pipelines
+agent fleet manifest.yaml [--dry-run]      # spawn agents from manifest
+agent pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
+
+# Analytics
+agent cost <name>                          # estimate API spend
+agent audit [--lines N]                    # show operation log
+```
+
 ## Security Model
 
 | Default | Override |

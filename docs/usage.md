@@ -27,6 +27,22 @@
 | `agent vm start` | Start VM and re-apply hardening |
 | `agent vm stop` | Stop the VM |
 | `agent vm ssh` | SSH into the VM for debugging |
+| **Workflow** | |
+| `agent diff <name>` | Show git diff from agent's working tree |
+| `agent checkpoint create <name>` | Snapshot the working tree |
+| `agent checkpoint list <name>` | List snapshots |
+| `agent checkpoint revert <name> <ref>` | Revert to a snapshot |
+| `agent todo add <name> "text"` | Add a merge requirement |
+| `agent todo list <name>` | Show todos with completion status |
+| `agent todo check <name> <index>` | Mark a todo as done |
+| `agent pr <name>` | Create a GitHub PR from agent's branch |
+| `agent review <name>` | AI code review (codex review or git diff) |
+| **Fleet & Orchestration** | |
+| `agent fleet manifest.yaml` | Spawn agents from a YAML manifest |
+| `agent pipeline pipeline.yaml` | Run a multi-step agent pipeline |
+| **Analytics** | |
+| `agent cost <name>` | Estimate API spend from session data |
+| `agent audit` | Show append-only operation log |
 
 ## Spawning agents
 
@@ -336,6 +352,139 @@ agent peek --latest --lines 50    # more lines from the latest container
 ```
 
 Only works on running containers with tmux sessions (Claude/Codex agents). For shell containers or stopped agents, use `agent attach` instead.
+
+## Developer workflow
+
+### Diff — review agent's changes
+
+```bash
+agent diff api-refactor          # full git diff
+agent diff --latest --stat       # diffstat summary
+```
+
+### Checkpoints — snapshot and revert
+
+```bash
+agent checkpoint create api-refactor "before refactor"
+agent checkpoint list api-refactor
+agent checkpoint revert api-refactor checkpoint-1712678400
+```
+
+Checkpoints use git stash refs (`refs/safe-agentic/checkpoints/`) so they don't pollute the branch history.
+
+### Todos — merge gates
+
+```bash
+agent todo add api-refactor "Run tests"
+agent todo add api-refactor "Update docs"
+agent todo list api-refactor
+agent todo check api-refactor 1
+```
+
+`agent pr` blocks if incomplete todos exist.
+
+### PR creation
+
+```bash
+agent pr api-refactor --title "feat: add caching" --base dev
+agent pr --latest
+```
+
+Requires `--ssh` (for push) and `gh` auth inside the container. Commits uncommitted changes, pushes, creates PR via `gh pr create`.
+
+### Code review
+
+```bash
+agent review api-refactor               # codex review --uncommitted (or git diff fallback)
+agent review --latest --base main       # codex review --base main
+```
+
+### Lifecycle scripts
+
+Add a `safe-agentic.json` to your repo root:
+
+```json
+{
+  "scripts": {
+    "setup": "npm install && cp .env.example .env"
+  }
+}
+```
+
+The `setup` script runs automatically after the repo is cloned inside the container.
+
+## Fleet & orchestration
+
+### Fleet — spawn from manifest
+
+```bash
+agent fleet fleet.yaml
+agent fleet fleet.yaml --dry-run
+```
+
+Manifest format:
+```yaml
+agents:
+  - name: api-worker
+    type: claude
+    repo: git@github.com:org/api.git
+    ssh: true
+    reuse_auth: true
+    prompt: "Fix the failing tests"
+  - name: frontend
+    type: codex
+    repo: https://github.com/org/frontend.git
+```
+
+### Pipeline — multi-step workflows
+
+```bash
+agent pipeline pipeline.yaml
+agent pipeline pipeline.yaml --dry-run
+```
+
+Pipeline format:
+```yaml
+name: test-and-fix
+steps:
+  - name: run-tests
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Run all tests and report results"
+    on_failure: fix-tests
+  - name: fix-tests
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Fix the failing tests"
+    retry: 2
+  - name: create-pr
+    type: claude
+    repo: git@github.com:org/api.git
+    prompt: "Create a PR with the fixes"
+    depends_on: fix-tests
+```
+
+Steps execute sequentially. `depends_on` skips if dependency hasn't completed. `retry` re-attempts with backoff. `on_failure` triggers a handler step.
+
+## Analytics
+
+### Cost estimation
+
+```bash
+agent cost api-refactor
+agent cost --latest
+```
+
+Parses session JSONL for token usage, estimates cost per model.
+
+### Audit log
+
+```bash
+agent audit               # last 50 entries
+agent audit --lines 100
+```
+
+Append-only JSONL log at `~/.config/safe-agentic/audit.jsonl`. Records every spawn, stop, and attach with timestamp and details.
 
 ## Interactive shell
 

@@ -61,15 +61,15 @@ var allShortcuts = []shortcut{
 	{"s", "Stop"},
 	{"l", "Logs"},
 	{"d", "Describe"},
+	{"f", "Diff"},
+	{"t", "Todos"},
+	{"x", "Checkpoint"},
+	{"g", "PR"},
 	{"y", "YAML"},
 	{"n", "New"},
 	{"p", "Preview"},
 	{"e", "Export"},
-	{"f", "Diff"},
-	{"t", "Todos"},
-	{"x", "Checkpoint"},
 	{"c", "Copy"},
-	{"g", "PR"},
 	{"m", "MCP Login"},
 	{"/", "Filter"},
 	{":", "Command"},
@@ -79,7 +79,7 @@ var allShortcuts = []shortcut{
 }
 
 const shortcutCellWidth = 20 // fixed column width per shortcut
-const shortcutRows = 3
+const shortcutRows = 4
 
 func (f *Footer) showShortcuts() {
 	f.hints.SetText(renderShortcutGrid(allShortcuts, shortcutRows))

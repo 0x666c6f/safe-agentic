@@ -24,6 +24,22 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 - `agent sessions` — export session history for archival
 - `agent diagnose` — health check for OrbStack, VM, Docker, image, SSH, defaults
 
+**Developer Workflow**
+- `agent diff` — show git diff from an agent's working tree
+- `agent checkpoint` — create/list/revert working tree snapshots (git stash refs)
+- `agent todo` — track merge requirements; blocks PR creation until all checked off
+- `agent pr` — create a GitHub PR from the agent's branch (push + `gh pr create`)
+- `agent review` — AI code review via `codex review` or raw diff fallback
+- `safe-agentic.json` — lifecycle scripts (`setup` runs after repo clone)
+
+**Fleet & Orchestration**
+- `agent fleet manifest.yaml` — spawn multiple agents from a YAML manifest
+- `agent pipeline pipeline.yaml` — multi-step workflows with retry, dependencies, failure handlers
+
+**Analytics**
+- `agent cost` — estimate API spend by parsing session token usage
+- `agent audit` — append-only JSONL log of all spawn/stop/attach operations
+
 **Auth & Config**
 - `--ssh` — SSH agent forwarding via socat relay (userns-remap compatible)
 - `--reuse-auth` — persist Claude/Codex OAuth tokens across sessions
