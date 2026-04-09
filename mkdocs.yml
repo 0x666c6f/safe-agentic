@@ -42,7 +42,11 @@ nav:
     - Fleet & Orchestration: guide/fleet.md
     - Analytics: guide/analytics.md
     - Configuration: guide/configuration.md
-  - Architecture: architecture.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Isolation Boundaries: architecture/isolation.md
+    - Networking: architecture/networking.md
+    - Container Internals: architecture/container.md
   - Security: security.md
 
 markdown_extensions:
