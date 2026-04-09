@@ -93,7 +93,9 @@ ${GREEN}Run:${NC}
   agent-codex [spawn-options] <repo-url> [repo-url...]
 
 ${GREEN}Manage:${NC}
-  agent list
+  agent list [--json]
+  agent summary <name>|--latest
+  agent config <show|set|get|reset>
   agent tui
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
@@ -126,7 +128,8 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|review|cost|audit|fleet|pipeline|pr|stop|cleanup|update|vm|diagnose]
+  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|review|cost|audit|fleet|pipeline|pr|stop|cleanup|update|vm|diagnose|config|summary]
+  agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
@@ -820,11 +823,13 @@ cmd_spawn() {
   fi
   if [ "$agent_type" = "codex" ] || [ "$agent_type" = "claude" ]; then
     run_container_detached
+    ok "Container: $container_name"
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     auto_attach_tmux_session "$container_name"
   else
-    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     run_container "$managed_network" "$network_name"
+    ok "Container: $container_name"
+    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
   fi
 }
 
@@ -1003,10 +1008,41 @@ cmd_shell() {
 }
 
 cmd_list() {
+  local json=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json)
+        json=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent list [--json]
+
+List all safe-agentic containers.
+
+Options:
+  --json   Output raw JSON array (docker ps --format '{{json .}}')
+EOF
+        return 0
+        ;;
+      *)
+        die "Unknown argument '$1'. Run 'agent help' for usage."
+        ;;
+    esac
+  done
+
   require_vm
-  vm_exec docker ps -a \
-    --filter "name=^${CONTAINER_PREFIX}-" \
-    --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.gh-auth"}}\t{{.Label "safe-agentic.docker"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
+  if $json; then
+    vm_exec docker ps -a \
+      --filter "name=^${CONTAINER_PREFIX}-" \
+      --format '{{json .}}'
+  else
+    vm_exec docker ps -a \
+      --filter "name=^${CONTAINER_PREFIX}-" \
+      --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.gh-auth"}}\t{{.Label "safe-agentic.docker"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
+  fi
 }
 
 resolve_target_container() {
@@ -1516,6 +1552,311 @@ cmd_vm() {
   esac
 }
 
+print_help_summary() {
+  cat <<EOF
+Usage: agent summary <name>|--latest
+
+Show a one-screen overview of a container, including:
+  - Name, type, status, uptime/exit time
+  - Repo
+  - Flags (SSH, auth, Docker)
+  - Git status: branch, commits since clone, files changed
+  - Cost estimate
+  - Todo status
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help
+
+Examples:
+  agent summary my-task
+  agent summary --latest
+EOF
+}
+
+cmd_summary() {
+  local topic="summary"
+  local name=""
+  local latest=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_summary
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Gather basic container info
+  local state started_at finished_at agent_type repo_display ssh_label auth_label docker_label
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  started_at=$(vm_exec docker inspect --format '{{.State.StartedAt}}' "$name" 2>/dev/null || echo "")
+  finished_at=$(vm_exec docker inspect --format '{{.State.FinishedAt}}' "$name" 2>/dev/null || echo "")
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "-")
+  ssh_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.ssh"}}' "$name" 2>/dev/null || echo "")
+  auth_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.auth"}}' "$name" 2>/dev/null || echo "")
+  docker_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.docker"}}' "$name" 2>/dev/null || echo "")
+
+  echo ""
+  echo -e "${CYAN}=== Agent Summary: $name ===${NC}"
+  echo ""
+  echo -e "  ${GREEN}Type:${NC}     ${agent_type:-unknown}"
+  echo -e "  ${GREEN}Status:${NC}   $state"
+  if [ "$state" = "running" ]; then
+    echo -e "  ${GREEN}Started:${NC}  $started_at"
+  else
+    echo -e "  ${GREEN}Started:${NC}  $started_at"
+    echo -e "  ${GREEN}Exited:${NC}   $finished_at"
+  fi
+  echo -e "  ${GREEN}Repo:${NC}     $repo_display"
+  echo ""
+  echo -e "  ${GREEN}SSH:${NC}      ${ssh_label:-off}"
+  echo -e "  ${GREEN}Auth:${NC}     ${auth_label:-ephemeral}"
+  echo -e "  ${GREEN}Docker:${NC}   ${docker_label:-off}"
+  echo ""
+
+  # Git status (only if running)
+  if [ "$state" = "running" ]; then
+    echo -e "  ${GREEN}Git status:${NC}"
+    local branch commits_since changed_files
+    # shellcheck disable=SC2016
+    branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD 2>/dev/null' 2>/dev/null | tr -d '[:space:]' || echo "")
+    # shellcheck disable=SC2016
+    commits_since=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-list --count HEAD 2>/dev/null || echo 0' 2>/dev/null | tr -d '[:space:]' || echo "?")
+    # shellcheck disable=SC2016
+    changed_files=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff --name-only 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]' || echo "?")
+    echo -e "    Branch:          ${branch:-unknown}"
+    echo -e "    Commits:         ${commits_since:-?}"
+    echo -e "    Files changed:   ${changed_files:-?}"
+    echo ""
+
+    # Todo status
+    local todos_summary
+    todos_summary=$(vm_exec docker exec "$name" python3 -c '
+import json, os, sys
+path = "/workspace/.safe-agentic/todos.json"
+if not os.path.exists(path):
+    print("No todos")
+    sys.exit(0)
+try:
+    with open(path) as f:
+        todos = json.load(f)
+except Exception:
+    print("No todos")
+    sys.exit(0)
+done = sum(1 for t in todos if t.get("done"))
+total = len(todos)
+print("{}/{} complete".format(done, total))
+' 2>/dev/null || echo "")
+    echo -e "  ${GREEN}Todos:${NC}    ${todos_summary:-No todos}"
+    echo ""
+
+    # Cost estimate
+    local config_dir jsonl_data
+    case "$agent_type" in
+      codex) config_dir="/home/agent/.codex" ;;
+      *) config_dir="/home/agent/.claude" ;;
+    esac
+
+    jsonl_data=$(vm_exec docker exec "$name" bash -c "
+      find '${config_dir}/sessions' -name '*.jsonl' 2>/dev/null | while read -r f; do cat \"\$f\"; done
+      [ -f '${config_dir}/history.jsonl' ] && cat '${config_dir}/history.jsonl' || true
+    " 2>/dev/null || true)
+
+    if [ -n "$jsonl_data" ]; then
+      echo -e "  ${GREEN}Cost estimate:${NC}"
+      local py_script
+      py_script=$(mktemp /tmp/agent-cost-XXXXXX.py)
+      trap 'rm -f "$py_script"' RETURN
+      cat >"$py_script" <<'PYEOF'
+import sys, json, re
+PRICES = {
+    "claude-opus-4-6":   (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0,  15.0),
+    "claude-haiku-4-5":  (0.80,  4.0),
+}
+DEFAULT_PRICE = (3.0, 15.0)
+totals_by_model = {}
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    usage = obj.get("usage") or (obj.get("payload") or {}).get("usage")
+    if not usage or not isinstance(usage, dict):
+        continue
+    model = (obj.get("model") or (obj.get("payload") or {}).get("model") or "unknown")
+    model_key = re.sub(r"-\d{8}$", "", model)
+    inp = int(usage.get("input_tokens", 0))
+    out = int(usage.get("output_tokens", 0))
+    if model_key not in totals_by_model:
+        totals_by_model[model_key] = [0, 0]
+    totals_by_model[model_key][0] += inp
+    totals_by_model[model_key][1] += out
+if not totals_by_model:
+    print("    No token data yet.")
+    sys.exit(0)
+grand_in = grand_out = grand_cost = 0.0
+for model_key in sorted(totals_by_model):
+    inp, out = totals_by_model[model_key]
+    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
+    cost = (inp / 1_000_000) * price_in + (out / 1_000_000) * price_out
+    grand_in += inp
+    grand_out += out
+    grand_cost += cost
+print(f"    ~${grand_cost:.4f}  ({int(grand_in):,} in / {int(grand_out):,} out tokens)")
+PYEOF
+      echo "$jsonl_data" | python3 "$py_script"
+      echo ""
+    fi
+  fi
+}
+
+print_help_config() {
+  cat <<EOF
+Usage: agent config <show|set|get|reset>
+
+Manage default settings stored in ${DEFAULTS_FILE}.
+
+Subcommands:
+  show                    Print current defaults (or "No defaults set")
+  set <key> <value>       Set a default value (creates file if needed)
+  get <key>               Show a specific default value
+  reset                   Delete the defaults file
+
+Valid keys:
+  memory          SAFE_AGENTIC_DEFAULT_MEMORY
+  cpus            SAFE_AGENTIC_DEFAULT_CPUS
+  pids-limit      SAFE_AGENTIC_DEFAULT_PIDS_LIMIT
+  ssh             SAFE_AGENTIC_DEFAULT_SSH
+  reuse-auth      SAFE_AGENTIC_DEFAULT_REUSE_AUTH
+  reuse-gh-auth   SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH
+  docker          SAFE_AGENTIC_DEFAULT_DOCKER
+  network         SAFE_AGENTIC_DEFAULT_NETWORK
+  identity        SAFE_AGENTIC_DEFAULT_IDENTITY
+
+Examples:
+  agent config show
+  agent config set memory 16g
+  agent config set ssh true
+  agent config get memory
+  agent config reset
+EOF
+}
+
+# Map friendly key names to env var names used in the defaults file.
+_config_key_to_env() {
+  case "$1" in
+    memory)       echo "SAFE_AGENTIC_DEFAULT_MEMORY" ;;
+    cpus)         echo "SAFE_AGENTIC_DEFAULT_CPUS" ;;
+    pids-limit)   echo "SAFE_AGENTIC_DEFAULT_PIDS_LIMIT" ;;
+    ssh)          echo "SAFE_AGENTIC_DEFAULT_SSH" ;;
+    reuse-auth)   echo "SAFE_AGENTIC_DEFAULT_REUSE_AUTH" ;;
+    reuse-gh-auth) echo "SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH" ;;
+    docker)       echo "SAFE_AGENTIC_DEFAULT_DOCKER" ;;
+    network)      echo "SAFE_AGENTIC_DEFAULT_NETWORK" ;;
+    identity)     echo "SAFE_AGENTIC_DEFAULT_IDENTITY" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_config() {
+  local topic="config"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_config
+      return 0
+      ;;
+    show|set|get|reset)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (show|set|get|reset)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use show, set, get, or reset."
+      ;;
+  esac
+
+  case "$subcmd" in
+    show)
+      if [ ! -f "$DEFAULTS_FILE" ]; then
+        echo "No defaults set."
+        return 0
+      fi
+      cat "$DEFAULTS_FILE"
+      ;;
+    set)
+      local key="${1:-}"
+      local value="${2:-}"
+      [ -n "$key" ] || die_with_help "$topic" "Key required."
+      [ -n "$value" ] || die_with_help "$topic" "Value required."
+      local env_key
+      env_key=$(_config_key_to_env "$key") || die "Unknown config key '$key'. Run 'agent config --help' for valid keys."
+      mkdir -p "$(dirname "$DEFAULTS_FILE")"
+      # Remove existing line for this key, then append new value.
+      if [ -f "$DEFAULTS_FILE" ]; then
+        local tmpfile
+        tmpfile=$(mktemp "${TMPDIR:-/tmp}/safe-agentic-config.XXXXXX")
+        grep -v "^${env_key}=" "$DEFAULTS_FILE" > "$tmpfile" || true
+        mv "$tmpfile" "$DEFAULTS_FILE"
+      fi
+      printf '%s=%s\n' "$env_key" "$value" >> "$DEFAULTS_FILE"
+      ok "Set $key=$value in $DEFAULTS_FILE"
+      ;;
+    get)
+      local key="${1:-}"
+      [ -n "$key" ] || die_with_help "$topic" "Key required."
+      local env_key
+      env_key=$(_config_key_to_env "$key") || die "Unknown config key '$key'. Run 'agent config --help' for valid keys."
+      if [ ! -f "$DEFAULTS_FILE" ]; then
+        echo "No defaults set."
+        return 0
+      fi
+      local val
+      val=$(grep "^${env_key}=" "$DEFAULTS_FILE" | tail -1 | cut -d= -f2-) || true
+      if [ -n "$val" ]; then
+        echo "$val"
+      else
+        echo "(not set)"
+      fi
+      ;;
+    reset)
+      if [ -f "$DEFAULTS_FILE" ]; then
+        rm -f "$DEFAULTS_FILE"
+        ok "Defaults file removed: $DEFAULTS_FILE"
+      else
+        echo "No defaults file to remove."
+      fi
+      ;;
+  esac
+}
+
 cmd_help() {
   local topic="${1:-}"
 
@@ -1580,8 +1921,47 @@ cmd_help() {
     pr)
       print_help_pr
       ;;
+    config)
+      print_help_config
+      ;;
+    summary)
+      print_help_summary
+      ;;
     *)
-      die "Unknown help topic: $topic. Run 'agent help' for available topics."
+      # Search all help text for the keyword
+      local keyword="$topic"
+      local combined_help
+      combined_help=$(
+        print_help_general
+        print_help_spawn
+        print_help_shell
+        print_help_attach
+        print_help_cp
+        print_help_peek
+        print_help_diff
+        print_help_checkpoint
+        print_help_todo
+        print_help_stop
+        print_help_cleanup
+        print_help_update
+        print_help_vm
+        print_help_diagnose
+        print_help_review
+        print_help_audit
+        print_help_cost
+        print_help_fleet
+        print_help_pipeline
+        print_help_pr
+        print_help_config
+        print_help_summary
+      ) 2>/dev/null
+      local matches
+      matches=$(printf '%s\n' "$combined_help" | grep -i --color=auto -C 2 "$keyword" 2>/dev/null) || true
+      if [ -n "$matches" ]; then
+        printf '%s\n' "$matches"
+      else
+        die "No help found for '$keyword'."
+      fi
       ;;
   esac
 }
@@ -3201,6 +3581,8 @@ case "$cmd" in
   orchestrate) cmd_orchestrate "$@" ;;
   pr)         cmd_pr "$@" ;;
   aws-refresh) cmd_aws_refresh "$@" ;;
+  config)      cmd_config "$@" ;;
+  summary)     cmd_summary "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"
     [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."

@@ -243,6 +243,9 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		case 'A':
 			a.actions.Audit()
 			return nil
+		case '?':
+			a.showHelpOverlay()
+			return nil
 		case '/':
 			a.footer.ShowFilter(func(text string) {
 				a.table.SetFilter(text)
@@ -325,6 +328,45 @@ func (a *App) updatePreview(agent *Agent) {
 		return
 	}
 	a.preview.Update(agent.Name, content)
+}
+
+func (a *App) showHelpOverlay() {
+	content := `Keybindings
+
+Navigation
+  j / k / Up / Down   Move selection up/down
+  1-9                 Sort by column (1=Name, 2=Type, etc.)
+  /                   Filter agents by keyword
+  :                   Command mode (quit, fleet, pipeline, audit)
+
+Actions
+  Enter / a           Attach to selected agent (tmux)
+  r                   Resume agent session
+  n                   Spawn new agent (form)
+  s / Ctrl+D          Stop selected agent
+  Ctrl+K              Stop all agents
+
+Inspect
+  p                   Toggle preview pane (last output)
+  l                   Logs (docker logs)
+  d                   Describe container (docker inspect)
+  y                   YAML view
+  f                   Diff (git diff in workspace)
+  x                   Checkpoint (create snapshot)
+  t                   Todo list
+  e                   Export sessions
+  c                   Copy files from container
+  $                   Cost estimate
+  A                   Audit log
+  R                   Code review (codex)
+  g                   Create PR
+  m                   MCP OAuth login
+
+Other
+  ?                   This help overlay
+  q / Ctrl+C          Quit
+  Esc                 Close overlay / reset filter`
+	ShowOverlay(a, "help", "Help", content)
 }
 
 func capturePreview(name string, lines int) (string, error) {

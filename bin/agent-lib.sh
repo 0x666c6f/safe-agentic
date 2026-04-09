@@ -606,8 +606,7 @@ append_ssh_mount() {
   fi
 
   if [ -n "$repos_joined" ] && echo "$repos_joined" | grep -qE '(^|,)(git@|ssh://)'; then
-    warn "SSH repos detected but --ssh not passed. Clone will fail without SSH agent."
-    warn "Re-run with --ssh to enable SSH agent forwarding."
+    die "SSH repo detected in repos but --ssh not passed. Re-run with --ssh to enable SSH agent forwarding."
   fi
 }
 
