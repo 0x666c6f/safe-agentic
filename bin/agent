@@ -2198,7 +2198,7 @@ cmd_review() {
   if vm_exec docker exec "$name" command -v codex >/dev/null 2>&1; then
     if [ -n "$base" ]; then
       info "Running codex review --base $base in $name..."
-      vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --base $base"
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && codex review --base \"\$SA_BASE\""
     else
       info "Running codex review --uncommitted in $name..."
       vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --uncommitted"
@@ -2206,7 +2206,7 @@ cmd_review() {
   else
     if [ -n "$base" ]; then
       info "Running git diff against $base in $name (codex not available)..."
-      vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff $base"
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && git diff \"\$SA_BASE\""
     else
       info "Running git diff in $name (codex not available)..."
       vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff"
