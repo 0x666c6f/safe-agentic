@@ -76,6 +76,7 @@ func NewApp() *App {
 // Run starts the poller and the TUI event loop.
 func (a *App) Run() error {
 	a.poller.Start()
+	defer a.poller.Stop()
 	go a.spinLoading()
 	return a.tapp.SetRoot(a.pages, true).EnableMouse(false).Run()
 }
