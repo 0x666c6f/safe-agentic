@@ -682,6 +682,125 @@ func extractText(raw json.RawMessage) string {
 	return ""
 }
 
+// Review runs an AI code review of the agent's changes in an overlay.
+func (ac *Actions) Review() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	if !agent.Running {
+		ac.app.footer.ShowStatus("Agent not running", true)
+		return
+	}
+	name := agent.Name
+	ac.app.footer.ShowStatus("Running review...", false)
+	go func() {
+		out, err := execOrbLong("docker", "exec", name, "bash", "-lc",
+			"cd /workspace/* 2>/dev/null || cd /workspace; if command -v codex >/dev/null 2>&1; then codex review --uncommitted 2>&1; else git diff 2>&1; fi")
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Review failed", true)
+				return
+			}
+			content := string(out)
+			if strings.TrimSpace(content) == "" {
+				ac.app.footer.ShowStatus("No changes to review", false)
+				return
+			}
+			ShowOverlay(ac.app, "review", fmt.Sprintf("Review: %s", name), content)
+		})
+	}()
+}
+
+// Cost shows estimated API spend for the agent's sessions in an overlay.
+func (ac *Actions) Cost() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	name := agent.Name
+	ac.app.footer.ShowStatus("Analyzing cost...", false)
+	go func() {
+		cmd := exec.Command("agent", "cost", name)
+		out, err := cmd.CombinedOutput()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Cost analysis failed: "+strings.TrimSpace(string(out)), true)
+				return
+			}
+			content := strings.TrimSpace(string(out))
+			if content == "" {
+				ac.app.footer.ShowStatus("No session data found", false)
+				return
+			}
+			ShowOverlay(ac.app, "cost", fmt.Sprintf("Cost: %s", name), content)
+		})
+	}()
+}
+
+// Audit shows the operation audit log in an overlay.
+func (ac *Actions) Audit() {
+	ac.app.footer.ShowStatus("Loading audit log...", false)
+	go func() {
+		cmd := exec.Command("agent", "audit")
+		out, err := cmd.CombinedOutput()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("No audit log yet", false)
+				return
+			}
+			content := strings.TrimSpace(string(out))
+			if content == "" {
+				ac.app.footer.ShowStatus("No audit log yet", false)
+				return
+			}
+			ShowOverlay(ac.app, "audit", "Audit Log", content)
+		})
+	}()
+}
+
+// Fleet spawns agents from a manifest file (entered via command bar).
+func (ac *Actions) Fleet(manifestPath string) {
+	if manifestPath == "" {
+		ac.app.footer.ShowStatus("Usage: :fleet <manifest.yaml>", true)
+		return
+	}
+	ac.app.footer.ShowStatus("Spawning fleet from "+manifestPath+"...", false)
+	go func() {
+		cmd := exec.Command("agent", "fleet", manifestPath)
+		out, err := cmd.CombinedOutput()
+		ac.app.poller.ForceRefresh()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Fleet failed: "+strings.TrimSpace(string(out)), true)
+			} else {
+				ac.app.footer.ShowStatus("Fleet spawned. Press 'r' to connect.", false)
+			}
+		})
+	}()
+}
+
+// Pipeline runs a multi-step agent pipeline (entered via command bar).
+func (ac *Actions) Pipeline(pipelinePath string) {
+	if pipelinePath == "" {
+		ac.app.footer.ShowStatus("Usage: :pipeline <pipeline.yaml>", true)
+		return
+	}
+	ac.app.footer.ShowStatus("Running pipeline from "+pipelinePath+"...", false)
+	go func() {
+		cmd := exec.Command("agent", "pipeline", pipelinePath)
+		out, err := cmd.CombinedOutput()
+		ac.app.poller.ForceRefresh()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Pipeline failed: "+strings.TrimSpace(string(out)), true)
+			} else {
+				ac.app.footer.ShowStatus("Pipeline complete", false)
+			}
+		})
+	}()
+}
+
 // CreatePR creates a GitHub Pull Request from the agent's current branch.
 // Requires the container to have been spawned with --ssh.
 func (ac *Actions) CreatePR() {

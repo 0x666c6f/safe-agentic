@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -232,6 +233,15 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		case 'g':
 			a.actions.CreatePR()
 			return nil
+		case 'R':
+			a.actions.Review()
+			return nil
+		case '$':
+			a.actions.Cost()
+			return nil
+		case 'A':
+			a.actions.Audit()
+			return nil
 		case '/':
 			a.footer.ShowFilter(func(text string) {
 				a.table.SetFilter(text)
@@ -263,9 +273,22 @@ func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (a *App) handleCommand(cmd string) {
-	switch cmd {
+	parts := strings.SplitN(cmd, " ", 2)
+	verb := parts[0]
+	arg := ""
+	if len(parts) > 1 {
+		arg = strings.TrimSpace(parts[1])
+	}
+
+	switch verb {
 	case "q", "quit":
 		a.tapp.Stop()
+	case "fleet":
+		a.actions.Fleet(arg)
+	case "pipeline":
+		a.actions.Pipeline(arg)
+	case "audit":
+		a.actions.Audit()
 	default:
 		a.footer.ShowStatus("Unknown command: "+cmd, true)
 	}
