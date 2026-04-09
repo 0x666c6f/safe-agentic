@@ -373,26 +373,67 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 		findDir = configDir
 	}
 
+	// Get container creation time to match the correct session file
+	createdOut, _ := execOrb("docker", "inspect", "--format", "{{.Created}}", name)
+	containerCreated := strings.TrimSpace(string(createdOut))
+
 	// Check if container is running
 	stateOut, _ := execOrb("docker", "inspect", "--format", "{{.State.Status}}", name)
 	running := strings.TrimSpace(string(stateOut)) == "running"
 
+	// Python script: find the session file whose first timestamp is closest
+	// to (and after) the container creation time
+	matchScript := fmt.Sprintf(`
+import os, json, sys, glob
+container_created = sys.argv[1][:19]  # trim to seconds
+find_dir = sys.argv[2]
+tail_lines = sys.argv[3]
+
+# Find all session jsonl files
+files = glob.glob(os.path.join(find_dir, '*.jsonl'))
+if not files:
+    # Fallback: search deeper
+    files = glob.glob(os.path.join(find_dir, '**', '*.jsonl'), recursive=True)
+files = [f for f in files if not f.endswith('history.jsonl') and '/subagents/' not in f]
+
+best_file = None
+best_delta = float('inf')
+
+for f in files:
+    try:
+        with open(f) as fh:
+            for line in fh:
+                d = json.loads(line.strip())
+                ts = d.get('timestamp', '')
+                if not ts and 'message' in d and isinstance(d['message'], dict):
+                    ts = d['message'].get('timestamp', '')
+                if ts:
+                    session_start = ts[:19]
+                    # Simple string comparison works for ISO timestamps
+                    if session_start >= container_created:
+                        delta = ord(session_start[18]) - ord(container_created[18])
+                        if delta < best_delta:
+                            best_delta = delta
+                            best_file = f
+                    break
+    except:
+        pass
+
+if not best_file and files:
+    # Fallback: most recently modified
+    best_file = max(files, key=os.path.getmtime)
+
+if best_file:
+    print(best_file)
+`)
+
 	if running {
-		// Running: use docker exec
-		findCmd := fmt.Sprintf(
-			"find %s -maxdepth 1 -name '*.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
-			findDir)
-		latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
-		if err != nil || strings.TrimSpace(string(latestFile)) == "" {
-			findCmd = fmt.Sprintf(
-				"find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
-				configDir)
-			latestFile, _ = execOrbLong("docker", "exec", name, "bash", "-c", findCmd)
-		}
-		path := strings.TrimSpace(string(latestFile))
-		if path == "" {
+		// Write match script, run via docker exec
+		result, err := execOrbTimeout(15*time.Second, "docker", "exec", name, "python3", "-c", matchScript, containerCreated, findDir, tailLines)
+		if err != nil || strings.TrimSpace(string(result)) == "" {
 			return nil
 		}
+		path := strings.TrimSpace(string(result))
 		if tailLines == "0" {
 			data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
 			return data
@@ -401,25 +442,19 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 		return data
 	}
 
-	// Stopped: use docker cp to extract the project dir, then read locally in VM
+	// Stopped: docker cp the project dir, then match locally
 	tmpDir := "/tmp/satui-logs-" + name
 	execOrb("rm", "-rf", tmpDir)
 	defer execOrb("rm", "-rf", tmpDir)
 
-	_, err := execOrbLong("docker", "cp", name+":"+findDir, tmpDir+"/")
-	if err != nil {
-		// Fallback: copy entire config dir
-		_, err = execOrbTimeout(60*time.Second, "docker", "cp", name+":"+configDir, tmpDir+"/")
-		if err != nil {
-			return nil
-		}
+	execOrbLong("docker", "cp", name+":"+findDir, tmpDir+"/")
+	// Also try the full config dir as fallback
+	if _, err := execOrb("bash", "-c", fmt.Sprintf("ls %s/*.jsonl 2>/dev/null | head -1", tmpDir)); err != nil || true {
+		execOrbLong("docker", "cp", name+":"+configDir+"/projects", tmpDir+"/projects/")
 	}
 
-	findCmd := fmt.Sprintf(
-		"find %s -maxdepth 2 -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-",
-		tmpDir)
-	latestFile, _ := execOrbLong("bash", "-c", findCmd)
-	path := strings.TrimSpace(string(latestFile))
+	result, _ := execOrbTimeout(15*time.Second, "python3", "-c", matchScript, containerCreated, tmpDir, tailLines)
+	path := strings.TrimSpace(string(result))
 	if path == "" {
 		return nil
 	}
