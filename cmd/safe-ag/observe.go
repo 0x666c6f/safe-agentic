@@ -164,7 +164,16 @@ func runOutput(cmd *cobra.Command, args []string) error {
 		return enc.Encode(result)
 
 	default:
-		// Plain docker logs fallback
+		// For tmux containers, capture the pane (docker logs only shows entrypoint)
+		termLabel, _ := docker.InspectLabel(ctx, exec, name, "safe-agentic.terminal")
+		if termLabel == "tmux" {
+			paneOut, err := exec.Run(ctx, tmux.BuildCapturePaneArgs(name, 80)...)
+			if err == nil && len(strings.TrimSpace(string(paneOut))) > 0 {
+				fmt.Print(string(paneOut))
+				return nil
+			}
+		}
+		// Fallback to docker logs
 		out, err := exec.Run(ctx, "docker", "logs", "--tail", "80", name)
 		if err != nil {
 			return fmt.Errorf("docker logs: %w", err)
