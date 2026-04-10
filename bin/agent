@@ -87,6 +87,9 @@ ${GREEN}Setup:${NC}
   agent setup
   agent diagnose
 
+${GREEN}Quick Start:${NC}
+  agent run [flags] <repo-url> [repo-url...] "prompt"
+
 ${GREEN}Run:${NC}
   agent spawn <claude|codex> [options]
   agent shell [options]
@@ -136,7 +139,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
+  agent help [run|spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
   agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
@@ -146,6 +149,42 @@ ${GREEN}Examples:${NC}
   agent fleet agents.yaml --dry-run
   agent pipeline my-workflow.yaml --dry-run
   agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+  agent run git@github.com:org/repo.git "Fix the failing CI tests"
+EOF
+}
+
+print_help_run() {
+  cat <<EOF
+Usage: agent run [flags] <repo-url> [repo-url...] "prompt"
+
+One-command quick start. The last positional argument is the prompt; the rest
+are repo URLs. SSH, reuse-auth, and git identity are auto-detected.
+
+Flags:
+  --claude              Use Claude agent (default)
+  --codex               Use Codex agent
+  --name NAME           Container name
+  --template NAME       Use a prompt template instead of inline prompt
+  --instructions TEXT   Inject instructions file
+  --network NAME        Custom network
+  --memory SIZE         Memory limit (default 8g)
+  --cpus N              CPU limit (default 4)
+  --max-cost N          Cost budget label
+  --background          Run headless
+  --ephemeral-auth      Disable reuse-auth (per-session auth)
+  --dry-run             Show what would run without starting
+  -h, --help
+
+Smart defaults (compared to 'agent spawn'):
+  - SSH auto-enabled when any repo URL starts with git@ or ssh://
+  - Auth reused across sessions (--reuse-auth)
+  - Git identity auto-detected from 'git config'
+
+Examples:
+  agent run git@github.com:org/repo.git "Fix the failing CI tests"
+  agent run --codex https://github.com/org/api.git "Add rate limiting"
+  agent run git@github.com:org/a.git git@github.com:org/b.git "Align API contracts"
+  agent run --dry-run git@github.com:org/repo.git "Audit security"
 EOF
 }
 
@@ -746,6 +785,116 @@ attach_container_console() {
       die "Container $name is in state '$state' and cannot be attached."
       ;;
   esac
+}
+
+cmd_run() {
+  local topic="run"
+  local agent_type="claude"
+  local dry_run=false
+  local ephemeral_auth=false
+  local -a spawn_flags=()
+  local -a positional=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --claude)
+        agent_type="claude"
+        shift
+        ;;
+      --codex)
+        agent_type="codex"
+        shift
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --ephemeral-auth)
+        ephemeral_auth=true
+        shift
+        ;;
+      --name|--network|--memory|--cpus|--max-cost|--template|--instructions)
+        require_option_value "$topic" "$1" "${2:-}"
+        spawn_flags+=("$1" "$2")
+        shift 2
+        ;;
+      --background)
+        spawn_flags+=("$1")
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      --*)
+        die_with_help "$topic" "Unknown flag '$1'"
+        ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # Last positional is the prompt; the rest are repo URLs
+  if [ ${#positional[@]} -lt 2 ]; then
+    die_with_help "$topic" "Usage: agent run [flags] <repo-url> [repo-url...] \"prompt\""
+  fi
+
+  local prompt="${positional[${#positional[@]}-1]}"
+  local -a repos=()
+  local i
+  for (( i = 0; i < ${#positional[@]} - 1; i++ )); do
+    repos+=("${positional[$i]}")
+  done
+
+  [ ${#repos[@]} -gt 0 ] || die_with_help "$topic" "At least one repo URL required"
+  [ -n "$prompt" ] || die_with_help "$topic" "Prompt (last argument) required"
+
+  # Auto-detect SSH from repo URLs
+  local auto_ssh=false
+  local url
+  for url in "${repos[@]}"; do
+    if repo_uses_ssh "$url"; then
+      auto_ssh=true
+      break
+    fi
+  done
+
+  # Build spawn arguments
+  local -a spawn_args=("$agent_type")
+
+  for url in "${repos[@]}"; do
+    spawn_args+=(--repo "$url")
+  done
+
+  spawn_args+=(--prompt "$prompt")
+
+  if $auto_ssh; then
+    spawn_args+=(--ssh)
+  fi
+
+  if ! $ephemeral_auth; then
+    spawn_args+=(--reuse-auth)
+  fi
+
+  # Auto-detect git identity
+  local git_name="" git_email=""
+  git_name=$(git config --global user.name 2>/dev/null) || true
+  git_email=$(git config --global user.email 2>/dev/null) || true
+  if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+    spawn_args+=(--identity "$git_name <$git_email>")
+  fi
+
+  if $dry_run; then
+    spawn_args+=(--dry-run)
+  fi
+
+  [ ${#spawn_flags[@]} -gt 0 ] && spawn_args+=("${spawn_flags[@]}")
+
+  info "-> agent spawn $(render_command "${spawn_args[@]}")"
+
+  cmd_spawn "${spawn_args[@]}"
 }
 
 cmd_spawn() {
@@ -2084,6 +2233,9 @@ cmd_help() {
     ""|help)
       print_help_general
       ;;
+    run)
+      print_help_run
+      ;;
     spawn)
       print_help_spawn
       ;;
@@ -2162,6 +2314,7 @@ cmd_help() {
       local combined_help
       combined_help=$(
         print_help_general
+        print_help_run
         print_help_spawn
         print_help_shell
         print_help_attach
@@ -4351,6 +4504,7 @@ shift 2>/dev/null || true
 
 case "$cmd" in
   setup)      cmd_setup "$@" ;;
+  run)        cmd_run "$@" ;;
   spawn)      cmd_spawn "$@" ;;
   shell)      cmd_shell "$@" ;;
   list)       cmd_list "$@" ;;
