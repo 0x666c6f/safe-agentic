@@ -1287,6 +1287,9 @@ cmd_spawn() {
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     emit_event "$events_file" "agent.spawned" \
       "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
     auto_attach_tmux_session "$container_name"
   else
     run_container "$managed_network" "$network_name"
@@ -1294,6 +1297,9 @@ cmd_spawn() {
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
     emit_event "$events_file" "agent.spawned" \
       "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
   fi
 }
 
