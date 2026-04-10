@@ -36,6 +36,7 @@ var peekCmd = &cobra.Command{
 
 func init() {
 	peekCmd.Flags().IntVar(&peekLines, "lines", 30, "Number of lines to show")
+	addLatestFlag(peekCmd)
 	rootCmd.AddCommand(peekCmd)
 }
 
@@ -54,6 +55,7 @@ var logsCmd = &cobra.Command{
 func init() {
 	logsCmd.Flags().IntVar(&logsLines, "lines", 50, "Number of entries to show")
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Follow log output")
+	addLatestFlag(logsCmd)
 	rootCmd.AddCommand(logsCmd)
 }
 
@@ -61,10 +63,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -77,15 +76,54 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		configDir = "/home/agent/.codex"
 	}
 
-	// Find the most recent session JSONL
+	// Find the session JSONL that matches this container.
+	// Multiple containers may share the auth volume, so we match by
+	// file birth/change time closest to the container's start time.
+	startedAt, _ := inspectField(ctx, exec, name, "{{.State.StartedAt}}")
+
+	// Use stat %W (birth) or %Z (change) to find the file created at container start
 	findCmd := fmt.Sprintf(
-		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		`find %s/projects -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -exec stat -c '%%W %%n' {} + 2>/dev/null | sort -n`,
 		configDir)
 	out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
 	if err != nil {
 		return fmt.Errorf("find session log: %w", err)
 	}
-	jsonlPath := strings.TrimSpace(string(out))
+
+	jsonlPath := ""
+	if startedAt != "" {
+		containerStart, parseErr := time.Parse(time.RFC3339Nano, startedAt)
+		if parseErr == nil {
+			startEpoch := float64(containerStart.Unix())
+			bestDelta := float64(999999)
+			// Find the file born closest to container start (within 60s window)
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				var fileEpoch float64
+				fmt.Sscanf(parts[0], "%f", &fileEpoch)
+				delta := fileEpoch - startEpoch
+				if delta >= -5 && delta < 60 && delta < bestDelta {
+					bestDelta = delta
+					jsonlPath = parts[1]
+				}
+			}
+		}
+	}
+
+	// Fallback: most recent file
+	if jsonlPath == "" {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) > 0 {
+			parts := strings.SplitN(strings.TrimSpace(lines[len(lines)-1]), " ", 2)
+			if len(parts) == 2 {
+				jsonlPath = parts[1]
+			}
+		}
+	}
+
 	if jsonlPath == "" {
 		return fmt.Errorf("no session log found in %s", configDir)
 	}
@@ -226,10 +264,7 @@ func runPeek(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -283,6 +318,7 @@ func init() {
 	outputCmd.Flags().BoolVar(&outputFiles, "files", false, "Show changed files")
 	outputCmd.Flags().BoolVar(&outputCommits, "commits", false, "Show git commit log")
 	outputCmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	addLatestFlag(outputCmd)
 	rootCmd.AddCommand(outputCmd)
 }
 
@@ -290,10 +326,7 @@ func runOutput(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -377,6 +410,7 @@ var summaryCmd = &cobra.Command{
 }
 
 func init() {
+	addLatestFlag(summaryCmd)
 	rootCmd.AddCommand(summaryCmd)
 }
 
@@ -384,10 +418,7 @@ func runSummary(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -451,6 +482,7 @@ var costCmd = &cobra.Command{
 
 func init() {
 	costCmd.Flags().StringVar(&costHistory, "history", "", "Show historical costs (e.g. 7d, 30d)")
+	addLatestFlag(costCmd)
 	rootCmd.AddCommand(costCmd)
 }
 
@@ -462,10 +494,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 		return runCostHistory(ctx, exec, costHistory)
 	}
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -709,6 +738,7 @@ var sessionsCmd = &cobra.Command{
 }
 
 func init() {
+	addLatestFlag(sessionsCmd)
 	rootCmd.AddCommand(sessionsCmd)
 }
 
@@ -718,15 +748,24 @@ func runSessions(cmd *cobra.Command, args []string) error {
 
 	target := ""
 	dest := ""
-	switch len(args) {
-	case 0:
-		// resolve latest, default dest
-	case 1:
-		// Could be a container name or a dest path — treat as container name
-		target = args[0]
-	case 2:
-		target = args[0]
-		dest = args[1]
+
+	latest, _ := cmd.Flags().GetBool("latest")
+	if latest {
+		target = "--latest"
+		if len(args) > 0 {
+			dest = args[0]
+		}
+	} else {
+		switch len(args) {
+		case 0:
+			// resolve latest, default dest
+		case 1:
+			// Could be a container name or a dest path — treat as container name
+			target = args[0]
+		case 2:
+			target = args[0]
+			dest = args[1]
+		}
 	}
 
 	name, err := docker.ResolveTarget(ctx, exec, target)
@@ -825,6 +864,7 @@ var replayCmd = &cobra.Command{
 
 func init() {
 	replayCmd.Flags().BoolVar(&replayToolsOnly, "tools-only", false, "Show only tool calls")
+	addLatestFlag(replayCmd)
 	rootCmd.AddCommand(replayCmd)
 }
 
@@ -832,10 +872,7 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
