@@ -253,7 +253,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute pipeline stages in dependency order.
-	// Track which stage names have completed.
+	timestamp := time.Now().Format("20060102-150405")
 	completed := make(map[string]bool)
 	remaining := make([]fleet.PipelineStage, len(m.Stages))
 	copy(remaining, m.Stages)
@@ -289,7 +289,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 				if spec.Type == "" {
 					continue
 				}
-				opts := specToSpawnOpts(spec, "")
+				opts := specToSpawnOpts(spec, "pipeline-"+timestamp)
 				opts.Background = true
 				if err := executeSpawn(opts); err != nil {
 					return fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
