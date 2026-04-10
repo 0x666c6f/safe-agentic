@@ -15,6 +15,7 @@ import (
 
 const defaultResumeCWD = "/workspace"
 const tmuxSessionName = "safe-agentic"
+const cliBinary = "safe-ag"
 
 // Actions handles all keybinding-triggered operations.
 type Actions struct {
@@ -237,7 +238,7 @@ func (ac *Actions) StopAgent() {
 		}
 		ac.app.footer.ShowStatus(fmt.Sprintf("Stopping %s...", name), false)
 		go func() {
-			cmd := exec.Command("agent", "stop", name)
+			cmd := exec.Command(cliBinary, "stop", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
@@ -713,7 +714,7 @@ func (ac *Actions) ExportSessions() {
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Exporting sessions from %s...", name), false)
 	go func() {
-		cmd := exec.Command("agent", "sessions", name)
+		cmd := exec.Command(cliBinary, "sessions", name)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -755,7 +756,7 @@ func (ac *Actions) McpLogin() {
 		if server == "" {
 			return
 		}
-		cmd := exec.Command("agent", "mcp-login", name, server)
+		cmd := exec.Command(cliBinary, "mcp-login", name, server)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -776,7 +777,7 @@ func (ac *Actions) KillAll() {
 		}
 		ac.app.footer.ShowStatus("Stopping all agents...", false)
 		go func() {
-			cmd := exec.Command("agent", "stop", "--all")
+			cmd := exec.Command(cliBinary, "stop", "--all")
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
@@ -1033,7 +1034,7 @@ func (ac *Actions) Cost() {
 	name := agent.Name
 	ac.app.footer.ShowStatus("Analyzing cost...", false)
 	go func() {
-		cmd := exec.Command("agent", "cost", name)
+		cmd := exec.Command(cliBinary, "cost", name)
 		out, err := cmd.Output()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1059,7 +1060,7 @@ func (ac *Actions) Cost() {
 func (ac *Actions) Audit() {
 	ac.app.footer.ShowStatus("Loading audit log...", false)
 	go func() {
-		cmd := exec.Command("agent", "audit")
+		cmd := exec.Command(cliBinary, "audit")
 		out, err := cmd.CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1084,7 +1085,7 @@ func (ac *Actions) Fleet(manifestPath string) {
 	}
 	ac.app.footer.ShowStatus("Spawning fleet from "+manifestPath+"...", false)
 	go func() {
-		cmd := exec.Command("agent", "fleet", manifestPath)
+		cmd := exec.Command(cliBinary, "fleet", manifestPath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1105,7 +1106,7 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 	}
 	ac.app.footer.ShowStatus("Running pipeline from "+pipelinePath+"...", false)
 	go func() {
-		cmd := exec.Command("agent", "pipeline", pipelinePath)
+		cmd := exec.Command(cliBinary, "pipeline", pipelinePath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1141,7 +1142,7 @@ func (ac *Actions) CreatePR() {
 		}
 		ac.app.footer.ShowStatus(fmt.Sprintf("Creating PR for %s...", name), false)
 		go func() {
-			cmd := exec.Command("agent", "pr", name)
+			cmd := exec.Command(cliBinary, "pr", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
