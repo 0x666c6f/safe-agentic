@@ -215,8 +215,8 @@ func TestKeyAllowed(t *testing.T) {
 		"GIT_COMMITTER_EMAIL",
 	}
 	for _, k := range allowed {
-		if !keyAllowed(k) {
-			t.Errorf("keyAllowed(%q) = false, want true", k)
+		if !KeyAllowed(k) {
+			t.Errorf("KeyAllowed(%q) = false, want true", k)
 		}
 	}
 
@@ -229,8 +229,8 @@ func TestKeyAllowed(t *testing.T) {
 		"SOME_RANDOM_KEY",
 	}
 	for _, k := range notAllowed {
-		if keyAllowed(k) {
-			t.Errorf("keyAllowed(%q) = true, want false", k)
+		if KeyAllowed(k) {
+			t.Errorf("KeyAllowed(%q) = true, want false", k)
 		}
 	}
 }

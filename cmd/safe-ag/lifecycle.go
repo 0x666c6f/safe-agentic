@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"safe-agentic/pkg/audit"
@@ -170,8 +171,12 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 func stopOneContainer(ctx context.Context, exec orb.Executor, name string) error {
 	fmt.Printf("Stopping %s...\n", name)
-	exec.Run(ctx, "docker", "stop", "-t", "30", name)
-	exec.Run(ctx, "docker", "rm", name)
+	if _, err := exec.Run(ctx, "docker", "stop", "-t", "30", name); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: stop %s: %v\n", name, err)
+	}
+	if _, err := exec.Run(ctx, "docker", "rm", name); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: rm %s: %v\n", name, err)
+	}
 
 	// Clean up DinD sidecar and managed network (best-effort)
 	docker.RemoveDinDRuntime(ctx, exec, name)

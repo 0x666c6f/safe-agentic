@@ -52,7 +52,7 @@ func ReadCodexConfig(codexHome string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read codex config: %w", err)
 	}
-	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString([]byte(string(data)))
+	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 

@@ -130,18 +130,34 @@ func TestRemoveDinDRuntime_VolumesRemoved(t *testing.T) {
 
 func TestCleanupAllDinD(t *testing.T) {
 	fake := orb.NewFake()
+	// Simulate docker ps and docker volume ls returning IDs to clean up.
+	fake.SetResponse("docker ps -aq", "abc123\ndef456")
+	fake.SetResponse("docker volume ls -q", "vol1\nvol2")
 	err := CleanupAllDinD(context.Background(), fake)
 	if err != nil {
 		t.Fatalf("CleanupAllDinD() error = %v", err)
 	}
-	// Should have run docker rm and docker volume rm
-	rmCmds := fake.CommandsMatching("docker rm")
+	// Should have run docker rm for each container ID
+	rmCmds := fake.CommandsMatching("docker rm -f")
 	if len(rmCmds) == 0 {
 		t.Fatal("expected at least one docker rm command")
 	}
 	volCmds := fake.CommandsMatching("docker volume rm")
 	if len(volCmds) == 0 {
 		t.Fatal("expected at least one docker volume rm command")
+	}
+}
+
+func TestCleanupAllDinD_NoContainers(t *testing.T) {
+	fake := orb.NewFake()
+	// No containers or volumes — should succeed without issuing rm commands.
+	err := CleanupAllDinD(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("CleanupAllDinD() error = %v", err)
+	}
+	rmCmds := fake.CommandsMatching("docker rm -f")
+	if len(rmCmds) != 0 {
+		t.Fatalf("expected no docker rm commands, got %d", len(rmCmds))
 	}
 }
 

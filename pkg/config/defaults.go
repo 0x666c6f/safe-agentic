@@ -31,7 +31,6 @@ type Config struct {
 	GitCommitterEmail string
 }
 
-// Defaults returns an empty Config with zero-value fields (all empty strings).
 // Defaults returns a Config with the same hardcoded defaults as bin/agent:
 // DEFAULT_CPUS=4, DEFAULT_MEMORY=8g, DEFAULT_PIDS_LIMIT=512.
 func Defaults() Config {
@@ -114,7 +113,7 @@ func parseLine(line string, lineNo int, cfg *Config) error {
 	key := strings.TrimSpace(line[:eqIdx])
 	rawValue := line[eqIdx+1:]
 
-	if !keyAllowed(key) {
+	if !KeyAllowed(key) {
 		return fmt.Errorf("unsupported defaults key %q", key)
 	}
 
@@ -155,9 +154,9 @@ func parseValue(raw string) (string, error) {
 	}
 }
 
-// keyAllowed returns true if key is in the allowlist of supported keys. It
+// KeyAllowed returns true if key is in the allowlist of supported keys. It
 // mirrors default_key_allowed() in bin/agent-lib.sh.
-func keyAllowed(key string) bool {
+func KeyAllowed(key string) bool {
 	switch key {
 	case
 		"SAFE_AGENTIC_DEFAULT_CPUS",

@@ -116,7 +116,7 @@ func runOutput(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	wsCmd := `repo_dir=$(find /workspace -mindepth 1 -maxdepth 4 -name .git -type d -exec dirname {} \; 2>/dev/null | head -1); if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi`
+	wsCmd := workspaceFindCmd()
 
 	switch {
 	case outputDiff:
@@ -578,6 +578,7 @@ func runSessions(cmd *cobra.Command, args []string) error {
 func extractTar(r io.Reader, destDir string) (int, error) {
 	tr := tar.NewReader(r)
 	count := 0
+	cleanDest := filepath.Clean(destDir) + string(os.PathSeparator)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -589,6 +590,9 @@ func extractTar(r io.Reader, destDir string) (int, error) {
 		// Skip directories
 		if hdr.Typeflag == tar.TypeDir {
 			target := filepath.Join(destDir, filepath.Clean(hdr.Name))
+			if !strings.HasPrefix(target+string(os.PathSeparator), cleanDest) {
+				return count, fmt.Errorf("tar entry %q escapes destination", hdr.Name)
+			}
 			os.MkdirAll(target, 0755)
 			continue
 		}
@@ -596,6 +600,9 @@ func extractTar(r io.Reader, destDir string) (int, error) {
 			continue
 		}
 		target := filepath.Join(destDir, filepath.Clean(hdr.Name))
+		if !strings.HasPrefix(target, cleanDest) {
+			return count, fmt.Errorf("tar entry %q escapes destination", hdr.Name)
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return count, err
 		}

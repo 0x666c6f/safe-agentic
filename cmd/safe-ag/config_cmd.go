@@ -70,7 +70,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	value := args[1]
 
 	// Validate key using the same allowlist as the config package.
-	if !configKeyAllowed(key) {
+	if !config.KeyAllowed(key) {
 		return fmt.Errorf("unsupported key %q\n\nValid keys:\n%s", key, configAllowedKeysList())
 	}
 
@@ -140,7 +140,7 @@ var configGetCmd = &cobra.Command{
 
 func runConfigGet(cmd *cobra.Command, args []string) error {
 	key := args[0]
-	if !configKeyAllowed(key) {
+	if !config.KeyAllowed(key) {
 		return fmt.Errorf("unsupported key %q", key)
 	}
 
@@ -170,7 +170,7 @@ var configResetCmd = &cobra.Command{
 
 func runConfigReset(cmd *cobra.Command, args []string) error {
 	key := args[0]
-	if !configKeyAllowed(key) {
+	if !config.KeyAllowed(key) {
 		return fmt.Errorf("unsupported key %q", key)
 	}
 
@@ -207,30 +207,6 @@ func runConfigReset(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Removed %s from %s\n", key, path)
 	return nil
-}
-
-// configKeyAllowed duplicates the allowlist from pkg/config so the cmd layer
-// can validate without importing the unexported function.
-func configKeyAllowed(key string) bool {
-	switch key {
-	case
-		"SAFE_AGENTIC_DEFAULT_CPUS",
-		"SAFE_AGENTIC_DEFAULT_MEMORY",
-		"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT",
-		"SAFE_AGENTIC_DEFAULT_SSH",
-		"SAFE_AGENTIC_DEFAULT_DOCKER",
-		"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET",
-		"SAFE_AGENTIC_DEFAULT_REUSE_AUTH",
-		"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH",
-		"SAFE_AGENTIC_DEFAULT_NETWORK",
-		"SAFE_AGENTIC_DEFAULT_IDENTITY",
-		"GIT_AUTHOR_NAME",
-		"GIT_AUTHOR_EMAIL",
-		"GIT_COMMITTER_NAME",
-		"GIT_COMMITTER_EMAIL":
-		return true
-	}
-	return false
 }
 
 func configAllowedKeysList() string {

@@ -97,9 +97,27 @@ func RemoveDinDRuntime(ctx context.Context, exec orb.Executor, containerName str
 }
 
 func CleanupAllDinD(ctx context.Context, exec orb.Executor) error {
-	exec.Run(ctx, "docker", "rm", "-f",
-		"$(docker ps -aq --filter label=safe-agentic.type=docker-runtime)")
-	exec.Run(ctx, "docker", "volume", "rm",
-		"$(docker volume ls -q --filter label=safe-agentic.type=docker-runtime)")
+	// List containers with docker-runtime label, then remove each individually.
+	out, _ := exec.Run(ctx, "docker", "ps", "-aq", "--filter", "label=safe-agentic.type=docker-runtime")
+	ids := strings.TrimSpace(string(out))
+	if ids != "" {
+		for _, id := range strings.Split(ids, "\n") {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				exec.Run(ctx, "docker", "rm", "-f", id)
+			}
+		}
+	}
+	// List volumes with docker-runtime label, then remove each individually.
+	out, _ = exec.Run(ctx, "docker", "volume", "ls", "-q", "--filter", "label=safe-agentic.type=docker-runtime")
+	vols := strings.TrimSpace(string(out))
+	if vols != "" {
+		for _, v := range strings.Split(vols, "\n") {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				exec.Run(ctx, "docker", "volume", "rm", v)
+			}
+		}
+	}
 	return nil
 }

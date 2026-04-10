@@ -1018,14 +1018,14 @@ func TestConfigKeyAllowed(t *testing.T) {
 		"GIT_COMMITTER_EMAIL",
 	}
 	for _, k := range allowed {
-		if !configKeyAllowed(k) {
-			t.Errorf("configKeyAllowed(%q) = false, want true", k)
+		if !config.KeyAllowed(k) {
+			t.Errorf("config.KeyAllowed(%q) = false, want true", k)
 		}
 	}
 	forbidden := []string{"RANDOM_KEY", "", "SAFE_AGENTIC_NOPE", "PATH"}
 	for _, k := range forbidden {
-		if configKeyAllowed(k) {
-			t.Errorf("configKeyAllowed(%q) = true, want false", k)
+		if config.KeyAllowed(k) {
+			t.Errorf("config.KeyAllowed(%q) = true, want false", k)
 		}
 	}
 }

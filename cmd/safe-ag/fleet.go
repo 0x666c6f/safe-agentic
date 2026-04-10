@@ -331,7 +331,6 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 	if len(names) == 0 {
 		return nil
 	}
-	const pollInterval = 5 * time.Second
 	for {
 		allDone := true
 		for _, name := range names {
@@ -348,7 +347,11 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 		if allDone {
 			return nil
 		}
-		time.Sleep(pollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 	}
 }
 

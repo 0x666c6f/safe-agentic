@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"safe-agentic/pkg/docker"
@@ -12,16 +13,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// workspaceFindCmd returns the shell snippet that cd's into the first git repo
+// in /workspace, handling both /workspace/repo and /workspace/org/repo layouts.
+func workspaceFindCmd() string {
+	return `repo_dir=$(find /workspace -mindepth 1 -maxdepth 4 -name .git -type d -exec dirname {} \; 2>/dev/null | head -1); ` +
+		`if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi`
+}
+
 // workspaceExec builds a docker exec command that cds into the first git repo in /workspace.
 // Uses find to locate the .git directory, handling org/repo nested layouts.
 func workspaceExec(containerName string, gitCmd string) []string {
-	// Find the first git repo — handles both /workspace/repo and /workspace/org/repo layouts
-	findRepo := `repo_dir=$(find /workspace -mindepth 1 -maxdepth 4 -name .git -type d -exec dirname {} \; 2>/dev/null | head -1); ` +
-		`if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi`
 	return []string{
 		"docker", "exec", containerName,
 		"bash", "-c",
-		fmt.Sprintf("%s && %s", findRepo, gitCmd),
+		fmt.Sprintf("%s && %s", workspaceFindCmd(), gitCmd),
 	}
 }
 
@@ -181,12 +186,19 @@ func init() {
 	checkpointCmd.AddCommand(checkpointRevertCmd)
 }
 
+var validStashRef = regexp.MustCompile(`^(stash@\{\d+\}|\d+)$`)
+
 func runCheckpointRevert(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
 	target := args[0]
 	ref := args[1]
+
+	// Validate ref to prevent shell injection — only allow stash@{N} or plain integers.
+	if !validStashRef.MatchString(ref) {
+		return fmt.Errorf("invalid stash ref %q: must be stash@{N} or a numeric index", ref)
+	}
 
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
