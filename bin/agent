@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+VERSION="dev"
 IMAGE_NAME="safe-agentic"
 IMAGE_TAG="latest"
 CONTAINER_PREFIX="agent"
@@ -4384,6 +4385,7 @@ case "$cmd" in
     [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
     exec "$tui_bin" "$@"
     ;;
+  --version)  echo "safe-agentic $VERSION"; exit 0 ;;
   help|-h|--help) cmd_help "$@" ;;
   *)          die "Unknown command: $cmd. Run 'agent help' for usage." ;;
 esac

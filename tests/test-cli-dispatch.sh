@@ -122,6 +122,9 @@ run_ok   "-h flag"          bash "$REPO_DIR/bin/agent" -h
 run_ok   "--help flag"      bash "$REPO_DIR/bin/agent" --help
 run_ok   "no args = help"   bash "$REPO_DIR/bin/agent"
 
+run_ok   "--version flag"   bash "$REPO_DIR/bin/agent" --version
+assert_output_contains "safe-agentic" "--version shows project name"
+
 run_fails "unknown command"  bash "$REPO_DIR/bin/agent" bogus
 assert_output_contains "Unknown command" "unknown command error message"
 
