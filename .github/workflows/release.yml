@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Release
+    needs: ci
+    runs-on: macos-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$latest_tag" ]; then
+            echo "version=v0.1.0" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "changelog=Initial release" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git tag --points-at HEAD | grep -q '^v'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          commits=$(git log "${latest_tag}..HEAD" --pretty=format:"%s" --no-merges)
+          if [ -z "$commits" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          bump="none"
+          while IFS= read -r msg; do
+            if echo "$msg" | grep -qE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE'; then
+              bump="major"
+              break
+            elif echo "$msg" | grep -qE '^feat(\(.+\))?:'; then
+              [ "$bump" != "major" ] && bump="minor"
+            elif echo "$msg" | grep -qE '^fix(\(.+\))?:'; then
+              [ "$bump" = "none" ] && bump="patch"
+            fi
+          done <<< "$commits"
+
+          if [ "$bump" = "none" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          current="${latest_tag#v}"
+          IFS='.' read -r major minor patch <<< "$current"
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          next="v${major}.${minor}.${patch}"
+
+          changelog=""
+          feats=$(git log "${latest_tag}..HEAD" --pretty=format:"- %s" --no-merges | grep -E '^\- feat' || true)
+          fixes=$(git log "${latest_tag}..HEAD" --pretty=format:"- %s" --no-merges | grep -E '^\- fix' || true)
+          other=$(git log "${latest_tag}..HEAD" --pretty=format:"- %s" --no-merges | grep -vE '^\- (feat|fix)' || true)
+          [ -n "$feats" ] && changelog="${changelog}### Features\n${feats}\n\n"
+          [ -n "$fixes" ] && changelog="${changelog}### Fixes\n${fixes}\n\n"
+          [ -n "$other" ] && changelog="${changelog}### Other\n${other}\n\n"
+
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "changelog<<CHANGELOGEOF"
+            printf '%b' "$changelog"
+            echo "CHANGELOGEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip if no release needed
+        if: steps.version.outputs.skip == 'true'
+        run: echo "No user-facing changes since last release. Skipping."
+
+      - name: Set up Go
+        if: steps.version.outputs.skip != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+          cache-dependency-path: tui/go.sum
+
+      - name: Build universal TUI binary
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          cd tui
+          GOOS=darwin GOARCH=amd64 go build -o agent-tui-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -o agent-tui-arm64 .
+          lipo -create -output agent-tui agent-tui-amd64 agent-tui-arm64
+          rm agent-tui-amd64 agent-tui-arm64
+          chmod +x agent-tui
+
+      - name: Package tarball
+        if: steps.version.outputs.skip != 'true'
+        id: package
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          staging="safe-agentic-${version}"
+          mkdir -p "$staging"/{bin,config,templates,tui,vm}
+
+          cp bin/agent bin/agent-lib.sh bin/agent-claude bin/agent-codex \
+             bin/agent-alias bin/agent-session.sh bin/docker-runtime.sh \
+             bin/repo-url.sh "$staging/bin/"
+
+          cp tui/agent-tui "$staging/tui/"
+
+          cp config/* "$staging/config/"
+          cp templates/* "$staging/templates/"
+          cp vm/setup.sh "$staging/vm/"
+
+          cp Dockerfile entrypoint.sh package.json package-lock.json op-env.sh "$staging/"
+
+          sed -i '' "s/VERSION=\"dev\"/VERSION=\"${version}\"/" "$staging/bin/agent"
+
+          tarball="safe-agentic-${version}-darwin-universal.tar.gz"
+          tar -czf "$tarball" "$staging"
+          sha256=$(shasum -a 256 "$tarball" | awk '{print $1}')
+
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          tarball="${{ steps.package.outputs.tarball }}"
+
+          git tag "$version"
+          git push origin "$version"
+
+          gh release create "$version" "$tarball" \
+            --title "$version" \
+            --notes "${{ steps.version.outputs.changelog }}"
+
+      - name: Update Homebrew tap
+        if: steps.version.outputs.skip != 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          sha256="${{ steps.package.outputs.sha256 }}"
+          url="https://github.com/0x666c6f/safe-agentic/releases/download/${version}/safe-agentic-${version}-darwin-universal.tar.gz"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/0x666c6f/homebrew-tap.git" /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          cat > Formula/safe-agentic.rb << FORMULA
+          class SafeAgentic < Formula
+            desc "Isolated environment for running AI coding agents safely"
+            homepage "https://github.com/0x666c6f/safe-agentic"
+            url "${url}"
+            sha256 "${sha256}"
+            version "${version#v}"
+            license "MIT"
+
+            def install
+              libexec.install Dir["*"]
+              %w[agent agent-claude agent-codex].each do |cmd|
+                bin.install_symlink libexec/"bin"/cmd
+              end
+            end
+
+            test do
+              assert_match "safe-agentic", shell_output("\#{bin}/agent --version")
+            end
+          end
+          FORMULA
+
+          sed -i '' 's/^          //' Formula/safe-agentic.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/safe-agentic.rb
+          git commit -m "safe-agentic ${version}"
+          git push
