@@ -932,6 +932,7 @@ cmd_spawn() {
   local on_fail_cmd=""
   local max_cost=""
   local notify_targets=""
+  local fleet_volume_name=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
@@ -1067,6 +1068,11 @@ cmd_spawn() {
       --dry-run)
         dry_run=true
         shift
+        ;;
+      --fleet-volume)
+        require_option_value "$topic" "--fleet-volume" "${2:-}"
+        fleet_volume_name="$2"
+        shift 2
         ;;
       -h|--help)
         cmd_help "$topic"
@@ -1272,6 +1278,13 @@ cmd_spawn() {
     docker_cmd+=(--label "safe-agentic.terminal=none")
   else
     docker_cmd+=(--label "safe-agentic.terminal=tmux")
+  fi
+
+  # Fleet shared task volume: mounted at /fleet for agent-to-agent coordination
+  if [ -n "${fleet_volume_name:-}" ]; then
+    docker_cmd+=(--mount "type=volume,src=${fleet_volume_name},dst=/fleet")
+    docker_cmd+=(--label "safe-agentic.fleet=${fleet_volume_name}")
+    info "Fleet: shared task volume mounted at /fleet ($fleet_volume_name)"
   fi
 
   docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
@@ -3655,6 +3668,24 @@ print(json.dumps(obj, indent=2))
 
 cmd_fleet() {
   local topic="fleet"
+
+  # Subcommand: fleet status
+  if [ "${1:-}" = "status" ]; then
+    shift
+    require_vm
+    local containers
+    containers=$(vm_exec docker ps --filter "label=safe-agentic.fleet" --format '{{.Names}}' 2>/dev/null || echo "")
+    if [ -z "$containers" ]; then
+      info "No fleet containers running."
+      return 0
+    fi
+    local first
+    first=$(echo "$containers" | head -1)
+    info "Tasks from $first:"
+    vm_exec docker exec "$first" cat /fleet/tasks.jsonl 2>/dev/null || info "No tasks found in /fleet/tasks.jsonl"
+    return 0
+  fi
+
   local manifest=""
   local dry_run=false
 
@@ -3697,30 +3728,44 @@ agent_bin     = sys.argv[2]
 
 agents = []
 current = None
+shared_tasks = 'false'
 
 with open(manifest_path) as f:
-    for raw_line in f:
-        line = raw_line.rstrip('\n')
-        stripped = line.lstrip()
+    content = f.read()
 
-        # Start of a new agent entry
-        if stripped.startswith('- name:'):
-            current = {'name': stripped[len('- name:'):].strip()}
-            agents.append(current)
-            continue
+# Parse shared_tasks from top-level (before agents list)
+for raw_line in content.split('\n'):
+    stripped = raw_line.strip()
+    if stripped.startswith('shared_tasks:'):
+        val = stripped.split(':', 1)[1].strip().lower()
+        shared_tasks = 'true' if val in ('true', 'yes', '1') else 'false'
+        break
 
-        # Key-value field inside an agent entry
-        if current is not None and ':' in stripped and not stripped.startswith('-') and not stripped.startswith('#'):
-            key, _, val = stripped.partition(':')
-            key = key.strip()
-            val = val.strip()
-            if key and val:
-                # Normalise booleans
-                if val.lower() == 'true':
-                    val = True
-                elif val.lower() == 'false':
-                    val = False
-                current[key] = val
+for raw_line in content.split('\n'):
+    line = raw_line.rstrip('\n')
+    stripped = line.lstrip()
+
+    # Start of a new agent entry
+    if stripped.startswith('- name:'):
+        current = {'name': stripped[len('- name:'):].strip()}
+        agents.append(current)
+        continue
+
+    # Key-value field inside an agent entry
+    if current is not None and ':' in stripped and not stripped.startswith('-') and not stripped.startswith('#'):
+        key, _, val = stripped.partition(':')
+        key = key.strip()
+        val = val.strip()
+        if key and val:
+            # Normalise booleans
+            if val.lower() == 'true':
+                val = True
+            elif val.lower() == 'false':
+                val = False
+            current[key] = val
+
+# Output shared_tasks flag before CMD: lines
+print(f'SHARED_TASKS={shared_tasks}')
 
 for agent in agents:
     agent_type = agent.get('type', '')
@@ -3804,10 +3849,31 @@ for agent in agents:
 PYEOF
   ) || die "Failed to parse manifest: $manifest"
 
+  # Check for shared tasks
+  local shared_tasks=false
+  local fleet_volume=""
+  if echo "$parse_output" | grep -qF "SHARED_TASKS=true"; then
+    shared_tasks=true
+    local fleet_id
+    fleet_id=$(basename "$manifest" .yaml | tr -cd 'a-zA-Z0-9-')
+    fleet_volume="fleet-${fleet_id}-$(date +%s)"
+    if [ "$dry_run" = false ]; then
+      vm_exec docker volume create "$fleet_volume" >/dev/null 2>&1
+      info "Created shared task volume: $fleet_volume"
+    else
+      info "[dry-run] Would create shared volume: $fleet_volume"
+    fi
+  fi
+
   local -a spawn_cmds=()
   while IFS= read -r line; do
     [[ "$line" == CMD:* ]] || continue
-    spawn_cmds+=("${line#CMD:}")
+    local cmd_line="${line#CMD:}"
+    # Inject --fleet-volume if shared_tasks is enabled
+    if $shared_tasks && [ -n "$fleet_volume" ]; then
+      cmd_line="$cmd_line --fleet-volume $fleet_volume"
+    fi
+    spawn_cmds+=("$cmd_line")
   done <<< "$parse_output"
 
   [ ${#spawn_cmds[@]} -gt 0 ] || die "No valid agent entries found in manifest: $manifest"
