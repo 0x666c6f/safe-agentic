@@ -15,6 +15,7 @@ type DockerRunCmd struct {
 	envs     []envEntry
 	mounts   []string
 	tmpfs    []string
+	cmdArgs  []string // CMD args passed after image name to entrypoint
 }
 
 type envEntry struct {
@@ -33,6 +34,7 @@ func NewRunCmd(name, image string) *DockerRunCmd {
 func (d *DockerRunCmd) AddLabel(key, value string) { d.labels[key] = value }
 func (d *DockerRunCmd) AddEnv(key, value string)   { d.envs = append(d.envs, envEntry{key, value}) }
 func (d *DockerRunCmd) AddFlag(flags ...string)     { d.flags = append(d.flags, flags...) }
+func (d *DockerRunCmd) AddCmdArgs(args ...string)   { d.cmdArgs = append(d.cmdArgs, args...) }
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
@@ -98,6 +100,7 @@ func (d *DockerRunCmd) Build() []string {
 		args = append(args, "--tmpfs", t)
 	}
 	args = append(args, d.image)
+	args = append(args, d.cmdArgs...)
 	return args
 }
 

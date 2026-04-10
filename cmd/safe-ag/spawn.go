@@ -327,8 +327,11 @@ func executeSpawn(opts SpawnOpts) error {
 	}
 
 	// Prompt / instructions / template
+	// Pass prompt as -p CMD arg so agent-session.sh handles it natively:
+	// - background mode: claude runs non-interactively and exits when done
+	// - foreground mode: saved to pending-prompt, sent via tmux send-keys
 	if opts.Prompt != "" {
-		cmd.AddEnv("SAFE_AGENTIC_PROMPT_B64", inject.EncodeB64(opts.Prompt))
+		cmd.AddCmdArgs("-p", opts.Prompt)
 		cmd.AddLabel(labels.Prompt, truncate(opts.Prompt, 100))
 	}
 	if opts.Instructions != "" {
