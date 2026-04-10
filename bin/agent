@@ -352,15 +352,17 @@ EOF
 
 print_help_checkpoint() {
   cat <<EOF
-Usage: agent checkpoint <create|list|revert> <name>|--latest [...]
+Usage: agent checkpoint <create|list|revert|fork> <name>|--latest [...]
 
 Snapshot and revert an agent's working tree using git stash objects stored
-as named refs under refs/safe-agentic/checkpoints/.
+as named refs under refs/safe-agentic/checkpoints/. Also captures full
+container filesystem state via docker commit.
 
 Subcommands:
-  create <name>|--latest [label]   Snapshot current changes (default label: checkpoint-<epoch>)
-  list   <name>|--latest           List all checkpoints for the container
-  revert <name>|--latest <ref>     Restore a checkpoint (discards current changes)
+  create <name>|--latest [label]              Snapshot current changes (default label: checkpoint-<epoch>)
+  list   <name>|--latest                      List all checkpoints for the container
+  revert <name>|--latest <ref>                Restore a checkpoint (discards current changes)
+  fork   <name>|--latest <new-name> [label]   Create a new agent from the latest snapshot
 
 Options:
   --latest    Target the most recently started container
@@ -370,6 +372,7 @@ Examples:
   agent checkpoint create my-task before-refactor
   agent checkpoint list my-task
   agent checkpoint revert my-task before-refactor
+  agent checkpoint fork my-task my-fork
   agent checkpoint create --latest
   agent checkpoint list --latest
 EOF
@@ -2788,14 +2791,14 @@ cmd_checkpoint() {
       print_help_checkpoint
       return 0
       ;;
-    create|list|revert)
+    create|list|revert|fork)
       shift
       ;;
     "")
-      die_with_help "$topic" "Subcommand required (create|list|revert)."
+      die_with_help "$topic" "Subcommand required (create|list|revert|fork)."
       ;;
     *)
-      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, or revert."
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, revert, or fork."
       ;;
   esac
 
@@ -2803,6 +2806,7 @@ cmd_checkpoint() {
   local latest=false
   local label=""
   local ref=""
+  local fork_name=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2820,6 +2824,16 @@ cmd_checkpoint() {
             name="$1"
           elif [ -z "$ref" ]; then
             ref="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        elif [ "$subcmd" = "fork" ]; then
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$fork_name" ]; then
+            fork_name="$1"
+          elif [ -z "$label" ]; then
+            label="$1"
           else
             die_with_help "$topic" "Unexpected argument '$1'."
           fi
@@ -2847,6 +2861,10 @@ cmd_checkpoint() {
     die_with_help "$topic" "Checkpoint ref required for revert."
   fi
 
+  if [ "$subcmd" = "fork" ] && [ -z "$fork_name" ]; then
+    die_with_help "$topic" "Fork name required. Usage: agent checkpoint fork <container> <new-name> [label]"
+  fi
+
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
@@ -2869,7 +2887,31 @@ cmd_checkpoint() {
       fi
       vm_exec docker exec -e SA_LABEL="$label" -e SA_SHA="$stash_sha" "$name" bash -c \
         'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git update-ref "refs/safe-agentic/checkpoints/$SA_LABEL" "$SA_SHA"'
-      ok "Checkpoint '$label' created ($stash_sha) in $name."
+
+      # Docker commit for full container state snapshot
+      local timestamp
+      timestamp=$(date +%Y%m%d-%H%M%S)
+      local snapshot_tag="safe-agentic-checkpoint:${name}-${timestamp}"
+      info "Creating container snapshot: $snapshot_tag"
+
+      # Pause agent process via tmux
+      local agent_pid
+      agent_pid=$(vm_exec docker exec "$name" tmux list-panes -t agent -F '#{pane_pid}' 2>/dev/null || echo "")
+      [ -n "$agent_pid" ] && vm_exec docker exec "$name" kill -STOP "$agent_pid" 2>/dev/null || true
+
+      # Commit container filesystem
+      vm_exec docker commit "$name" "$snapshot_tag" >/dev/null
+
+      # Store snapshot metadata
+      vm_exec docker exec -e SA_TS="$timestamp" -e SA_LABEL="$label" -e SA_TAG="$snapshot_tag" -e SA_SHA="$stash_sha" "$name" bash -c '
+        mkdir -p /workspace/.safe-agentic
+        printf "{\"timestamp\":\"%s\",\"label\":\"%s\",\"image\":\"%s\",\"git_ref\":\"%s\"}\n" "$SA_TS" "$SA_LABEL" "$SA_TAG" "${SA_SHA:-none}" >> /workspace/.safe-agentic/checkpoints.jsonl
+      ' 2>/dev/null || true
+
+      # Resume agent process
+      [ -n "$agent_pid" ] && vm_exec docker exec "$name" kill -CONT "$agent_pid" 2>/dev/null || true
+
+      ok "Checkpoint '$label' created ($stash_sha) in $name (snapshot: $snapshot_tag)."
       ;;
     list)
       vm_exec docker exec "$name" bash -c \
@@ -2892,6 +2934,41 @@ cmd_checkpoint() {
       vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
         'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
       ok "Reverted $name to checkpoint '$ref'."
+      ;;
+    fork)
+      validate_name_component "$fork_name" "Fork name"
+
+      # Get latest snapshot image from container metadata
+      local snapshot_tag
+      snapshot_tag=$(vm_exec docker exec "$name" bash -c '
+        tail -1 /workspace/.safe-agentic/checkpoints.jsonl 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)[\"image\"])" 2>/dev/null
+      ' || echo "")
+      snapshot_tag=$(echo "$snapshot_tag" | tr -d '[:space:]')
+      [ -n "$snapshot_tag" ] || die "No checkpoint found for $name. Run 'agent checkpoint create $name <label>' first."
+
+      [ -z "$label" ] && label="fork-$(date +%s)"
+      info "Forking $name as $fork_name from $snapshot_tag..."
+
+      # Get original container's agent type
+      local agent_type
+      agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "claude")
+      [ -n "$agent_type" ] || agent_type="claude"
+
+      # Create network and run from snapshot
+      local fork_network="${fork_name}-net"
+      create_managed_network "$fork_network"
+
+      vm_exec docker run -d \
+        --name "$fork_name" \
+        --network "$fork_network" \
+        --label "safe-agentic.agent-type=$agent_type" \
+        --label "safe-agentic.forked-from=$name" \
+        --label "safe-agentic.fork-label=$label" \
+        "$snapshot_tag" \
+        sleep infinity >/dev/null
+
+      ok "Fork created: $fork_name (use 'agent attach $fork_name' to connect)"
+      audit_log "fork" "$fork_name" "from=$name snapshot=$snapshot_tag"
       ;;
   esac
 }
