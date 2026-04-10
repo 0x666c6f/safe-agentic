@@ -39,6 +39,189 @@ func init() {
 	rootCmd.AddCommand(peekCmd)
 }
 
+// ─── logs ──────────────────────────────────────────────────────────────────
+
+var logsLines int
+var logsFollow bool
+
+var logsCmd = &cobra.Command{
+	Use:   "logs [name|--latest]",
+	Short: "Show agent session conversation log",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runLogs,
+}
+
+func init() {
+	logsCmd.Flags().IntVar(&logsLines, "lines", 50, "Number of entries to show")
+	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Follow log output")
+	rootCmd.AddCommand(logsCmd)
+}
+
+func runLogs(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	exec := newExecutor()
+
+	target := ""
+	if len(args) > 0 {
+		target = args[0]
+	}
+	name, err := docker.ResolveTarget(ctx, exec, target)
+	if err != nil {
+		return err
+	}
+
+	// Detect agent type for config dir
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	configDir := "/home/agent/.claude"
+	if agentType == "codex" {
+		configDir = "/home/agent/.codex"
+	}
+
+	// Find the most recent session JSONL
+	findCmd := fmt.Sprintf(
+		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		configDir)
+	out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
+	if err != nil {
+		return fmt.Errorf("find session log: %w", err)
+	}
+	jsonlPath := strings.TrimSpace(string(out))
+	if jsonlPath == "" {
+		return fmt.Errorf("no session log found in %s", configDir)
+	}
+
+	// Read and render the JSONL
+	tailCmd := fmt.Sprintf("tail -n %d %s", logsLines*3, jsonlPath) // read more lines, filter later
+	out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
+	if err != nil {
+		return fmt.Errorf("read session log: %w", err)
+	}
+
+	count := 0
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		rendered := renderLogEntry(line)
+		if rendered != "" {
+			fmt.Println(rendered)
+			count++
+			if count >= logsLines {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func renderLogEntry(line string) string {
+	var entry map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		return ""
+	}
+
+	entryType, _ := entry["type"].(string)
+
+	switch entryType {
+	case "user":
+		msg, _ := entry["message"].(map[string]interface{})
+		if msg == nil {
+			return ""
+		}
+		role, _ := msg["role"].(string)
+		if role != "user" {
+			return ""
+		}
+		content, _ := msg["content"].(string)
+		if content == "" {
+			// content might be array of blocks
+			if blocks, ok := msg["content"].([]interface{}); ok {
+				for _, b := range blocks {
+					if block, ok := b.(map[string]interface{}); ok {
+						if t, _ := block["type"].(string); t == "text" {
+							content, _ = block["text"].(string)
+							break
+						}
+					}
+				}
+			}
+		}
+		if content == "" {
+			return ""
+		}
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		return fmt.Sprintf("\033[0;36m> %s\033[0m", content)
+
+	case "assistant":
+		msg, _ := entry["message"].(map[string]interface{})
+		if msg == nil {
+			return ""
+		}
+		// Extract text from content blocks
+		content := extractAssistantText(msg)
+		if content == "" {
+			return ""
+		}
+		if len(content) > 300 {
+			content = content[:300] + "..."
+		}
+		return fmt.Sprintf("\033[0;32m  %s\033[0m", content)
+
+	case "system":
+		subtype, _ := entry["subtype"].(string)
+		switch subtype {
+		case "tool_use":
+			// Show tool calls
+			if infos, ok := entry["hookInfos"].([]interface{}); ok && len(infos) > 0 {
+				return ""
+			}
+			return ""
+		case "result":
+			dur, _ := entry["durationMs"].(float64)
+			msgCount, _ := entry["messageCount"].(float64)
+			if dur > 0 {
+				return fmt.Sprintf("\033[0;33m  [%d messages, %.1fs]\033[0m", int(msgCount), dur/1000)
+			}
+		}
+	}
+	return ""
+}
+
+func extractAssistantText(msg map[string]interface{}) string {
+	content, ok := msg["content"]
+	if !ok {
+		return ""
+	}
+	// String content
+	if s, ok := content.(string); ok {
+		return s
+	}
+	// Array of content blocks
+	blocks, ok := content.([]interface{})
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		block, ok := b.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		bType, _ := block["type"].(string)
+		switch bType {
+		case "text":
+			if t, ok := block["text"].(string); ok && t != "" {
+				parts = append(parts, t)
+			}
+		case "tool_use":
+			toolName, _ := block["name"].(string)
+			parts = append(parts, fmt.Sprintf("[tool: %s]", toolName))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 func runPeek(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
