@@ -119,6 +119,7 @@ ${GREEN}Observe:${NC}
   agent output <name>|--latest [--diff|--files|--commits|--json]
   agent review <name>|--latest [--base BRANCH]
   agent cost <name>|--latest
+  agent replay <name>|--latest [--tools-only] [--cost-timeline]
 
 ${GREEN}Analytics:${NC}
   agent audit [--lines N]
@@ -143,7 +144,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [run|spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
+  agent help [run|spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|replay|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
   agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
@@ -449,6 +450,30 @@ Outputs:
 Examples:
   agent cost api-refactor
   agent cost --latest
+EOF
+}
+
+print_help_replay() {
+  cat <<EOF
+Usage: agent replay <name>|--latest [--tools-only] [--cost-timeline]
+
+Replay a session from the event log, showing timestamped events, tool
+calls, git commits, and agent messages with a running cost summary.
+
+Reads from /workspace/.safe-agentic/session-events.jsonl inside the
+container.
+
+Options:
+  --tools-only       Show only tool.call events (skip messages, commits)
+  --cost-timeline    Print a running cost after each event
+  --latest           Target the most recently started container
+  -h, --help
+
+Examples:
+  agent replay api-refactor
+  agent replay --latest
+  agent replay --latest --tools-only
+  agent replay --latest --cost-timeline
 EOF
 }
 
@@ -2404,6 +2429,9 @@ cmd_help() {
     cost)
       print_help_cost
       ;;
+    replay)
+      print_help_replay
+      ;;
     fleet)
       print_help_fleet
       ;;
@@ -2449,6 +2477,7 @@ cmd_help() {
         print_help_review
         print_help_audit
         print_help_cost
+        print_help_replay
         print_help_fleet
         print_help_pipeline
         print_help_pr
@@ -3567,6 +3596,157 @@ print(json.dumps({
     "grand_cost": grand_cost,
 }, sort_keys=True))
 '
+}
+
+cmd_replay() {
+  local topic="replay"
+  local name=""
+  local latest=false
+  local tools_only=false
+  local cost_timeline=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --tools-only)
+        tools_only=true
+        shift
+        ;;
+      --cost-timeline)
+        cost_timeline=true
+        shift
+        ;;
+      -h|--help)
+        print_help_replay
+        return 0
+        ;;
+      -*)
+        die "Unknown flag: $1"
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Read session events from container
+  local events=""
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "gone")
+
+  local events_path="/workspace/.safe-agentic/session-events.jsonl"
+
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..." >&2
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+    state="running"
+  fi
+
+  events=$(vm_exec docker exec "$name" cat "$events_path" 2>/dev/null || echo "")
+
+  [ -n "$events" ] || die "No session events found for $name."
+
+  local tools_flag="False"
+  local cost_flag="False"
+  [ "$tools_only" = true ] && tools_flag="True"
+  [ "$cost_timeline" = true ] && cost_flag="True"
+
+  local py_script
+  py_script=$(mktemp "${TMPDIR:-/tmp}/agent-replay.XXXXXX")
+  trap 'rm -f "$py_script"' RETURN
+
+  cat >"$py_script" <<'PYEOF'
+import json, os, sys
+
+tools_only = os.environ.get('REPLAY_TOOLS_ONLY') == 'True'
+cost_timeline = os.environ.get('REPLAY_COST_TIMELINE') == 'True'
+
+PRICES = {
+    'claude-opus-4-6':   (15.0, 75.0),
+    'claude-sonnet-4-6': (3.0, 15.0),
+    'claude-haiku-4-5':  (0.80, 4.0),
+    'gpt-5.4':           (2.50, 10.0),
+    'gpt-5.2':           (2.50, 10.0),
+    'o3':                (10.0, 40.0),
+    'o4-mini':           (1.10, 4.40),
+}
+running_cost = 0.0
+total_in = total_out = 0
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        evt = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    ts = evt.get('ts', '?')
+    etype = evt.get('type', '?')
+    data = evt.get('data', {})
+
+    tin = int(data.get('tokens_in', 0))
+    tout = int(data.get('tokens_out', 0))
+    total_in += tin
+    total_out += tout
+    model = data.get('model', 'claude-sonnet-4-6')
+    price = PRICES.get(model, (3.0, 15.0))
+    running_cost += (tin / 1_000_000) * price[0] + (tout / 1_000_000) * price[1]
+
+    if tools_only and etype != 'tool.call':
+        continue
+
+    time_part = ts.split('T')[1].rstrip('Z') if 'T' in ts else ts
+
+    if etype == 'session.start':
+        agent = data.get('agent', '?')
+        model_name = data.get('model', '?')
+        print(f'[{time_part}] Session started ({agent} {model_name})')
+    elif etype == 'tool.call':
+        tool = data.get('tool', '?')
+        file = data.get('file', '')
+        tokens = f'({tin + tout} tokens)' if tin + tout > 0 else ''
+        print(f'[{time_part}] {tool} {file} {tokens}')
+    elif etype == 'git.commit':
+        sha = str(data.get('sha', '?'))[:7]
+        msg = data.get('message', '')
+        print(f'[{time_part}] Git commit: {sha} "{msg}"')
+    elif etype == 'agent.message':
+        content = str(data.get('content', ''))[:80]
+        ellipsis = '...' if len(str(data.get('content', ''))) > 80 else ''
+        print(f'[{time_part}] Agent: {content}{ellipsis}')
+    elif etype == 'session.end':
+        code = data.get('exit_code', '?')
+        print(f'[{time_part}] Session ended (exit {code})')
+    else:
+        print(f'[{time_part}] {etype}')
+
+    if cost_timeline and running_cost > 0:
+        print(f'           Running cost: ${running_cost:.4f}')
+
+print()
+print(f'Total: {total_in:,} in / {total_out:,} out tokens | Cost: ~${running_cost:.2f}')
+PYEOF
+
+  export REPLAY_TOOLS_ONLY="$tools_flag"
+  export REPLAY_COST_TIMELINE="$cost_flag"
+  printf '%s\n' "$events" | python3 "$py_script"
 }
 
 _output_get_logs() {
@@ -4825,6 +5005,7 @@ case "$cmd" in
   audit)       cmd_audit "$@" ;;
   output)     cmd_output "$@" ;;
   cost)       cmd_cost "$@" ;;
+  replay)     cmd_replay "$@" ;;
   fleet)      cmd_fleet "$@" ;;
   pipeline)   cmd_pipeline "$@" ;;
   orchestrate) cmd_orchestrate "$@" ;;
