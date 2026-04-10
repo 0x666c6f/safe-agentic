@@ -34,10 +34,10 @@ func (d *DockerRunCmd) AddLabel(key, value string) { d.labels[key] = value }
 func (d *DockerRunCmd) AddEnv(key, value string)   { d.envs = append(d.envs, envEntry{key, value}) }
 func (d *DockerRunCmd) AddFlag(flags ...string)     { d.flags = append(d.flags, flags...) }
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
-	d.mounts = append(d.mounts, fmt.Sprintf("--mount type=volume,src=%s,dst=%s", src, dst))
+	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
 func (d *DockerRunCmd) AddEphemeralVolume(dst string) {
-	d.mounts = append(d.mounts, fmt.Sprintf("--mount type=volume,dst=%s", dst))
+	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,dst=%s", dst))
 }
 func (d *DockerRunCmd) AddTmpfs(path, size string, noexec, nosuid bool) {
 	opts := "rw"
