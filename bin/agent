@@ -98,6 +98,7 @@ ${GREEN}Manage:${NC}
   agent summary <name>|--latest
   agent config <show|set|get|reset>
   agent tui
+  agent dashboard [--bind host:port]
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
   agent peek <name>|--latest [--lines N]
@@ -4380,6 +4381,11 @@ case "$cmd" in
   summary)     cmd_summary "$@" ;;
   retry)       cmd_retry "$@" ;;
   template)    cmd_template "$@" ;;
+  dashboard)
+    tui_bin="$REPO_DIR/tui/agent-tui"
+    [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
+    exec "$tui_bin" --dashboard "$@"
+    ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"
     [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."

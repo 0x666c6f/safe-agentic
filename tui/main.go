@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,10 +17,31 @@ const (
 )
 
 func main() {
+	// Check for dashboard mode before TUI initialization.
+	for _, arg := range os.Args[1:] {
+		if arg == "--dashboard" || arg == "dashboard" {
+			bind := "localhost:8420"
+			for i, a := range os.Args[1:] {
+				if a == "--bind" && i+2 < len(os.Args) {
+					bind = os.Args[i+2]
+				}
+			}
+			if err := preflight(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			d := NewDashboard(bind)
+			log.Fatal(d.Start())
+		}
+	}
+
 	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Println("Usage: agent tui")
+		fmt.Println("Usage: agent-tui [--dashboard [--bind host:port]]")
 		fmt.Println()
 		fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
+		fmt.Println("  --dashboard    Start web dashboard instead of TUI")
+		fmt.Println("  --bind         Bind address (default: localhost:8420)")
+		fmt.Println()
 		fmt.Println("Keybindings: a=attach s=stop l=logs d=describe n=new q=quit")
 		os.Exit(0)
 	}
