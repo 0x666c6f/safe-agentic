@@ -684,9 +684,7 @@ func TestDet_SafeAgDiff(t *testing.T) {
 
 	out, err := runSafeAg(t, "diff", detSharedContainer)
 	if err != nil {
-		// Known limitation: workspaceExec heuristic does cd /workspace/$(ls | head -1)
-		// which gives /workspace/octocat (org dir, not git repo) for org/repo layouts.
-		t.Skipf("diff failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("diff failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "safe-ag-diff-test") {
 		t.Fatalf("diff should show our change:\n%s", out)
@@ -702,7 +700,7 @@ func TestDet_SafeAgDiffStat(t *testing.T) {
 
 	out, err := runSafeAg(t, "diff", "--stat", detSharedContainer)
 	if err != nil {
-		t.Skipf("diff --stat failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("diff --stat failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "README") {
 		t.Fatalf("diff --stat should mention README:\n%s", out)
@@ -764,25 +762,30 @@ func TestDet_SafeAgCheckpointWorkflow(t *testing.T) {
 	ensureSharedContainer(t)
 	repo := "/workspace/octocat/Hello-World"
 
-	// Make and commit a change
+	// Make an UNCOMMITTED change (stash only works on uncommitted changes)
 	detExec(t, "bash", "-c", fmt.Sprintf(
-		"cd %s && echo 'checkpoint-test-%d' > det-checkpoint.txt && git add det-checkpoint.txt && git commit -m 'det: checkpoint test'",
+		"cd %s && echo 'checkpoint-test-%d' > det-checkpoint.txt && git add det-checkpoint.txt",
 		repo, time.Now().Unix()))
 
 	// Create checkpoint (uses workspaceExec -> git stash)
 	out, err := runSafeAg(t, "checkpoint", "create", detSharedContainer, "det-cp")
 	if err != nil {
-		// Known limitation: workspaceExec heuristic gives org dir, not repo
-		t.Skipf("checkpoint create failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("checkpoint create failed: %v\n%s", err, out)
 	}
 
 	// List checkpoints
 	out, err = runSafeAg(t, "checkpoint", "list", detSharedContainer)
 	if err != nil {
-		t.Skipf("checkpoint list failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("checkpoint list failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "det-cp") {
 		t.Fatalf("checkpoint list should show 'det-cp':\n%s", out)
+	}
+
+	// Revert checkpoint (pop the stash)
+	out, err = runSafeAg(t, "checkpoint", "revert", detSharedContainer, "0")
+	if err != nil {
+		t.Logf("checkpoint revert: %v\n%s", err, out)
 	}
 }
 
@@ -797,8 +800,7 @@ func TestDet_SafeAgOutputCommits(t *testing.T) {
 
 	out, err := runSafeAg(t, "output", "--commits", detSharedContainer)
 	if err != nil {
-		// Known limitation: workspaceExec heuristic navigates to org dir, not repo
-		t.Skipf("output --commits failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("output --commits failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "det: output commit test") {
 		t.Fatalf("output --commits should show our commit:\n%s", out)
@@ -810,7 +812,7 @@ func TestDet_SafeAgOutputFiles(t *testing.T) {
 
 	out, err := runSafeAg(t, "output", "--files", detSharedContainer)
 	if err != nil {
-		t.Skipf("output --files failed (expected: workspace discovery heuristic): %v", err)
+		t.Fatalf("output --files failed: %v\n%s", err, out)
 	}
 	// Should list files that have been changed
 	t.Logf("output --files:\n%s", out)

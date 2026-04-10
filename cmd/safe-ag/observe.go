@@ -116,7 +116,7 @@ func runOutput(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	wsCmd := "cd /workspace/$(ls /workspace/ 2>/dev/null | head -1) 2>/dev/null"
+	wsCmd := `repo_dir=$(find /workspace -mindepth 1 -maxdepth 4 -name .git -type d -exec dirname {} \; 2>/dev/null | head -1); if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi`
 
 	switch {
 	case outputDiff:

@@ -12,12 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// workspaceExec builds a docker exec command that cds into the first workspace dir.
+// workspaceExec builds a docker exec command that cds into the first git repo in /workspace.
+// Uses find to locate the .git directory, handling org/repo nested layouts.
 func workspaceExec(containerName string, gitCmd string) []string {
+	// Find the first git repo — handles both /workspace/repo and /workspace/org/repo layouts
+	findRepo := `repo_dir=$(find /workspace -mindepth 1 -maxdepth 4 -name .git -type d -exec dirname {} \; 2>/dev/null | head -1); ` +
+		`if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi`
 	return []string{
 		"docker", "exec", containerName,
 		"bash", "-c",
-		fmt.Sprintf("cd /workspace/$(ls /workspace/ | head -1) 2>/dev/null && %s", gitCmd),
+		fmt.Sprintf("%s && %s", findRepo, gitCmd),
 	}
 }
 
