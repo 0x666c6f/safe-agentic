@@ -32,10 +32,16 @@ type Config struct {
 }
 
 // Defaults returns an empty Config with zero-value fields (all empty strings).
-// It mirrors the implicit defaults in bin/agent-lib.sh: nothing is set until
-// the user provides a defaults file.
+// Defaults returns a Config with the same hardcoded defaults as bin/agent:
+// DEFAULT_CPUS=4, DEFAULT_MEMORY=8g, DEFAULT_PIDS_LIMIT=512.
 func Defaults() Config {
-	return Config{}
+	return Config{
+		CPUs:        "4",
+		Memory:      "8g",
+		PIDsLimit:   "512",
+		ReuseAuth:   "true",
+		ReuseGHAuth: "true",
+	}
 }
 
 // DefaultsPath returns the path to the defaults file, respecting

@@ -23,14 +23,14 @@ func writeTemp(t *testing.T, content string) string {
 
 func TestDefaults(t *testing.T) {
 	d := Defaults()
-	if d.CPUs != "" {
-		t.Errorf("default CPUs should be empty, got %q", d.CPUs)
+	if d.CPUs != "4" {
+		t.Errorf("default CPUs should be '4', got %q", d.CPUs)
 	}
-	if d.Memory != "" {
-		t.Errorf("default Memory should be empty, got %q", d.Memory)
+	if d.Memory != "8g" {
+		t.Errorf("default Memory should be '8g', got %q", d.Memory)
 	}
-	if d.SSH != "" {
-		t.Errorf("default SSH should be empty, got %q", d.SSH)
+	if d.PIDsLimit != "512" {
+		t.Errorf("default PIDsLimit should be '512', got %q", d.PIDsLimit)
 	}
 }
 
@@ -40,8 +40,9 @@ func TestLoadDefaults_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDefaults with missing file should return no error, got: %v", err)
 	}
-	if cfg.CPUs != "" {
-		t.Errorf("expected empty CPUs for missing file, got %q", cfg.CPUs)
+	// Missing file returns hardcoded defaults
+	if cfg.CPUs != "4" {
+		t.Errorf("expected default CPUs '4' for missing file, got %q", cfg.CPUs)
 	}
 }
 
