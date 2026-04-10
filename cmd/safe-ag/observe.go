@@ -77,53 +77,58 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find the session JSONL that matches this container.
-	// Multiple containers may share the auth volume, so we match by
-	// file birth/change time closest to the container's start time.
-	startedAt, _ := inspectField(ctx, exec, name, "{{.State.StartedAt}}")
+	// Uses the same Python-based matching as the TUI: compare container
+	// creation time to the first timestamp entry in each JSONL file.
+	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
 
-	// Use stat %W (birth) or %Z (change) to find the file created at container start
-	findCmd := fmt.Sprintf(
-		`find %s/projects -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -exec stat -c '%%W %%n' {} + 2>/dev/null | sort -n`,
-		configDir)
-	out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
+	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
+	searchDirs := sessionSearchDirs(configDir, repoLabel)
+
+	matchScript := `
+import os, json, sys, glob
+container_created = sys.argv[1][:19]
+search_dirs = [p for p in sys.argv[2:] if p]
+files = []
+seen = set()
+for d in search_dirs:
+    for pattern in (os.path.join(d, '*.jsonl'), os.path.join(d, '**', '*.jsonl')):
+        for f in glob.glob(pattern, recursive=True):
+            if f.endswith('history.jsonl') or '/subagents/' in f or f in seen:
+                continue
+            seen.add(f)
+            files.append(f)
+best_file = None
+best_delta = float('inf')
+for f in files:
+    try:
+        with open(f) as fh:
+            for line in fh:
+                d = json.loads(line.strip())
+                ts = d.get('timestamp', '')
+                if not ts and 'message' in d and isinstance(d['message'], dict):
+                    ts = d['message'].get('timestamp', '')
+                if ts:
+                    s = ts[:19]
+                    if s >= container_created:
+                        delta = ord(s[18]) - ord(container_created[18])
+                        if delta < best_delta:
+                            best_delta = delta
+                            best_file = f
+                    break
+    except:
+        pass
+if not best_file and files:
+    best_file = max(files, key=os.path.getmtime)
+if best_file:
+    print(best_file)
+`
+	findArgs := []string{"docker", "exec", name, "python3", "-c", matchScript, createdAt}
+	findArgs = append(findArgs, searchDirs...)
+	out, err := exec.Run(ctx, findArgs...)
 	if err != nil {
 		return fmt.Errorf("find session log: %w", err)
 	}
-
-	jsonlPath := ""
-	if startedAt != "" {
-		containerStart, parseErr := time.Parse(time.RFC3339Nano, startedAt)
-		if parseErr == nil {
-			startEpoch := float64(containerStart.Unix())
-			bestDelta := float64(999999)
-			// Find the file born closest to container start (within 60s window)
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-				parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				var fileEpoch float64
-				fmt.Sscanf(parts[0], "%f", &fileEpoch)
-				delta := fileEpoch - startEpoch
-				if delta >= -5 && delta < 60 && delta < bestDelta {
-					bestDelta = delta
-					jsonlPath = parts[1]
-				}
-			}
-		}
-	}
-
-	// Fallback: most recent file
-	if jsonlPath == "" {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 0 {
-			parts := strings.SplitN(strings.TrimSpace(lines[len(lines)-1]), " ", 2)
-			if len(parts) == 2 {
-				jsonlPath = parts[1]
-			}
-		}
-	}
-
+	jsonlPath := strings.TrimSpace(string(out))
 	if jsonlPath == "" {
 		return fmt.Errorf("no session log found in %s", configDir)
 	}
@@ -149,6 +154,16 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func sessionSearchDirs(configDir, repo string) []string {
+	dirs := make([]string, 0, 3)
+	if repo != "" && repo != "-" {
+		projSlug := strings.ReplaceAll(repo, "/", "-")
+		dirs = append(dirs, fmt.Sprintf("%s/projects/-workspace-%s", configDir, projSlug))
+	}
+	dirs = append(dirs, configDir+"/sessions", configDir)
+	return dirs
 }
 
 func renderLogEntry(line string) string {

@@ -262,7 +262,23 @@ func executeSpawn(opts SpawnOpts) error {
 	cmd.AddLabel(labels.Terminal, "tmux")
 
 	// Auth volumes
-	if opts.EphemeralAuth {
+	// Fleet/pipeline agents get per-container volumes (seeded from shared) for session isolation.
+	if opts.FleetVolume != "" && !opts.EphemeralAuth {
+		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
+		perContainerVol := containerName + "-auth"
+		// Create per-container volume and seed credentials from shared volume
+		if !opts.DryRun {
+			exec.Run(ctx, "docker", "volume", "create", perContainerVol)
+			// Copy credentials from shared auth volume
+			exec.Run(ctx, "docker", "run", "--rm",
+				"-v", sharedVol+":/src:ro",
+				"-v", perContainerVol+":/dst",
+				"alpine", "sh", "-c",
+				"cp -a /src/.credentials.json /src/.claude.json /src/settings.json /dst/ 2>/dev/null; true")
+		}
+		cmd.AddLabel(labels.AuthType, "fleet-isolated")
+		cmd.AddNamedVolume(perContainerVol, authDestination(opts.AgentType))
+	} else if opts.EphemeralAuth {
 		cmd.AddLabel(labels.AuthType, "ephemeral")
 		authVol := docker.AuthVolumeName(opts.AgentType, true, containerName)
 		cmd.AddNamedVolume(authVol, authDestination(opts.AgentType))
