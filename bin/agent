@@ -89,6 +89,7 @@ ${GREEN}Setup:${NC}
 
 ${GREEN}Run:${NC}
   agent spawn <claude|codex> [options]
+  agent run <repo> "prompt"                     (quick start with smart defaults)
   agent shell [options]
   agent-claude [spawn-options] <repo-url> [repo-url...]
   agent-codex [spawn-options] <repo-url> [repo-url...]
@@ -98,11 +99,12 @@ ${GREEN}Manage:${NC}
   agent summary <name>|--latest
   agent config <show|set|get|reset>
   agent tui
+  agent dashboard [--bind HOST:PORT]              (web dashboard)
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
   agent peek <name>|--latest [--lines N]
   agent diff <name>|--latest [--stat]
-  agent checkpoint <create|list|revert> <name>|--latest [...]
+  agent checkpoint <create|list|revert|fork> <name>|--latest [...]
   agent todo <add|list|check|uncheck> <name>|--latest [...]
   agent stop <name>|--latest|--all
   agent cleanup [--auth]
@@ -111,13 +113,15 @@ ${GREEN}Manage:${NC}
 ${GREEN}Observe:${NC}
   agent output <name>|--latest [--diff|--files|--commits|--json]
   agent review <name>|--latest [--base BRANCH]
-  agent cost <name>|--latest
+  agent cost <name>|--latest [--history [PERIOD]]
+  agent replay <name>|--latest                    (replay session from event log)
 
 ${GREEN}Analytics:${NC}
   agent audit [--lines N]
 
 ${GREEN}Orchestrate:${NC}
   agent fleet <manifest.yaml> [--dry-run]
+  agent fleet status                                (show running fleet progress)
   agent pipeline <pipeline.yaml> [--dry-run]
 
 ${GREEN}Workflow:${NC}
@@ -136,11 +140,12 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
+  agent help [spawn|run|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template|replay|dashboard|orchestrate]
   agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
   agent-claude git@github.com:myorg/myrepo.git
+  agent run git@github.com:myorg/myrepo.git "Fix the CI tests"
   agent spawn codex --reuse-auth --identity 'You <you@example.com>' --repo https://github.com/myorg/api.git
   agent shell --dry-run --repo https://github.com/myorg/myrepo.git
   agent fleet agents.yaml --dry-run
@@ -170,9 +175,13 @@ Options:
   --instructions 'TEXT'
   --instructions-file PATH
   --on-exit 'COMMAND'
+  --on-complete 'COMMAND'
+  --on-fail 'COMMAND'
+  --notify TARGETS
   --max-cost N
   --aws PROFILE
   --identity 'Name <email@example.com>'
+  --ephemeral-auth
   --auto-trust
   --background
   --dry-run
@@ -183,8 +192,12 @@ Notes:
   - --template loads a pre-built prompt by name (see 'agent template list'); --prompt takes precedence
   - --instructions injects text as /workspace/AGENT-INSTRUCTIONS.md (Claude picks it up automatically)
   - --instructions-file reads instructions from a local file
-  - --on-exit runs a shell command after the agent exits (e.g. webhook notification)
-  - --max-cost sets a cost budget label (shown in TUI cost overlay)
+  - --on-exit runs a shell command after the agent exits (regardless of outcome)
+  - --on-complete runs a shell command only when the agent succeeds (exit 0)
+  - --on-fail runs a shell command only when the agent fails (non-zero exit)
+  - --notify sends notifications to targets (comma-separated: terminal,slack,command:/path/to/script)
+  - --max-cost sets a cost budget; kills the agent if estimated spend exceeds this amount
+  - --ephemeral-auth forces a one-off auth volume (opposite of --reuse-auth)
   - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
   - --background runs headless (no tmux, not attachable, output via docker logs)
   - Codex background runs require existing auth in --reuse-auth; otherwise first-run device login blocks in logs
@@ -194,6 +207,69 @@ Notes:
   - SSH repos require --ssh; aliases auto-enable it
   - --docker starts an internal Docker daemon sidecar
   - --docker-socket mounts the VM Docker socket directly (dangerous)
+EOF
+}
+
+print_help_run() {
+  cat <<EOF
+Usage: agent run <repo> "prompt" [options]
+
+Quick start with smart defaults. Equivalent to:
+  agent spawn claude --ssh --reuse-auth --repo <repo> --prompt "prompt"
+
+Automatically enables --ssh for SSH URLs and --reuse-auth for shared
+credentials. Use 'agent spawn' for full control over flags.
+
+Options:
+  --type <claude|codex>   Agent type (default: claude)
+  --name NAME             Container name override
+  --on-complete 'CMD'     Run command on success
+  --on-fail 'CMD'         Run command on failure
+  --notify TARGETS        Send notifications (terminal,slack,command:script)
+  --max-cost N            Kill agent if estimated cost exceeds budget
+  -h, --help
+
+Examples:
+  agent run git@github.com:org/repo.git "Fix the failing CI tests"
+  agent run https://github.com/org/repo.git "Add unit tests" --type codex
+  agent run git@github.com:org/repo.git "Refactor auth" --on-complete "echo done"
+EOF
+}
+
+print_help_replay() {
+  cat <<EOF
+Usage: agent replay <name>|--latest [options]
+
+Replay an agent session from its event log. Shows a timestamped playback
+of agent actions, tool calls, and outputs as they originally occurred.
+
+Options:
+  --latest        Replay the most recently started container
+  --speed N       Playback speed multiplier (default: 1)
+  --no-color      Disable colored output
+  -h, --help
+
+Examples:
+  agent replay my-task
+  agent replay --latest
+  agent replay my-task --speed 5
+EOF
+}
+
+print_help_dashboard() {
+  cat <<EOF
+Usage: agent dashboard [--bind HOST:PORT]
+
+Start a web dashboard for monitoring running agents. Opens a browser
+to a local web UI showing agent status, logs, costs, and diffs.
+
+Options:
+  --bind HOST:PORT   Bind address (default: 127.0.0.1:8420)
+  -h, --help
+
+Examples:
+  agent dashboard
+  agent dashboard --bind 0.0.0.0:9090
 EOF
 }
 
@@ -305,15 +381,16 @@ EOF
 
 print_help_checkpoint() {
   cat <<EOF
-Usage: agent checkpoint <create|list|revert> <name>|--latest [...]
+Usage: agent checkpoint <create|list|revert|fork> <name>|--latest [...]
 
 Snapshot and revert an agent's working tree using git stash objects stored
 as named refs under refs/safe-agentic/checkpoints/.
 
 Subcommands:
-  create <name>|--latest [label]   Snapshot current changes (default label: checkpoint-<epoch>)
-  list   <name>|--latest           List all checkpoints for the container
-  revert <name>|--latest <ref>     Restore a checkpoint (discards current changes)
+  create <name>|--latest [label]                Snapshot current changes (default label: checkpoint-<epoch>)
+  list   <name>|--latest                        List all checkpoints for the container
+  revert <name>|--latest <ref>                  Restore a checkpoint (discards current changes)
+  fork   <name>|--latest <new-name> [label]     Create a new agent from a checkpoint snapshot
 
 Options:
   --latest    Target the most recently started container
@@ -323,6 +400,7 @@ Examples:
   agent checkpoint create my-task before-refactor
   agent checkpoint list my-task
   agent checkpoint revert my-task before-refactor
+  agent checkpoint fork my-task my-task-v2 before-refactor
   agent checkpoint create --latest
   agent checkpoint list --latest
 EOF
@@ -386,10 +464,16 @@ EOF
 
 print_help_cost() {
   cat <<EOF
-Usage: agent cost <name>|--latest
+Usage: agent cost <name>|--latest [--history [PERIOD]]
 
 Estimate API spend for a session by reading JSONL session files from
 the container and summing token usage fields.
+
+Options:
+  --history [PERIOD]   Show historical cost from audit log (default: 7d)
+                       Period examples: 1d, 7d, 30d, all
+  --latest             Target the most recently started container
+  -h, --help
 
 Outputs:
   - total input/output tokens
@@ -399,6 +483,8 @@ Outputs:
 Examples:
   agent cost api-refactor
   agent cost --latest
+  agent cost --history
+  agent cost --history 30d
 EOF
 }
 
@@ -432,10 +518,15 @@ EOF
 print_help_fleet() {
   cat <<EOF
 Usage: agent fleet <manifest.yaml> [--dry-run]
+       agent fleet status
 
 Spawn multiple agents from a YAML manifest file in parallel.
 
+Subcommands:
+  status   Show task progress for currently running fleet agents
+
 Manifest format:
+  shared_tasks: true           # optional: enable shared task queue
   agents:
     - name: api-worker
       type: claude
@@ -449,6 +540,9 @@ Manifest format:
 Supported fields per agent entry:
   name, type, repo, ssh, reuse_auth, reuse_gh_auth, docker,
   prompt, aws, network, memory, cpus
+
+Top-level fields:
+  shared_tasks   Enable shared task queue across fleet agents (default: false)
 
 Options:
   --dry-run   Print spawn commands without executing them
@@ -474,6 +568,10 @@ Pipeline YAML format:
       on_failure: other-step-name
       retry: N
       depends_on: step-name
+      when: "{{steps.prev.exit_code}} == 0"
+      outputs:
+        - diff
+        - commits
 
 Options:
   --dry-run   Print execution plan without running any agents
@@ -488,6 +586,10 @@ Step fields:
   on_failure  Step name to run if this step fails.
   retry       Number of retry attempts on failure (default: 0).
   depends_on  Step name that must have completed successfully.
+  when        Conditional expression; step runs only if it evaluates to true.
+              Supports {{steps.<name>.exit_code}} and {{steps.<name>.output}} placeholders.
+  outputs     List of outputs to capture from the step (diff, commits, files, json).
+              Available to downstream steps via {{steps.<name>.output}} placeholders.
 
 Examples:
   agent pipeline workflow.yaml
@@ -2087,6 +2189,9 @@ cmd_help() {
     spawn)
       print_help_spawn
       ;;
+    run)
+      print_help_run
+      ;;
     shell)
       print_help_shell
       ;;
@@ -2156,6 +2261,15 @@ cmd_help() {
     template)
       print_help_template
       ;;
+    replay)
+      print_help_replay
+      ;;
+    dashboard)
+      print_help_dashboard
+      ;;
+    orchestrate)
+      print_help_orchestrate
+      ;;
     *)
       # Search all help text for the keyword
       local keyword="$topic"
@@ -2163,6 +2277,7 @@ cmd_help() {
       combined_help=$(
         print_help_general
         print_help_spawn
+        print_help_run
         print_help_shell
         print_help_attach
         print_help_cp
@@ -2186,6 +2301,9 @@ cmd_help() {
         print_help_summary
         print_help_retry
         print_help_template
+        print_help_replay
+        print_help_dashboard
+        print_help_orchestrate
       ) 2>/dev/null
       local matches
       matches=$(printf '%s\n' "$combined_help" | grep -i --color=auto -C 2 "$keyword" 2>/dev/null) || true
@@ -4201,6 +4319,110 @@ EOF
   ok "AWS credentials refreshed in $name (profile: $profile)"
 }
 
+# ---------------------------------------------------------------------------
+# cmd_run — Quick start with smart defaults
+# ---------------------------------------------------------------------------
+cmd_run() {
+  local topic="run"
+  local repo=""
+  local prompt=""
+  local agent_type="claude"
+  local name=""
+  local -a extra_args=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --type)
+        require_option_value "$topic" "--type" "${2:-}"
+        agent_type="$2"
+        shift 2
+        ;;
+      --name)
+        require_option_value "$topic" "--name" "${2:-}"
+        name="$2"
+        shift 2
+        ;;
+      --on-complete|--on-fail|--notify|--max-cost)
+        require_option_value "$topic" "$1" "${2:-}"
+        extra_args+=("$1" "$2")
+        shift 2
+        ;;
+      -h|--help)
+        print_help_run
+        return 0
+        ;;
+      *)
+        if [ -z "$repo" ]; then
+          repo="$1"
+        elif [ -z "$prompt" ]; then
+          prompt="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$repo" ] || die_with_help "$topic" "Repository URL required."
+  [ -n "$prompt" ] || die_with_help "$topic" "Prompt required."
+
+  # Build spawn args with smart defaults
+  local -a spawn_args=("$agent_type" --repo "$repo" --prompt "$prompt" --reuse-auth)
+  [ -n "$name" ] && spawn_args+=(--name "$name")
+
+  # Auto-enable SSH for SSH URLs
+  case "$repo" in
+    git@*|ssh://*) spawn_args+=(--ssh) ;;
+  esac
+
+  spawn_args+=("${extra_args[@]}")
+
+  cmd_spawn "${spawn_args[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_replay — Replay agent session from event log
+# ---------------------------------------------------------------------------
+cmd_replay() {
+  local topic="replay"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        print_help_replay
+        return 0
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  die "The 'replay' command is not yet implemented. Coming in a future release."
+}
+
+# ---------------------------------------------------------------------------
+# cmd_dashboard — Start web dashboard
+# ---------------------------------------------------------------------------
+cmd_dashboard() {
+  local topic="dashboard"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        print_help_dashboard
+        return 0
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  die "The 'dashboard' command is not yet implemented. Coming in a future release."
+}
+
 print_help_retry() {
   cat <<EOF
 Usage: agent retry <name>|--latest [--feedback "text"]
@@ -4380,6 +4602,9 @@ case "$cmd" in
   summary)     cmd_summary "$@" ;;
   retry)       cmd_retry "$@" ;;
   template)    cmd_template "$@" ;;
+  run)         cmd_run "$@" ;;
+  replay)      cmd_replay "$@" ;;
+  dashboard)   cmd_dashboard "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"
     [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
