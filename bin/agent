@@ -439,6 +439,7 @@ EOF
 print_help_cost() {
   cat <<EOF
 Usage: agent cost <name>|--latest
+       agent cost --history [<period>]
 
 Estimate API spend for a session by reading JSONL session files from
 the container and summing token usage fields.
@@ -448,9 +449,15 @@ Outputs:
   - per-model breakdown
   - estimated cost in USD (approximate rates)
 
+Options:
+  --history [<period>]   Show historical costs from audit log.
+                         Period format: Nd (e.g. 7d, 30d). Default: 7d.
+
 Examples:
   agent cost api-refactor
   agent cost --latest
+  agent cost --history
+  agent cost --history 30d
 EOF
 }
 
@@ -1855,6 +1862,9 @@ cmd_stop() {
 
   $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
   name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Record cost to audit log before stopping (best-effort, container still running)
+  _record_cost_to_audit "$name"
 
   info "Stopping $name..."
   vm_exec docker stop "$name" >/dev/null 2>&1 || true
@@ -3277,6 +3287,51 @@ cmd_cost() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
+      --history)
+        local period="${2:-7d}"
+        # Only consume the next arg if it looks like a period (Nd)
+        if [[ "${2:-}" =~ ^[0-9]+d$ ]]; then
+          shift 2
+        else
+          shift
+        fi
+        local audit_file="$AUDIT_LOG_FILE"
+        [ -f "$audit_file" ] || die "No audit log found at $audit_file"
+
+        python3 -c "
+import json, sys
+from datetime import datetime, timedelta
+
+period = '$period'
+days = int(period.rstrip('d')) if period.endswith('d') else 7
+cutoff = datetime.utcnow() - timedelta(days=days)
+
+by_container = {}
+total = 0.0
+for line in open('$audit_file'):
+    try:
+        obj = json.loads(line)
+        if obj.get('action') != 'cost':
+            continue
+        ts = datetime.fromisoformat(obj['timestamp'].rstrip('Z'))
+        if ts < cutoff:
+            continue
+        name = obj.get('container', '?')
+        cost = float(obj.get('cost', 0))
+        by_container[name] = by_container.get(name, 0) + cost
+        total += cost
+    except (json.JSONDecodeError, KeyError, ValueError):
+        continue
+
+print(f'Cost history (last {days} days):')
+print()
+for name, cost in sorted(by_container.items(), key=lambda x: -x[1]):
+    print(f'  {name:40s} \${cost:.2f}')
+print()
+print(f'  {\"Total\":40s} \${total:.2f}')
+"
+        return 0
+        ;;
       --latest)
         latest=true
         shift
@@ -3748,6 +3803,56 @@ PYEOF
   export REPLAY_TOOLS_ONLY="$tools_flag"
   export REPLAY_COST_TIMELINE="$cost_flag"
   printf '%s\n' "$events" | python3 "$py_script"
+}
+
+# Record cost estimate to audit log (best-effort, silent on failure).
+# Called from cmd_stop() before the container is removed.
+_record_cost_to_audit() {
+  local container="$1"
+
+  # Detect agent type to find the right config dir
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$container" 2>/dev/null || echo "")
+  [ -n "$agent_type" ] || return 0
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    *)     config_dir="/home/agent/.claude" ;;
+  esac
+
+  # Try to read session JSONL from the running container
+  local jsonl_data
+  jsonl_data=$(vm_exec docker exec "$container" bash -c "
+    find '${config_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+      | while IFS= read -r f; do cat \"\$f\"; done
+  " 2>/dev/null || true)
+  [ -n "$jsonl_data" ] || return 0
+
+  # Compute the grand cost
+  local cost_est
+  cost_est=$(printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 -c "
+import json, sys
+stats = json.load(sys.stdin)
+gc = stats.get('grand_cost', 0.0)
+if gc > 0:
+    print('{:.4f}'.format(gc))
+else:
+    print('')
+" 2>/dev/null || true)
+  [ -n "$cost_est" ] || return 0
+
+  # Write structured cost entry with numeric cost field for --history
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$AUDIT_LOG_FILE")" 2>/dev/null || return 0
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'timestamp': sys.argv[1],
+    'action': 'cost',
+    'container': sys.argv[2],
+    'cost': float(sys.argv[3])
+}, separators=(',', ':')))" "$timestamp" "$container" "$cost_est" \
+    >>"$AUDIT_LOG_FILE" 2>/dev/null || true
 }
 
 _output_get_logs() {
