@@ -17,6 +17,10 @@ mkdir -p "$FAKE_BIN"
 SAMPLE_JSONL='{"type":"user","message":{"role":"user","content":"hello"}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done. Fixed 3 issues in auth.py."}]}}'
 
+SAMPLE_CODEX_JSONL='{"type":"turn_context","payload":{"model":"gpt-5.4"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fixed Codex parsing."}]}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1234,"output_tokens":56}}}}'
+
 cat >"$FAKE_BIN/orb" <<'ORBEOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -239,6 +243,33 @@ assert_output_contains '"files_changed"' "output --json has files_changed field"
 assert_output_contains '"cost_estimate"' "output --json has cost_estimate field"
 assert_output_contains 'agent-claude-my-task' "output --json contains container name"
 TEST_GIT_LOG=""
+
+# =============================================================================
+# Codex rollout JSONL: response_item messages + token_count totals
+# =============================================================================
+: >"$ORB_LOG"
+TEST_AGENT_TYPE=codex
+TEST_REPO_DISPLAY="morpho-org/hermes-agent-sre"
+TEST_SAMPLE_JSONL="$SAMPLE_CODEX_JSONL"
+TEST_GIT_LOG="abc1234 fix: resolve auth bug"
+TEST_GIT_DIFF="auth.py"
+TEST_GIT_UNTRACKED="tests/test_new.py"
+run_ok "output codex rollout message" bash "$REPO_DIR/bin/agent" output agent-claude-my-task
+assert_output_contains "Fixed Codex parsing." "output reads Codex response_item assistant text"
+assert_log_contains "/home/agent/.codex/sessions" "output checks Codex sessions dir"
+
+: >"$ORB_LOG"
+run_ok "output --json codex rollout" bash "$REPO_DIR/bin/agent" output agent-claude-my-task --json
+assert_output_contains '"cost_estimate"' "output --json codex has cost_estimate field"
+assert_output_contains 'Fixed Codex parsing.' "output --json codex includes assistant message"
+assert_output_contains '\$0.0036' "output --json codex estimates cost from token_count"
+assert_log_contains "SA_REPO_DISPLAY=morpho-org/hermes-agent-sre" "output --json passes repo path hint to git commands"
+TEST_AGENT_TYPE=claude
+TEST_REPO_DISPLAY="--"
+TEST_SAMPLE_JSONL="$SAMPLE_JSONL"
+TEST_GIT_LOG=""
+TEST_GIT_DIFF=""
+TEST_GIT_UNTRACKED=""
 
 # =============================================================================
 # No session data → warning

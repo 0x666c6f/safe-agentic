@@ -154,14 +154,13 @@ inject_security_preamble() {
       # Shell / unknown: inject both for flexibility
       local claude_md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
       local agents_md="${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-      mkdir -p "$(dirname "$claude_md")" 2>/dev/null || true
-      mkdir -p "$(dirname "$agents_md")" 2>/dev/null || true
       for target in "$claude_md" "$agents_md"; do
+        mkdir -p "$(dirname "$target")" 2>/dev/null || continue
         if [ -f "$target" ]; then
           grep -q "$marker" "$target" 2>/dev/null && continue
-          printf '\n%s\n' "$preamble" >> "$target"
+          printf '\n%s\n' "$preamble" >> "$target" 2>/dev/null || true
         else
-          printf '%s\n' "$preamble" > "$target"
+          printf '%s\n' "$preamble" > "$target" 2>/dev/null || true
         fi
       done
       ;;

@@ -29,7 +29,7 @@ case "$cmd" in
     fi
     # docker inspect for agent-type label
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *agent-type* ]]; then
-      echo "claude"; exit 0
+      echo "${TEST_AGENT_TYPE:-claude}"; exit 0
     fi
     # docker exec to read session JSONL
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ]; then
@@ -53,7 +53,7 @@ fail=0
 run_ok() {
   local label="$1"; shift
   if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" \
-     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" TEST_AGENT_TYPE="${TEST_AGENT_TYPE:-claude}" \
      "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     ((++pass))
   else
@@ -67,7 +67,7 @@ run_ok() {
 run_fails() {
   local label="$1"; shift
   if PATH="$FAKE_BIN:$PATH" TEST_ORB_LOG="$ORB_LOG" TEST_JSONL_DATA="${TEST_JSONL_DATA:-}" \
-     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
+     TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" TEST_AGENT_TYPE="${TEST_AGENT_TYPE:-claude}" \
      "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
@@ -123,6 +123,20 @@ TEST_JSONL_DATA='{"payload":{"model":"claude-opus-4-6","usage":{"input_tokens":2
 run_ok "cost with nested payload usage" bash "$REPO_DIR/bin/agent" cost agent-claude-test-task
 assert_output_contains "claude-opus-4-6" "nested payload model shown"
 assert_output_contains "2,000" "nested input tokens shown"
+
+# ---------------------------------------------------------------------------
+# cost handles Codex token_count rollups
+# ---------------------------------------------------------------------------
+: >"$ORB_LOG"
+TEST_AGENT_TYPE=codex
+TEST_JSONL_DATA='{"type":"turn_context","payload":{"model":"gpt-5.4"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1234,"output_tokens":56}}}}'
+run_ok "cost with codex token_count" bash "$REPO_DIR/bin/agent" cost agent-claude-test-task
+assert_output_contains "gpt-5.4" "cost shows Codex model name"
+assert_output_contains "1,234" "cost shows Codex input tokens"
+assert_output_contains "56" "cost shows Codex output tokens"
+TEST_AGENT_TYPE=claude
+TEST_JSONL_DATA=
 
 # ---------------------------------------------------------------------------
 # cost with no session data warns gracefully

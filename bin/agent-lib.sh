@@ -352,6 +352,7 @@ volume_contains_file() {
   local volume_name="$1"
   local relative_path="$2"
 
+  # shellcheck disable=SC2016
   vm_exec docker run --rm --pull=never \
     -e "SA_RELATIVE_PATH=$relative_path" \
     -v "$volume_name:/mnt" \

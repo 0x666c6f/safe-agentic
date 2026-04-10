@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,44 @@ func TestParseSessionMeta(t *testing.T) {
 	}
 	if got.CLIVersion != "0.118.0" {
 		t.Fatalf("parseSessionMeta().CLIVersion = %q", got.CLIVersion)
+	}
+}
+
+func TestSessionSearchDirsPrefersProjectThenSessions(t *testing.T) {
+	got := sessionSearchDirs("/home/agent/.codex", "morpho-org/hermes-agent-sre")
+	want := []string{
+		"/home/agent/.codex/projects/-workspace-morpho-org-hermes-agent-sre",
+		"/home/agent/.codex/sessions",
+		"/home/agent/.codex",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sessionSearchDirs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionSearchDirsWithoutRepo(t *testing.T) {
+	got := sessionSearchDirs("/home/agent/.claude", "-")
+	want := []string{
+		"/home/agent/.claude/sessions",
+		"/home/agent/.claude",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sessionSearchDirs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestRenderSessionLogCurrentCodexFormat(t *testing.T) {
+	data := []byte(
+		`{"timestamp":"2026-04-10T07:46:06.385Z","type":"session_meta","payload":{"timestamp":"2026-04-10T07:46:01.762Z","cwd":"/workspace/morpho-org/hermes-agent-sre","cli_version":"0.118.0","originator":"codex-tui"}}` + "\n" +
+			`{"timestamp":"2026-04-10T07:46:14.627Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Using github skills first."}]}}` + "\n" +
+			`{"timestamp":"2026-04-10T07:46:22.648Z","type":"event_msg","payload":{"type":"agent_message","message":"Checking PR context now.","phase":"commentary"}}` + "\n",
+	)
+
+	rendered := renderSessionLog(data)
+	if !strings.Contains(rendered, "Using github skills first.") {
+		t.Fatalf("rendered log missing assistant response_item text:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Checking PR context now.") {
+		t.Fatalf("rendered log missing event_msg agent text:\n%s", rendered)
 	}
 }

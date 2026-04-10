@@ -51,13 +51,17 @@ func (p *Poller) Start() {
 	go p.loop()
 }
 
-// Stop stops the polling loop and waits for it to finish.
-// Safe to call multiple times.
+// Stop stops the polling loop and waits briefly for it to finish.
+// Safe to call multiple times. Uses a short timeout so quit is never blocked
+// by slow docker commands or a deadlocked QueueUpdateDraw.
 func (p *Poller) Stop() {
 	p.stopOnce.Do(func() {
 		close(p.stopCh)
 	})
-	<-p.stopped
+	select {
+	case <-p.stopped:
+	case <-time.After(500 * time.Millisecond):
+	}
 }
 
 // ForceRefresh triggers an immediate poll outside the regular interval.
@@ -105,6 +109,14 @@ func (p *Poller) poll() {
 	current := make([]Agent, len(p.agents))
 	copy(current, p.agents)
 	p.mu.Unlock()
+
+	// Don't call onUpdate if we're stopping — tview may have exited and
+	// QueueUpdateDraw would deadlock on the closed event loop.
+	select {
+	case <-p.stopCh:
+		return
+	default:
+	}
 
 	if p.onUpdate != nil {
 		p.onUpdate(current, stale)

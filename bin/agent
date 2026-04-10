@@ -1884,16 +1884,18 @@ cmd_summary() {
   echo -e "  ${GREEN}Docker:${NC}   ${docker_label:-off}"
   echo ""
 
+  # Prefer the labeled repo path; fall back to the first nested git checkout.
+  local workspace_cd
+  # shellcheck disable=SC2016
+  workspace_cd='if [ -n "${SA_REPO_DISPLAY:-}" ] && [ "${SA_REPO_DISPLAY}" != "-" ] && [ -d "/workspace/${SA_REPO_DISPLAY}" ]; then cd "/workspace/${SA_REPO_DISPLAY}"; else repo_dir="$(find /workspace -mindepth 2 -maxdepth 4 \( -type d -o -type f \) -name .git -exec dirname {} \; | head -1)"; if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi; fi'
+
   # Git status (only if running)
   if [ "$state" = "running" ]; then
     echo -e "  ${GREEN}Git status:${NC}"
     local branch commits_since changed_files
-    # shellcheck disable=SC2016
-    branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD 2>/dev/null' 2>/dev/null | tr -d '[:space:]' || echo "")
-    # shellcheck disable=SC2016
-    commits_since=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-list --count HEAD 2>/dev/null || echo 0' 2>/dev/null | tr -d '[:space:]' || echo "?")
-    # shellcheck disable=SC2016
-    changed_files=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff --name-only 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]' || echo "?")
+    branch=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git rev-parse --abbrev-ref HEAD 2>/dev/null" 2>/dev/null | tr -d '[:space:]' || echo "")
+    commits_since=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git rev-list --count HEAD 2>/dev/null || echo 0" 2>/dev/null | tr -d '[:space:]' || echo "?")
+    changed_files=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff --name-only 2>/dev/null | wc -l" 2>/dev/null | tr -d '[:space:]' || echo "?")
     echo -e "    Branch:          ${branch:-unknown}"
     echo -e "    Commits:         ${commits_since:-?}"
     echo -e "    Files changed:   ${changed_files:-?}"
@@ -1927,58 +1929,26 @@ print("{}/{} complete".format(done, total))
       *) config_dir="/home/agent/.claude" ;;
     esac
 
-    jsonl_data=$(vm_exec docker exec "$name" bash -c "
-      find '${config_dir}/sessions' -name '*.jsonl' 2>/dev/null | while read -r f; do cat \"\$f\"; done
-      [ -f '${config_dir}/history.jsonl' ] && cat '${config_dir}/history.jsonl' || true
-    " 2>/dev/null || true)
+    jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
 
     if [ -n "$jsonl_data" ]; then
       echo -e "  ${GREEN}Cost estimate:${NC}"
       local py_script
-      py_script=$(mktemp /tmp/agent-cost-XXXXXX.py)
+      py_script=$(mktemp "${TMPDIR:-/tmp}/agent-cost.XXXXXX")
       trap 'rm -f "$py_script"' RETURN
       cat >"$py_script" <<'PYEOF'
-import sys, json, re
-PRICES = {
-    "claude-opus-4-6":   (15.0, 75.0),
-    "claude-sonnet-4-6": (3.0,  15.0),
-    "claude-haiku-4-5":  (0.80,  4.0),
-}
-DEFAULT_PRICE = (3.0, 15.0)
-totals_by_model = {}
+import sys, json
 for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-    usage = obj.get("usage") or (obj.get("payload") or {}).get("usage")
-    if not usage or not isinstance(usage, dict):
-        continue
-    model = (obj.get("model") or (obj.get("payload") or {}).get("model") or "unknown")
-    model_key = re.sub(r"-\d{8}$", "", model)
-    inp = int(usage.get("input_tokens", 0))
-    out = int(usage.get("output_tokens", 0))
-    if model_key not in totals_by_model:
-        totals_by_model[model_key] = [0, 0]
-    totals_by_model[model_key][0] += inp
-    totals_by_model[model_key][1] += out
-if not totals_by_model:
+    stats = json.loads(line)
+    break
+else:
+    stats = {"totals_by_model": {}, "grand_input": 0, "grand_output": 0, "grand_cost": 0.0}
+if not stats.get("totals_by_model"):
     print("    No token data yet.")
     sys.exit(0)
-grand_in = grand_out = grand_cost = 0.0
-for model_key in sorted(totals_by_model):
-    inp, out = totals_by_model[model_key]
-    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
-    cost = (inp / 1_000_000) * price_in + (out / 1_000_000) * price_out
-    grand_in += inp
-    grand_out += out
-    grand_cost += cost
-print(f"    ~${grand_cost:.4f}  ({int(grand_in):,} in / {int(grand_out):,} out tokens)")
+print(f"    ~${stats['grand_cost']:.4f}  ({int(stats['grand_input']):,} in / {int(stats['grand_output']):,} out tokens)")
 PYEOF
-      echo "$jsonl_data" | python3 "$py_script"
+      printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 "$py_script"
       echo ""
     fi
   fi
@@ -2353,7 +2323,7 @@ Usage: agent sessions <container> [destination]
        agent sessions --latest [destination]
 
 Export agent session history from a container to the host.
-Copies session files, history, and session index.
+Copies session files, history, indexes, and agent logs/state where available.
 Default destination: ./agent-sessions/<container-name>/
 
 Example:
@@ -2403,17 +2373,37 @@ EOF
 
   # Extract session-related files from the container
   local tmptar
-  tmptar=$(mktemp /tmp/agent-sessions-XXXXXX.tar)
+  tmptar=$(mktemp "${TMPDIR:-/tmp}/agent-sessions.XXXXXX")
   trap 'rm -f "$tmptar"' RETURN
 
-  orb run -m "$VM_NAME" docker exec -i "$name" \
-    tar -cf - -C "$config_dir" \
-      --ignore-failed-read \
-      sessions/ \
-      history.jsonl \
-      session_index.jsonl \
-      archived_sessions/ \
-      2>/dev/null > "$tmptar"
+  # shellcheck disable=SC2016
+  orb run -m "$VM_NAME" docker exec -i "$name" bash -c '
+    set -euo pipefail
+    cd "$1"
+    patterns=(
+      projects
+      sessions
+      history.jsonl
+      session_index.jsonl
+      archived_sessions
+      log
+      logs_*.sqlite
+      logs_*.sqlite-shm
+      logs_*.sqlite-wal
+      state_*.sqlite
+      state_*.sqlite-shm
+      state_*.sqlite-wal
+    )
+    paths=()
+    for pattern in "${patterns[@]}"; do
+      for match in $pattern; do
+        [ -e "$match" ] || continue
+        paths+=("$match")
+      done
+    done
+    [ "${#paths[@]}" -gt 0 ] || exit 0
+    tar -cf - --ignore-failed-read "${paths[@]}"
+  ' bash "$config_dir" 2>/dev/null > "$tmptar"
 
   if [ ! -s "$tmptar" ]; then
     warn "No session data found in $name."
@@ -2936,9 +2926,10 @@ cmd_cost() {
   local state
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   if [ "$state" != "running" ]; then
-    info "Starting container $name..."
+    info "Starting container $name..." >&2
     vm_exec docker start "$name" >/dev/null 2>&1
     sleep 1
+    state="running"
   fi
 
   # Detect agent type to find the right config dir
@@ -2946,99 +2937,75 @@ cmd_cost() {
   agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
   case "$agent_type" in
     codex) config_dir="/home/agent/.codex" ;;
-    claude) config_dir="/home/agent/.claude" ;;
-    *) config_dir="/home/agent/.claude" ;;  # default to claude
+    *)     config_dir="/home/agent/.claude" ;;
   esac
 
-  info "Reading session data from $name ($agent_type)..."
+  info "Reading session data from $name ($agent_type)..." >&2
 
-  # Collect all JSONL lines from session files, then pipe to python3 for cost analysis
+  # Collect ALL JSONL data from session files (cost needs aggregate, not single file).
+  # Claude stores sessions under projects/-workspace-*/; Codex under sessions/.
+  # Search the entire config dir to cover both.
   local jsonl_data
-  jsonl_data=$(vm_exec docker exec "$name" bash -c "
-    find '${config_dir}/sessions' -name '*.jsonl' 2>/dev/null | while read -r f; do cat \"\$f\"; done
-    [ -f '${config_dir}/history.jsonl' ] && cat '${config_dir}/history.jsonl' || true
-  " 2>/dev/null || true)
+  if [ "$state" = "running" ]; then
+    jsonl_data=$(vm_exec docker exec "$name" bash -c "
+      find '${config_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+        | while IFS= read -r f; do cat \"\$f\"; done
+    " 2>/dev/null || true)
+  else
+    local tmp_dir="/tmp/sa-cost-$$-${name}"
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec mkdir -p "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}" "${tmp_dir}/" >/dev/null 2>&1 || true
+    jsonl_data=$(vm_exec bash -c "
+      find '${tmp_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+        | while IFS= read -r f; do cat \"\$f\"; done
+    " 2>/dev/null || true)
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  fi
 
   if [ -z "$jsonl_data" ]; then
-    warn "No session data found in $name."
+    warn "No session data found in $name." >&2
     return 0
   fi
 
   # Write python analyser to a temp file so we can pipe JSONL into it
   local py_script
-  py_script=$(mktemp /tmp/agent-cost-XXXXXX.py)
+  py_script=$(mktemp "${TMPDIR:-/tmp}/agent-cost.XXXXXX")
   trap 'rm -f "$py_script"' RETURN
 
   cat >"$py_script" <<'PYEOF'
-import sys, json, re
-
-# Pricing per 1M tokens (input, output)
-PRICES = {
-    "claude-opus-4-6":    (15.0, 75.0),
-    "claude-sonnet-4-6":  (3.0,  15.0),
-    "claude-haiku-4-5":   (0.80,  4.0),
-}
-DEFAULT_PRICE = (3.0, 15.0)
-
-totals_by_model = {}
+import sys, json
 
 for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
+    stats = json.loads(line)
+    break
+else:
+    stats = {"totals_by_model": {}, "grand_input": 0, "grand_output": 0, "grand_cost": 0.0}
 
-    # Usage may be top-level or nested under payload
-    usage = obj.get("usage") or (obj.get("payload") or {}).get("usage")
-    if not usage or not isinstance(usage, dict):
-        continue
-
-    model = (
-        obj.get("model")
-        or (obj.get("payload") or {}).get("model")
-        or "unknown"
-    )
-    # Normalise model name: strip date suffixes like -20250101
-    model_key = re.sub(r"-\d{8}$", "", model)
-
-    inp = int(usage.get("input_tokens", 0))
-    out = int(usage.get("output_tokens", 0))
-
-    if model_key not in totals_by_model:
-        totals_by_model[model_key] = [0, 0]
-    totals_by_model[model_key][0] += inp
-    totals_by_model[model_key][1] += out
-
+totals_by_model = stats.get("totals_by_model") or {}
 if not totals_by_model:
     print("No token usage found in session data.")
     sys.exit(0)
-
-grand_in = grand_out = grand_cost = 0.0
 
 print("")
 print("  Model                      Input         Output    Est. Cost")
 print("  " + "-" * 65)
 
 for model_key in sorted(totals_by_model):
-    inp, out = totals_by_model[model_key]
-    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
-    cost = (inp / 1_000_000) * price_in + (out / 1_000_000) * price_out
-    grand_in   += inp
-    grand_out  += out
-    grand_cost += cost
+    entry = totals_by_model[model_key]
+    inp = int(entry.get("input_tokens", 0))
+    out = int(entry.get("output_tokens", 0))
+    cost = float(entry.get("cost", 0.0))
     print(f"  {model_key:<26} {inp:>12,}  {out:>12,}    ${cost:>8.4f}")
 
 print("  " + "-" * 65)
-print(f"  {'TOTAL':<26} {int(grand_in):>12,}  {int(grand_out):>12,}    ${grand_cost:>8.4f}")
+print(f"  {'TOTAL':<26} {int(stats.get('grand_input', 0)):>12,}  {int(stats.get('grand_output', 0)):>12,}    ${float(stats.get('grand_cost', 0.0)):>8.4f}")
 print("")
 print(f"  Note: estimates use list pricing; cache tokens billed differently.")
 print("")
 PYEOF
 
-  echo "$jsonl_data" | python3 "$py_script"
+  printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 "$py_script"
 }
 
 
@@ -3051,17 +3018,16 @@ _output_get_jsonl() {
   local state="$2"
   local config_dir="$3"
 
-  local repo_display find_dir
+  local repo_display proj_slug
   repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "")
   repo_display=$(printf '%s' "$repo_display" | tr -d '[:space:]')
 
+  local -a search_paths=()
   if [ -n "$repo_display" ] && [ "$repo_display" != "-" ]; then
-    local proj_slug
     proj_slug=$(printf '%s' "$repo_display" | tr '/' '-')
-    find_dir="${config_dir}/projects/-workspace-${proj_slug}"
-  else
-    find_dir="$config_dir"
+    search_paths+=("${config_dir}/projects/-workspace-${proj_slug}")
   fi
+  search_paths+=("${config_dir}/sessions" "$config_dir")
 
   local created_at
   created_at=$(vm_exec docker inspect --format '{{.Created}}' "$name" 2>/dev/null || echo "")
@@ -3069,11 +3035,16 @@ _output_get_jsonl() {
   local match_script='
 import os, json, sys, glob
 container_created = sys.argv[1][:19]
-find_dir = sys.argv[2]
-files = glob.glob(os.path.join(find_dir, "*.jsonl"))
-if not files:
-    files = glob.glob(os.path.join(find_dir, "**", "*.jsonl"), recursive=True)
-files = [f for f in files if not f.endswith("history.jsonl") and "/subagents/" not in f]
+search_paths = [p for p in sys.argv[2:] if p]
+files = []
+seen = set()
+for base in search_paths:
+    for pattern in (os.path.join(base, "*.jsonl"), os.path.join(base, "**", "*.jsonl")):
+        for f in glob.glob(pattern, recursive=True):
+            if f.endswith("history.jsonl") or "/subagents/" in f or f in seen:
+                continue
+            seen.add(f)
+            files.append(f)
 best_file = None
 best_delta = float("inf")
 for f in files:
@@ -3102,17 +3073,155 @@ if best_file:
 '
 
   if [ "$state" = "running" ]; then
-    vm_exec docker exec "$name" python3 -c "$match_script" "$created_at" "$find_dir" 2>/dev/null
+    vm_exec docker exec "$name" python3 -c "$match_script" "$created_at" "${search_paths[@]}" 2>/dev/null
   else
     local tmp_dir
     tmp_dir="/tmp/sa-output-$$-${name}"
     vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
     vm_exec mkdir -p "$tmp_dir" >/dev/null 2>&1 || true
-    vm_exec docker cp "${name}:${find_dir}" "${tmp_dir}/" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}/sessions" "${tmp_dir}/sessions" >/dev/null 2>&1 || true
     vm_exec docker cp "${name}:${config_dir}/projects" "${tmp_dir}/projects/" >/dev/null 2>&1 || true
-    vm_exec python3 -c "$match_script" "$created_at" "$tmp_dir" 2>/dev/null
+    vm_exec docker cp "${name}:${config_dir}/history.jsonl" "${tmp_dir}/history.jsonl" >/dev/null 2>&1 || true
+    local -a tmp_search_paths=()
+    if [ -n "$repo_display" ] && [ "$repo_display" != "-" ]; then
+      tmp_search_paths+=("${tmp_dir}/projects/-workspace-${proj_slug}")
+    fi
+    tmp_search_paths+=("${tmp_dir}/sessions" "$tmp_dir")
+    vm_exec python3 -c "$match_script" "$created_at" "${tmp_search_paths[@]}" 2>/dev/null
     vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
   fi
+}
+
+_session_jsonl_last_message() {
+  python3 -c '
+import json, sys
+
+def extract_text(content):
+    parts = []
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if text and item.get("type") in {"output_text", "text"}:
+                parts.append(text)
+    elif isinstance(content, str) and content:
+        parts.append(content)
+    return "\n".join(parts)
+
+last_text = ""
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    if obj.get("type") == "assistant":
+        message = obj.get("message") or {}
+        text = extract_text(message.get("content", ""))
+        if text:
+            last_text = text
+        continue
+
+    if obj.get("type") == "response_item":
+        payload = obj.get("payload") or {}
+        if payload.get("type") == "message" and payload.get("role") == "assistant":
+            text = extract_text(payload.get("content", ""))
+            if text:
+                last_text = text
+        continue
+
+    if obj.get("type") == "event_msg":
+        payload = obj.get("payload") or {}
+        if payload.get("type") == "agent_message" and payload.get("message"):
+            last_text = payload["message"]
+
+print(last_text)
+'
+}
+
+_session_jsonl_cost_stats() {
+  python3 -c '
+import json, re, sys
+
+PRICES = {
+    # Anthropic
+    "claude-opus-4-6":   (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0,  15.0),
+    "claude-haiku-4-5":  (0.80,  4.0),
+    # OpenAI
+    "gpt-5.4":           (2.50,  10.0),
+    "gpt-5.2":           (2.50,  10.0),
+    "o3":                (10.0,  40.0),
+    "o4-mini":           (1.10,   4.40),
+}
+DEFAULT_PRICE = (3.0, 15.0)
+
+totals_by_model = {}
+model_hint = "unknown"
+latest_token_totals = None
+
+def normalise_model(model):
+    return re.sub(r"-\d{8}$", "", model or "unknown")
+
+def add_usage(model, input_tokens, output_tokens):
+    model_key = normalise_model(model)
+    inp = int(input_tokens or 0)
+    out = int(output_tokens or 0)
+    entry = totals_by_model.setdefault(model_key, {"input_tokens": 0, "output_tokens": 0, "cost": 0.0})
+    entry["input_tokens"] += inp
+    entry["output_tokens"] += out
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+    if obj.get("type") == "turn_context":
+        model_hint = payload.get("model") or obj.get("model") or model_hint
+    elif obj.get("type") == "session_meta":
+        model_hint = payload.get("model") or obj.get("model") or model_hint
+
+    usage = obj.get("usage") or payload.get("usage")
+    if isinstance(usage, dict):
+        add_usage(obj.get("model") or payload.get("model") or model_hint, usage.get("input_tokens"), usage.get("output_tokens"))
+        continue
+
+    if obj.get("type") == "event_msg" and payload.get("type") == "token_count":
+        info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
+        total_usage = info.get("total_token_usage") if isinstance(info.get("total_token_usage"), dict) else {}
+        if total_usage:
+            latest_token_totals = total_usage
+
+if not totals_by_model and latest_token_totals:
+    add_usage(model_hint, latest_token_totals.get("input_tokens"), latest_token_totals.get("output_tokens"))
+
+grand_input = 0
+grand_output = 0
+grand_cost = 0.0
+for model_key, entry in totals_by_model.items():
+    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
+    cost = (entry["input_tokens"] / 1_000_000) * price_in + (entry["output_tokens"] / 1_000_000) * price_out
+    entry["cost"] = cost
+    grand_input += entry["input_tokens"]
+    grand_output += entry["output_tokens"]
+    grand_cost += cost
+
+print(json.dumps({
+    "totals_by_model": totals_by_model,
+    "grand_input": grand_input,
+    "grand_output": grand_output,
+    "grand_cost": grand_cost,
+}, sort_keys=True))
+'
 }
 
 _output_get_logs() {
@@ -3171,32 +3280,35 @@ cmd_output() {
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  local state agent_type config_dir terminal_mode
+  local state agent_type config_dir terminal_mode repo_display
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
   terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
+  repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "-")
   case "$agent_type" in
     codex) config_dir="/home/agent/.codex" ;;
     *)     config_dir="/home/agent/.claude" ;;
   esac
 
+  # Prefer the labeled repo path; fall back to the first nested git checkout.
+  local workspace_cd
   # shellcheck disable=SC2016
-  local workspace_cd='cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace'
+  workspace_cd='if [ -n "${SA_REPO_DISPLAY:-}" ] && [ "${SA_REPO_DISPLAY}" != "-" ] && [ -d "/workspace/${SA_REPO_DISPLAY}" ]; then cd "/workspace/${SA_REPO_DISPLAY}"; else repo_dir="$(find /workspace -mindepth 2 -maxdepth 4 \( -type d -o -type f \) -name .git -exec dirname {} \; | head -1)"; if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi; fi'
 
   case "$mode" in
     diff)
       [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
-      vm_exec docker exec "$name" bash -c "$workspace_cd && git diff"
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff"
       ;;
 
     files)
       [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
-      vm_exec docker exec "$name" bash -c "$workspace_cd && git diff --name-only && git ls-files --others --exclude-standard"
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff --name-only && git ls-files --others --exclude-standard"
       ;;
 
     commits)
       [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
-      vm_exec docker exec "$name" bash -c "$workspace_cd && git log --oneline"
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git log --oneline"
       ;;
 
     json)
@@ -3207,27 +3319,7 @@ cmd_output() {
       jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
 
       if [ -n "$jsonl_data" ]; then
-        last_message=$(printf '%s\n' "$jsonl_data" | python3 -c "
-import json, sys
-last_text = ''
-for line in sys.stdin:
-    line = line.strip()
-    if not line: continue
-    try:
-        d = json.loads(line)
-        if d.get('type') == 'assistant':
-            msg = d.get('message', {})
-            if isinstance(msg, dict):
-                content = msg.get('content', '')
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get('text'):
-                            last_text = c['text']
-                elif isinstance(content, str) and content:
-                    last_text = content
-    except: pass
-print(last_text)
-" 2>/dev/null || true)
+        last_message=$(printf '%s\n' "$jsonl_data" | _session_jsonl_last_message 2>/dev/null || true)
       else
         if [ "$terminal_mode" = "none" ]; then
           last_message=$(_output_get_logs "$name")
@@ -3238,7 +3330,7 @@ print(last_text)
 
       if [ "$state" = "running" ]; then
         local raw_commits
-        raw_commits=$(vm_exec docker exec "$name" bash -c "$workspace_cd && git log --oneline 2>/dev/null" 2>/dev/null || true)
+        raw_commits=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git log --oneline 2>/dev/null" 2>/dev/null || true)
         commits_json=$(printf '%s\n' "$raw_commits" | python3 -c "
 import json, sys
 lines = [l for l in sys.stdin.read().strip().splitlines() if l]
@@ -3246,7 +3338,7 @@ print(json.dumps(lines))
 " 2>/dev/null || echo "[]")
 
         local raw_files
-        raw_files=$(vm_exec docker exec "$name" bash -c "$workspace_cd && { git diff --name-only; git ls-files --others --exclude-standard; } 2>/dev/null" 2>/dev/null || true)
+        raw_files=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && { git diff --name-only; git ls-files --others --exclude-standard; } 2>/dev/null" 2>/dev/null || true)
         files_json=$(printf '%s\n' "$raw_files" | python3 -c "
 import json, sys
 lines = [l for l in sys.stdin.read().strip().splitlines() if l]
@@ -3258,36 +3350,13 @@ print(json.dumps(lines))
       fi
 
       if [ -n "$jsonl_data" ]; then
-        cost_estimate=$(printf '%s\n' "$jsonl_data" | python3 -c "
-import sys, json, re
-PRICES = {
-    'claude-opus-4-6':   (15.0, 75.0),
-    'claude-sonnet-4-6': (3.0,  15.0),
-    'claude-haiku-4-5':  (0.80,  4.0),
-}
-DEFAULT_PRICE = (3.0, 15.0)
-totals = {}
-for line in sys.stdin:
-    line = line.strip()
-    if not line: continue
-    try:
-        obj = json.loads(line)
-    except: continue
-    usage = obj.get('usage') or (obj.get('payload') or {}).get('usage')
-    if not usage or not isinstance(usage, dict): continue
-    model = (obj.get('model') or (obj.get('payload') or {}).get('model') or 'unknown')
-    mk = re.sub(r'-[0-9]{8}$', '', model)
-    inp = int(usage.get('input_tokens', 0))
-    out = int(usage.get('output_tokens', 0))
-    if mk not in totals: totals[mk] = [0, 0]
-    totals[mk][0] += inp
-    totals[mk][1] += out
-if not totals: print(''); sys.exit(0)
-grand = 0.0
-for mk, (i, o) in totals.items():
-    pi, po = PRICES.get(mk, DEFAULT_PRICE)
-    grand += (i / 1_000_000) * pi + (o / 1_000_000) * po
-print('\${:.4f}'.format(grand))
+        cost_estimate=$(printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 -c "
+import json, sys
+stats = json.load(sys.stdin)
+if stats.get('totals_by_model'):
+    print('\${:.4f}'.format(stats.get('grand_cost', 0.0)))
+else:
+    print('')
 " 2>/dev/null || true)
       else
         cost_estimate=""
@@ -3324,27 +3393,7 @@ print(json.dumps(obj, indent=2))
         return 0
       fi
 
-      printf '%s\n' "$jsonl_data" | python3 -c "
-import json, sys
-last_text = ''
-for line in sys.stdin:
-    line = line.strip()
-    if not line: continue
-    try:
-        d = json.loads(line)
-        if d.get('type') == 'assistant':
-            msg = d.get('message', {})
-            if isinstance(msg, dict):
-                content = msg.get('content', '')
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get('text'):
-                            last_text = c['text']
-                elif isinstance(content, str) and content:
-                    last_text = content
-    except: pass
-print(last_text)
-" 2>/dev/null
+      printf '%s\n' "$jsonl_data" | _session_jsonl_last_message 2>/dev/null
       ;;
   esac
 }

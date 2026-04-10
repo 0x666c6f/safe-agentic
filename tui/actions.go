@@ -348,6 +348,16 @@ func (ac *Actions) logsTitle(name string, state *logsState) string {
 	return fmt.Sprintf("Logs: %s | [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, refresh, lines)
 }
 
+func sessionSearchDirs(configDir, repo string) []string {
+	dirs := make([]string, 0, 3)
+	if repo != "" && repo != "-" {
+		projSlug := strings.ReplaceAll(repo, "/", "-")
+		dirs = append(dirs, fmt.Sprintf("%s/projects/-workspace-%s", configDir, projSlug))
+	}
+	dirs = append(dirs, configDir+"/sessions", configDir)
+	return dirs
+}
+
 func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 	// Get the container's repo label to find the right project dir
 	repoLabel, _ := execOrb("docker", "inspect", "--format",
@@ -362,16 +372,7 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 	if atype == "claude" {
 		configDir = "/home/agent/.claude"
 	}
-
-	// Build the project directory path that Claude/Codex uses
-	// e.g. repo "0x666c6f/safe-agentic" → projects/-workspace-0x666c6f-safe-agentic/
-	var findDir string
-	if repo != "" && repo != "-" {
-		projSlug := strings.ReplaceAll(repo, "/", "-")
-		findDir = fmt.Sprintf("%s/projects/-workspace-%s", configDir, projSlug)
-	} else {
-		findDir = configDir
-	}
+	searchDirs := sessionSearchDirs(configDir, repo)
 
 	// Get container creation time to match the correct session file
 	createdOut, _ := execOrb("docker", "inspect", "--format", "{{.Created}}", name)
@@ -383,18 +384,20 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 
 	// Python script: find the session file whose first timestamp is closest
 	// to (and after) the container creation time
-	matchScript := fmt.Sprintf(`
+	matchScript := `
 import os, json, sys, glob
 container_created = sys.argv[1][:19]  # trim to seconds
-find_dir = sys.argv[2]
-tail_lines = sys.argv[3]
+search_dirs = [p for p in sys.argv[2:] if p]
 
-# Find all session jsonl files
-files = glob.glob(os.path.join(find_dir, '*.jsonl'))
-if not files:
-    # Fallback: search deeper
-    files = glob.glob(os.path.join(find_dir, '**', '*.jsonl'), recursive=True)
-files = [f for f in files if not f.endswith('history.jsonl') and '/subagents/' not in f]
+files = []
+seen = set()
+for find_dir in search_dirs:
+    for pattern in (os.path.join(find_dir, '*.jsonl'), os.path.join(find_dir, '**', '*.jsonl')):
+        for f in glob.glob(pattern, recursive=True):
+            if f.endswith('history.jsonl') or '/subagents/' in f or f in seen:
+                continue
+            seen.add(f)
+            files.append(f)
 
 best_file = None
 best_delta = float('inf')
@@ -425,11 +428,12 @@ if not best_file and files:
 
 if best_file:
     print(best_file)
-`)
+`
 
 	if running {
 		// Write match script, run via docker exec
-		result, err := execOrbTimeout(15*time.Second, "docker", "exec", name, "python3", "-c", matchScript, containerCreated, findDir, tailLines)
+		args := append([]string{"docker", "exec", name, "python3", "-c", matchScript, containerCreated}, searchDirs...)
+		result, err := execOrbTimeout(15*time.Second, args...)
 		if err != nil || strings.TrimSpace(string(result)) == "" {
 			return nil
 		}
@@ -447,13 +451,34 @@ if best_file:
 	execOrb("rm", "-rf", tmpDir)
 	defer execOrb("rm", "-rf", tmpDir)
 
-	execOrbLong("docker", "cp", name+":"+findDir, tmpDir+"/")
-	// Also try the full config dir as fallback
-	if _, err := execOrb("bash", "-c", fmt.Sprintf("ls %s/*.jsonl 2>/dev/null | head -1", tmpDir)); err != nil || true {
-		execOrbLong("docker", "cp", name+":"+configDir+"/projects", tmpDir+"/projects/")
+	for _, dir := range searchDirs {
+		switch {
+		case strings.HasSuffix(dir, "/sessions"):
+			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/sessions/")
+		case strings.Contains(dir, "/projects/"):
+			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/projects/")
+		case dir == configDir:
+			execOrbLong("docker", "cp", name+":"+configDir+"/history.jsonl", tmpDir+"/history.jsonl")
+		default:
+			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/")
+		}
 	}
 
-	result, _ := execOrbTimeout(15*time.Second, "python3", "-c", matchScript, containerCreated, tmpDir, tailLines)
+	localSearchDirs := make([]string, 0, len(searchDirs))
+	for _, dir := range searchDirs {
+		switch {
+		case strings.HasSuffix(dir, "/sessions"):
+			localSearchDirs = append(localSearchDirs, tmpDir+"/sessions")
+		case strings.Contains(dir, "/projects/"):
+			localSearchDirs = append(localSearchDirs, tmpDir+"/projects")
+		case dir == configDir:
+			localSearchDirs = append(localSearchDirs, tmpDir)
+		default:
+			localSearchDirs = append(localSearchDirs, tmpDir)
+		}
+	}
+	args := append([]string{"python3", "-c", matchScript, containerCreated}, localSearchDirs...)
+	result, _ := execOrbTimeout(15*time.Second, args...)
 	path := strings.TrimSpace(string(result))
 	if path == "" {
 		return nil
@@ -780,7 +805,10 @@ type sessionMeta struct {
 }
 
 type responseItem struct {
-	Item struct {
+	Type    string          `json:"type"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+	Item    struct {
 		Type    string          `json:"type"`
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
@@ -788,7 +816,10 @@ type responseItem struct {
 }
 
 type eventMsg struct {
-	Msg string `json:"msg"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Phase   string `json:"phase"`
+	Msg     string `json:"msg"`
 }
 
 // claudeEntry represents a Claude Code session JSONL line
@@ -886,11 +917,18 @@ func renderSessionLog(data []byte) string {
 		case "response_item":
 			var ri responseItem
 			json.Unmarshal(entry.Payload, &ri)
-			role := ri.Item.Role
-			if role == "" || ri.Item.Type != "message" {
+			itemType := ri.Type
+			role := ri.Role
+			content := ri.Content
+			if itemType == "" && ri.Item.Type != "" {
+				itemType = ri.Item.Type
+				role = ri.Item.Role
+				content = ri.Item.Content
+			}
+			if role == "" || itemType != "message" {
 				continue
 			}
-			text := extractText(ri.Item.Content)
+			text := extractText(content)
 			if text == "" {
 				continue
 			}
@@ -902,6 +940,22 @@ func renderSessionLog(data []byte) string {
 				label = "AGENT"
 			case "developer", "system":
 				label = "SYS"
+			}
+			fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
+
+		case "event_msg":
+			var em eventMsg
+			json.Unmarshal(entry.Payload, &em)
+			text := strings.TrimSpace(em.Message)
+			if text == "" {
+				text = strings.TrimSpace(em.Msg)
+			}
+			if text == "" {
+				continue
+			}
+			label := "INFO"
+			if em.Phase == "commentary" {
+				label = "AGENT"
 			}
 			fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
 		}
@@ -980,10 +1034,15 @@ func (ac *Actions) Cost() {
 	ac.app.footer.ShowStatus("Analyzing cost...", false)
 	go func() {
 		cmd := exec.Command("agent", "cost", name)
-		out, err := cmd.CombinedOutput()
+		out, err := cmd.Output()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Cost analysis failed: "+strings.TrimSpace(string(out)), true)
+				// Show stderr from the exit error if available
+				msg := strings.TrimSpace(string(out))
+				if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+					msg = strings.TrimSpace(string(ee.Stderr))
+				}
+				ac.app.footer.ShowStatus("Cost analysis failed: "+msg, true)
 				return
 			}
 			content := strings.TrimSpace(string(out))
