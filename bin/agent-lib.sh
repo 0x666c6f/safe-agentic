@@ -348,6 +348,17 @@ auth_volume_exists() {
   vm_exec docker volume inspect "$volume_name" >/dev/null 2>&1
 }
 
+volume_contains_file() {
+  local volume_name="$1"
+  local relative_path="$2"
+  local mountpoint=""
+
+  mountpoint=$(vm_exec docker volume inspect --format '{{.Mountpoint}}' "$volume_name" 2>/dev/null || true)
+  mountpoint=$(trim_whitespace "$mountpoint")
+  [ -n "$mountpoint" ] || return 1
+  vm_exec test -f "$mountpoint/$relative_path" >/dev/null 2>&1
+}
+
 managed_network_summary() {
   printf '%s\n' "managed: egress filtered, TCP 22/80/443 only"
 }

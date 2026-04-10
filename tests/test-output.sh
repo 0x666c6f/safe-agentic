@@ -40,6 +40,10 @@ case "$cmd" in
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *repo-display* ]]; then
       echo "${TEST_REPO_DISPLAY:--}"; exit 0
     fi
+    # terminal mode label
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *safe-agentic.terminal* ]]; then
+      echo "${TEST_TERMINAL_MODE:-tmux}"; exit 0
+    fi
     # container creation time
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ] && [[ "${4:-}" == *\.Created* ]]; then
       echo "2024-01-01T00:00:00.000000000Z"; exit 0
@@ -69,6 +73,10 @@ case "$cmd" in
       printf '%s\n' "${TEST_GIT_UNTRACKED:-}"
       exit 0
     fi
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "logs" ]; then
+      printf '%s\n' "${TEST_DOCKER_LOGS:-}"
+      exit 0
+    fi
     exit 0 ;;
   push|start|stop|create|ssh) ;;
   *) echo "unexpected orb command: $cmd" >&2; exit 1 ;;
@@ -95,10 +103,12 @@ run_ok() {
      TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
      TEST_AGENT_TYPE="${TEST_AGENT_TYPE:-claude}" \
      TEST_REPO_DISPLAY="${TEST_REPO_DISPLAY:--}" \
+     TEST_TERMINAL_MODE="${TEST_TERMINAL_MODE:-tmux}" \
      TEST_SAMPLE_JSONL="${TEST_SAMPLE_JSONL-$SAMPLE_JSONL}" \
      TEST_GIT_DIFF="${TEST_GIT_DIFF:-}" \
      TEST_GIT_LOG="${TEST_GIT_LOG:-}" \
      TEST_GIT_UNTRACKED="${TEST_GIT_UNTRACKED:-}" \
+     TEST_DOCKER_LOGS="${TEST_DOCKER_LOGS:-}" \
      "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     ((++pass))
   else
@@ -116,10 +126,12 @@ run_fails() {
      TEST_CONTAINER_STATE="${TEST_CONTAINER_STATE:-running}" \
      TEST_AGENT_TYPE="${TEST_AGENT_TYPE:-claude}" \
      TEST_REPO_DISPLAY="${TEST_REPO_DISPLAY:--}" \
+     TEST_TERMINAL_MODE="${TEST_TERMINAL_MODE:-tmux}" \
      TEST_SAMPLE_JSONL="${TEST_SAMPLE_JSONL-$SAMPLE_JSONL}" \
      TEST_GIT_DIFF="${TEST_GIT_DIFF:-}" \
      TEST_GIT_LOG="${TEST_GIT_LOG:-}" \
      TEST_GIT_UNTRACKED="${TEST_GIT_UNTRACKED:-}" \
+     TEST_DOCKER_LOGS="${TEST_DOCKER_LOGS:-}" \
      "$@" >"$OUT_LOG" 2>"$ERR_LOG"; then
     echo "FAIL: $label: expected non-zero exit" >&2
     ((++fail))
@@ -236,6 +248,24 @@ TEST_SAMPLE_JSONL=""
 run_ok "output no session data" bash "$REPO_DIR/bin/agent" output agent-claude-my-task
 assert_output_contains "No session data" "output no-data shows warning"
 TEST_SAMPLE_JSONL="$SAMPLE_JSONL"
+
+# =============================================================================
+# Background sessions without JSONL fall back to docker logs
+# =============================================================================
+: >"$ORB_LOG"
+TEST_SAMPLE_JSONL=""
+TEST_TERMINAL_MODE=none
+TEST_DOCKER_LOGS='[entrypoint] First run — authenticating via device code flow...'
+run_ok "output background logs fallback" bash "$REPO_DIR/bin/agent" output agent-claude-my-task
+assert_output_contains "device code flow" "output background shows logs when no session data"
+assert_log_contains "docker logs --tail 80 agent-claude-my-task" "output background reads docker logs"
+
+: >"$ORB_LOG"
+run_ok "output --json background logs fallback" bash "$REPO_DIR/bin/agent" output agent-claude-my-task --json
+assert_output_contains 'device code flow' "output --json background stores log excerpt"
+TEST_SAMPLE_JSONL="$SAMPLE_JSONL"
+TEST_TERMINAL_MODE=tmux
+TEST_DOCKER_LOGS=""
 
 # =============================================================================
 # Container not running → error for git-dependent modes

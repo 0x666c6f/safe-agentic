@@ -85,6 +85,89 @@ ensure_claude_support_files() {
   echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
 }
 
+inject_security_preamble() {
+  local agent_type="${AGENT_TYPE:-}"
+  local template="${SAFE_AGENTIC_PREAMBLE_TEMPLATE:-/usr/local/lib/safe-agentic/security-preamble.md}"
+  local marker="safe-agentic:security-preamble"
+
+  [ -f "$template" ] || return 0
+
+  # Build dynamic values from env vars set by bin/agent
+  local ssh_status="disabled"
+  [ "${SAFE_AGENTIC_SSH_ENABLED:-}" = "1" ] && ssh_status="enabled (forwarded from host)"
+
+  local aws_status="not injected"
+  [ -n "${SAFE_AGENTIC_AWS_CREDS_B64:-}" ] && aws_status="injected (profile: ${AWS_PROFILE:-default})"
+
+  local network_status="${SAFE_AGENTIC_NETWORK_MODE:-managed}"
+  case "$network_status" in
+    managed) network_status="managed (dedicated bridge, internet access)" ;;
+    none)    network_status="none (no network access)" ;;
+    custom)  network_status="custom network" ;;
+  esac
+
+  local docker_status="${SAFE_AGENTIC_DOCKER_MODE:-off}"
+  case "$docker_status" in
+    off)          docker_status="not available" ;;
+    dind)         docker_status="internal daemon (DinD)" ;;
+    host-socket)  docker_status="host daemon socket (dangerous)" ;;
+  esac
+
+  local resources="${SAFE_AGENTIC_RESOURCES:-memory=8g,cpus=4,pids=512}"
+
+  # Substitute placeholders
+  local preamble
+  preamble=$(sed \
+    -e "s|{{SSH_STATUS}}|$ssh_status|g" \
+    -e "s|{{AWS_STATUS}}|$aws_status|g" \
+    -e "s|{{NETWORK_STATUS}}|$network_status|g" \
+    -e "s|{{DOCKER_STATUS}}|$docker_status|g" \
+    -e "s|{{RESOURCES}}|$resources|g" \
+    "$template")
+
+  # Inject into the appropriate user-level config file
+  case "$agent_type" in
+    claude)
+      local claude_md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
+      mkdir -p "$(dirname "$claude_md")" 2>/dev/null || return 0
+      if [ -f "$claude_md" ]; then
+        # Skip if already injected (e.g., reuse-auth volume from previous run)
+        grep -q "$marker" "$claude_md" 2>/dev/null && return 0
+        # Append to existing user CLAUDE.md
+        printf '\n%s\n' "$preamble" >> "$claude_md"
+      else
+        printf '%s\n' "$preamble" > "$claude_md"
+      fi
+      ;;
+    codex)
+      local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+      local agents_md="$codex_dir/AGENTS.md"
+      mkdir -p "$codex_dir" 2>/dev/null || return 0
+      if [ -f "$agents_md" ]; then
+        grep -q "$marker" "$agents_md" 2>/dev/null && return 0
+        printf '\n%s\n' "$preamble" >> "$agents_md"
+      else
+        printf '%s\n' "$preamble" > "$agents_md"
+      fi
+      ;;
+    *)
+      # Shell / unknown: inject both for flexibility
+      local claude_md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
+      local agents_md="${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
+      mkdir -p "$(dirname "$claude_md")" 2>/dev/null || true
+      mkdir -p "$(dirname "$agents_md")" 2>/dev/null || true
+      for target in "$claude_md" "$agents_md"; do
+        if [ -f "$target" ]; then
+          grep -q "$marker" "$target" 2>/dev/null && continue
+          printf '\n%s\n' "$preamble" >> "$target"
+        else
+          printf '%s\n' "$preamble" > "$target"
+        fi
+      done
+      ;;
+  esac
+}
+
 start_tmux_session() {
   local session_name="$1"
   shift
@@ -146,6 +229,9 @@ case "${AGENT_TYPE:-}" in
   codex)  ensure_codex_config ;;
   *)      ensure_codex_config; ensure_claude_support_files; ensure_claude_config ;;
 esac
+
+# Inject security preamble into user-level CLAUDE.md / AGENTS.md
+inject_security_preamble
 
 # AWS credentials (written to tmpfs-backed ~/.aws)
 if [ -n "${SAFE_AGENTIC_AWS_CREDS_B64:-}" ]; then

@@ -435,5 +435,121 @@ run_entrypoint AGENT_TYPE=claude
 assert_status 0 "claude legacy metadata backup restore exits cleanly"
 assert_contains "$(cat "$HOME_DIR/.claude/.claude.json")" '2026-04-09T10:16:04.180Z' "claude legacy metadata restored from backup"
 
+# =============================================================================
+# Test: Security preamble creates CLAUDE.md when none exists
+# =============================================================================
+rm -f "$HOME_DIR/.claude/CLAUDE.md" "$HOME_DIR/.claude/settings.json"
+rm -f "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.codex/auth.json"
+PREAMBLE_FILE="$TMP_DIR/security-preamble.md"
+cat >"$PREAMBLE_FILE" <<'EOF'
+<!-- safe-agentic:security-preamble -->
+# Container Security Context
+- SSH agent: {{SSH_STATUS}}
+- AWS credentials: {{AWS_STATUS}}
+- Network: {{NETWORK_STATUS}}
+- Docker: {{DOCKER_STATUS}}
+- Resources: {{RESOURCES}}
+<!-- /safe-agentic:security-preamble -->
+EOF
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=$PREAMBLE_FILE" \
+  "SAFE_AGENTIC_NETWORK_MODE=managed" \
+  "SAFE_AGENTIC_DOCKER_MODE=off" \
+  "SAFE_AGENTIC_RESOURCES=memory=8g,cpus=4,pids=512"
+assert_status 0 "security preamble creates CLAUDE.md exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "safe-agentic:security-preamble" "security preamble marker present in CLAUDE.md"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "SSH agent: disabled" "SSH disabled by default in preamble"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "Network: managed" "network mode substituted in preamble"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "Docker: not available" "docker mode substituted in preamble"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "Resources: memory=8g,cpus=4,pids=512" "resources substituted in preamble"
+
+# =============================================================================
+# Test: Security preamble appends to existing CLAUDE.md
+# =============================================================================
+rm -f "$HOME_DIR/.claude/settings.json"
+cat >"$HOME_DIR/.claude/CLAUDE.md" <<'EOF'
+# My Project Notes
+Important user instructions here.
+EOF
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=$PREAMBLE_FILE" \
+  "SAFE_AGENTIC_SSH_ENABLED=1" \
+  "SAFE_AGENTIC_NETWORK_MODE=none" \
+  "SAFE_AGENTIC_DOCKER_MODE=dind"
+assert_status 0 "security preamble append exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "My Project Notes" "existing CLAUDE.md content preserved"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "safe-agentic:security-preamble" "security preamble appended to existing CLAUDE.md"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "SSH agent: enabled" "SSH enabled reflected in preamble"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "Network: none" "network none reflected in preamble"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "Docker: internal daemon" "docker dind reflected in preamble"
+
+# =============================================================================
+# Test: Security preamble not double-injected on re-run
+# =============================================================================
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=$PREAMBLE_FILE" \
+  "SAFE_AGENTIC_NETWORK_MODE=managed" \
+  "SAFE_AGENTIC_DOCKER_MODE=off"
+assert_status 0 "security preamble double-inject prevention exits cleanly"
+# Count occurrences of the marker — should be exactly 1 (from first injection)
+marker_count=$(grep -c "safe-agentic:security-preamble" "$HOME_DIR/.claude/CLAUDE.md" || true)
+if [ "$marker_count" -eq 2 ]; then
+  ((++pass))
+else
+  echo "FAIL: expected exactly 2 marker lines (open+close), got $marker_count" >&2
+  ((++fail))
+fi
+
+# =============================================================================
+# Test: Security preamble creates AGENTS.md for Codex
+# =============================================================================
+rm -f "$HOME_DIR/.codex/AGENTS.md" "$HOME_DIR/.codex/config.toml"
+rm -f "$HOME_DIR/.codex/auth.json"
+RUN_ARGS=(fix)
+run_entrypoint AGENT_TYPE=codex \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=$PREAMBLE_FILE" \
+  "SAFE_AGENTIC_SSH_ENABLED=1" \
+  "SAFE_AGENTIC_NETWORK_MODE=custom" \
+  "SAFE_AGENTIC_DOCKER_MODE=host-socket" \
+  "SAFE_AGENTIC_RESOURCES=memory=16g,cpus=8,pids=1024"
+assert_status 0 "security preamble creates AGENTS.md exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.codex/AGENTS.md")" "safe-agentic:security-preamble" "security preamble marker present in AGENTS.md"
+assert_contains "$(cat "$HOME_DIR/.codex/AGENTS.md")" "SSH agent: enabled" "SSH enabled in AGENTS.md preamble"
+assert_contains "$(cat "$HOME_DIR/.codex/AGENTS.md")" "Network: custom" "network custom in AGENTS.md preamble"
+assert_contains "$(cat "$HOME_DIR/.codex/AGENTS.md")" "Docker: host daemon" "docker host-socket in AGENTS.md preamble"
+assert_contains "$(cat "$HOME_DIR/.codex/AGENTS.md")" "memory=16g,cpus=8,pids=1024" "resources in AGENTS.md preamble"
+
+# =============================================================================
+# Test: Security preamble skipped when template file missing
+# =============================================================================
+rm -f "$HOME_DIR/.claude/CLAUDE.md" "$HOME_DIR/.claude/settings.json"
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=/nonexistent/path.md"
+assert_status 0 "missing template exits cleanly"
+if [ -f "$HOME_DIR/.claude/CLAUDE.md" ]; then
+  echo "FAIL: CLAUDE.md should not be created when template is missing" >&2
+  ((++fail))
+else
+  ((++pass))
+fi
+
+# =============================================================================
+# Test: AWS credentials reflected in security preamble
+# =============================================================================
+rm -f "$HOME_DIR/.claude/CLAUDE.md" "$HOME_DIR/.claude/settings.json"
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude \
+  "SAFE_AGENTIC_PREAMBLE_TEMPLATE=$PREAMBLE_FILE" \
+  "SAFE_AGENTIC_AWS_CREDS_B64=dGVzdA==" \
+  "AWS_PROFILE=my-profile" \
+  "SAFE_AGENTIC_NETWORK_MODE=managed" \
+  "SAFE_AGENTIC_DOCKER_MODE=off"
+assert_status 0 "AWS preamble exits cleanly"
+assert_contains "$(cat "$HOME_DIR/.claude/CLAUDE.md")" "AWS credentials: injected (profile: my-profile)" "AWS profile reflected in preamble"
+
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

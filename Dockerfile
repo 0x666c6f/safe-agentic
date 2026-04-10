@@ -255,6 +255,7 @@ RUN if id -u agent >/dev/null 2>&1; then \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 
 COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh
+COPY --chmod=644 config/security-preamble.md /usr/local/lib/safe-agentic/security-preamble.md
 COPY --chmod=755 bin/agent-session.sh /usr/local/lib/safe-agentic/agent-session.sh
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 

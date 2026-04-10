@@ -30,9 +30,10 @@ Full diagrams in `docs/architecture.md`.
 - **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that auto-detect SSH URLs (`git@`, `ssh://`) and delegate to `bin/agent spawn`.
 - **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`, installs socat for SSH relay and MCP bridging. Re-run on every `agent vm start`.
 - **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Codex CLI installed via `npm ci` with lockfile; Claude Code installed via official installer (version-pinned, verified by `claude --version`). Non-root `agent` user, no sudo, no supplemental groups.
-- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, writes AWS credentials if injected, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent inside tmux or starts interactive shell.
+- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, injects security preamble into `~/.claude/CLAUDE.md` (Claude) or `~/.codex/AGENTS.md` (Codex) with runtime context (SSH, network, Docker, resources), writes AWS credentials if injected, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent inside tmux or starts interactive shell.
 - **`bin/agent-session.sh`** — Agent session wrapper launched inside tmux. Handles Claude (`--dangerously-skip-permissions` via `script` PTY), Codex (`--yolo`), and shell modes. Detects resume vs fresh start via state file.
 - **`config/bashrc`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
+- **`config/security-preamble.md`** — Template for container security context injected into CLAUDE.md / AGENTS.md. Uses `{{PLACEHOLDER}}` tokens substituted at runtime by `inject_security_preamble()` in entrypoint.
 - **`package.json`, `package-lock.json`** — Pins Codex CLI version for reproducible `npm ci` installs.
 - **`op-env.sh`** — Template for optional 1Password secret injection. Not used for base OAuth flow.
 
@@ -143,6 +144,7 @@ agent audit [--lines N]                    # show operation log
 | Per-session auth (ephemeral volume) | `--reuse-auth` |
 | AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
+| Security preamble injected into CLAUDE.md / AGENTS.md | — |
 | Read-only rootfs | — |
 | cap-drop ALL + no-new-privileges | — |
 | Dedicated bridge network per container | `--network <name>` |

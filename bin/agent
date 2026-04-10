@@ -186,6 +186,7 @@ Notes:
   - --max-cost sets a cost budget label (shown in TUI cost overlay)
   - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
   - --background runs headless (no tmux, not attachable, output via docker logs)
+  - Codex background runs require existing auth in --reuse-auth; otherwise first-run device login blocks in logs
   - --aws injects credentials from ~/.aws/credentials for the given profile
   - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
   - Defaults file: ${DEFAULTS_FILE}
@@ -710,6 +711,18 @@ auto_attach_tmux_session() {
   attach_tmux_session "$name"
 }
 
+ensure_codex_background_auth_ready() {
+  local reuse_auth="$1"
+
+  if ! $reuse_auth; then
+    die "Codex --background requires saved auth. Re-run once without --background and with --reuse-auth to complete login, then retry."
+  fi
+
+  if ! auth_volume_exists "agent-codex-auth" || ! volume_contains_file "agent-codex-auth" "auth.json"; then
+    die "Codex --background requires saved auth in agent-codex-auth. Re-run once without --background --reuse-auth to complete login, then retry."
+  fi
+}
+
 attach_container_console() {
   local name="$1"
   local state="$2"
@@ -899,6 +912,9 @@ cmd_spawn() {
   ensure_vm_runtime_hardening
   if ! $dry_run; then
     ensure_local_image_present
+    if [ "$agent_type" = "codex" ] && $background; then
+      ensure_codex_background_auth_ready "$reuse_auth"
+    fi
   fi
 
   timestamp=$(date +%s)
@@ -1016,6 +1032,13 @@ cmd_spawn() {
     fi
   fi
   docker_cmd+=(--label "safe-agentic.docker=$docker_label")
+
+  # Security preamble metadata: tells entrypoint what flags are active
+  # so it can template the security preamble into CLAUDE.md / AGENTS.md
+  $enable_ssh && docker_cmd+=(-e "SAFE_AGENTIC_SSH_ENABLED=1")
+  docker_cmd+=(-e "SAFE_AGENTIC_NETWORK_MODE=$network_mode_label")
+  docker_cmd+=(-e "SAFE_AGENTIC_DOCKER_MODE=$docker_label")
+  docker_cmd+=(-e "SAFE_AGENTIC_RESOURCES=memory=${memory},cpus=${cpus},pids=${pids_limit}")
 
   if $auto_trust; then
     docker_cmd+=(-e "SAFE_AGENTIC_AUTO_TRUST=1")
@@ -3092,6 +3115,13 @@ if best_file:
   fi
 }
 
+_output_get_logs() {
+  local name="$1"
+  local lines="${2:-80}"
+
+  vm_exec docker logs --tail "$lines" "$name" 2>&1 | tr -d '\r'
+}
+
 cmd_output() {
   local topic="output"
   local name=""
@@ -3141,9 +3171,10 @@ cmd_output() {
   require_vm
   name=$(resolve_target_container "$topic" "$name" "$latest")
 
-  local state agent_type config_dir
+  local state agent_type config_dir terminal_mode
   state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
   agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
   case "$agent_type" in
     codex) config_dir="/home/agent/.codex" ;;
     *)     config_dir="/home/agent/.claude" ;;
@@ -3198,7 +3229,11 @@ for line in sys.stdin:
 print(last_text)
 " 2>/dev/null || true)
       else
-        last_message=""
+        if [ "$terminal_mode" = "none" ]; then
+          last_message=$(_output_get_logs "$name")
+        else
+          last_message=""
+        fi
       fi
 
       if [ "$state" = "running" ]; then
@@ -3277,6 +3312,14 @@ print(json.dumps(obj, indent=2))
       jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
 
       if [ -z "$jsonl_data" ]; then
+        if [ "$terminal_mode" = "none" ]; then
+          local log_data
+          log_data=$(_output_get_logs "$name")
+          if [ -n "$log_data" ]; then
+            printf '%s\n' "$log_data"
+            return 0
+          fi
+        fi
         warn "No session data found in $name."
         return 0
       fi

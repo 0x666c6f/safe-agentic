@@ -49,7 +49,7 @@ agent spawn <claude|codex> [options]
 | `--instructions-file PATH` | Load role context from a file | none |
 | `--on-exit 'CMD'` | Run a host command when agent finishes | none |
 | `--max-cost N` | Cost budget label | none |
-| `--background` | Headless mode — detach immediately after spawn | off |
+| `--background` | Headless mode — detach immediately after spawn. Codex needs pre-seeded `--reuse-auth`. | off |
 | `--auto-trust` | Skip the trust prompt on first run | off |
 
 ## Examples
@@ -110,6 +110,8 @@ agent spawn claude --background --auto-trust --ssh \
   --prompt "Fix the failing tests" \
   --on-exit "agent output --latest --json > /tmp/result.json"
 ```
+
+For Codex, background mode only works after one interactive `--reuse-auth` run has created `/home/agent/.codex/auth.json` in `agent-codex-auth`.
 
 ## Getting the repo URL from the current directory
 

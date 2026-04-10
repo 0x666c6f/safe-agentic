@@ -56,9 +56,21 @@ case "$cmd" in
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "volume" ]; then
       case "${3:-}" in
-        inspect) exit 1 ;;
+        inspect)
+          if [ "${TEST_CODEX_AUTH_READY:-0}" = "1" ]; then
+            if [ "${4:-}" = "--format" ]; then
+              echo "/var/lib/docker/volumes/agent-codex-auth/_data"
+            fi
+            exit 0
+          fi
+          exit 1
+          ;;
         create|rm) exit 0 ;;
       esac
+    fi
+    if [ "${1:-}" = "test" ] && [ "${2:-}" = "-f" ] && [[ "${3:-}" == */agent-codex-auth/_data/auth.json ]]; then
+      [ "${TEST_CODEX_AUTH_READY:-0}" = "1" ] && exit 0
+      exit 1
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ] && [ "${4:-}" = "docker" ] && [ "${5:-}" = "--host" ] && [[ "${6:-}" == *safe-agentic-docker/docker.sock ]] && [ "${7:-}" = "info" ]; then
       exit 0
@@ -463,6 +475,18 @@ prompt_codex_run="$(last_docker_run)"
 assert_contains "$prompt_codex_run" "safe-agentic:latest do stuff" "codex prompt as positional arg"
 
 # =============================================================================
+# Test: Codex background mode requires saved shared auth
+# =============================================================================
+: >"$ORB_LOG"
+assert_fails "codex background without saved auth blocked" "$REPO_DIR/bin/agent" spawn codex --background --reuse-auth --name bg-noauth --repo https://github.com/a/b.git
+assert_contains "$(cat "$ERR_LOG")" "Codex --background requires saved auth" "codex background auth guard message"
+assert_not_contains "$(cat "$ORB_LOG")" "docker run " "codex background auth guard skips docker run"
+
+TEST_CODEX_AUTH_READY=1 run_agent "$REPO_DIR/bin/agent" spawn codex --background --reuse-auth --name bg-auth --repo https://github.com/a/b.git >/dev/null 2>&1
+bg_auth_run="$(last_docker_run)"
+assert_contains "$bg_auth_run" "SAFE_AGENTIC_BACKGROUND=1" "codex background allowed with saved auth"
+
+# =============================================================================
 # Test: --prompt flag for claude appends -p "prompt" after image name
 # =============================================================================
 run_agent "$REPO_DIR/bin/agent" spawn claude --prompt 'do stuff' --name pc --repo https://github.com/a/b.git >/dev/null 2>&1
@@ -525,6 +549,23 @@ CODEX_HOME="$CODEX_CONFIG_HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_HOME" \
 shell_cfg_run="$(last_docker_run)"
 assert_not_contains "$shell_cfg_run" "SAFE_AGENTIC_CODEX_CONFIG_B64=" "shell no codex config env var"
 assert_not_contains "$shell_cfg_run" "SAFE_AGENTIC_CLAUDE_CONFIG_B64=" "shell no claude config env var"
+
+# =============================================================================
+# Test: Security preamble metadata env vars set for claude spawn
+# =============================================================================
+run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --name preamble1 --repo https://github.com/a/b.git >/dev/null 2>&1
+preamble_run="$(last_docker_run)"
+assert_contains "$preamble_run" "SAFE_AGENTIC_NETWORK_MODE=" "network mode env var present"
+assert_contains "$preamble_run" "SAFE_AGENTIC_DOCKER_MODE=" "docker mode env var present"
+assert_contains "$preamble_run" "SAFE_AGENTIC_RESOURCES=" "resources env var present"
+assert_not_contains "$preamble_run" "SAFE_AGENTIC_SSH_ENABLED=" "SSH env var absent when --ssh not used"
+
+# =============================================================================
+# Test: SSH enabled metadata env var set when --ssh flag used
+# =============================================================================
+run_agent_env bash "$REPO_DIR/bin/agent" spawn claude --ssh --name preamble2 --repo git@github.com:a/b.git >/dev/null 2>&1
+ssh_preamble_run="$(last_docker_run)"
+assert_contains "$ssh_preamble_run" "SAFE_AGENTIC_SSH_ENABLED=1" "SSH enabled env var present with --ssh"
 
 echo "$((pass + fail)) tests, $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -38,7 +38,7 @@ agent spawn <claude|codex> [options]
 | `--instructions-file PATH` | Load role context from a file | none |
 | `--on-exit 'CMD'` | Run a command on the host when agent finishes | none |
 | `--max-cost N` | Cost budget label (informational) | none |
-| `--background` | Headless mode — detach immediately after spawn | off |
+| `--background` | Headless mode — detach immediately after spawn. Codex requires pre-seeded `--reuse-auth`. | off |
 | `--auto-trust` | Skip the trust prompt on first run | off |
 | `--dry-run` | Show docker command without running | -- |
 
@@ -225,3 +225,5 @@ agent spawn claude --ssh --repo git@github.com:org/api.git \
 ```
 
 `--auto-trust` skips the interactive trust prompt — useful in CI or fleet manifests where the agent must start without user input.
+
+For Codex, `--background` only works after you have already completed `codex login` in the shared `agent-codex-auth` volume. Prime it once with an interactive `agent spawn codex --reuse-auth ...`, then reuse `--background`.
