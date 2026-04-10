@@ -65,6 +65,10 @@ agent spawn claude --ssh --template security-audit --repo git@github.com:org/rep
 agent spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
 agent spawn claude --background --auto-trust --on-exit 'agent output --latest --json > out.json' --repo ...
 
+# Quick start with smart defaults (auto-enables --ssh for SSH URLs, --reuse-auth)
+agent run git@github.com:org/repo.git "Fix the CI tests"
+agent run https://github.com/org/repo.git "Add unit tests" --type codex
+
 # Quick aliases (auto-detect SSH from URL)
 agent-claude git@github.com:org/repo.git
 agent-codex https://github.com/org/repo.git
@@ -72,6 +76,7 @@ agent-codex https://github.com/org/repo.git
 # Management
 agent list                     # shows running + stopped containers
 agent tui                      # k9s-style interactive dashboard (build: make -C tui)
+agent dashboard [--bind host:port]  # start web dashboard
 agent attach <name>            # reattach (restarts stopped containers)
 agent stop <name|--all>        # stop + remove
 agent cleanup                  # removes containers + managed networks (keeps auth)
@@ -111,11 +116,19 @@ agent spawn claude --repo https://... --network agent-isolated
 ```
 
 ```bash
+# Spawn flags (new in v2)
+#   --on-complete "cmd"     Run command on agent success
+#   --on-fail "cmd"         Run command on agent failure
+#   --notify targets        Notifications (terminal,slack,command:script)
+#   --ephemeral-auth        One-off session, don't reuse auth volume
+#   --max-cost N.NN         Kill agent if estimated cost exceeds budget
+
 # Workflow
 agent diff <name>|--latest [--stat]       # show git diff from agent working tree
 agent checkpoint create <name> [label]     # snapshot working tree
 agent checkpoint list <name>               # list snapshots
 agent checkpoint revert <name> <ref>       # revert to snapshot
+agent checkpoint fork <name> <new-name> [label]  # fork from checkpoint snapshot
 agent todo add <name> "text"               # add merge requirement
 agent todo list <name>                     # show todos
 agent todo check <name> <index>            # mark done
@@ -129,6 +142,7 @@ agent output --files <name>               # list changed files
 agent output --commits <name>             # git log
 agent output --json <name>                # all as JSON
 agent summary <name>|--latest             # one-screen overview
+agent replay <name>|--latest              # replay session from event log
 
 # Retry
 agent retry <name>|--latest [--feedback "text"]  # re-run with same config
@@ -143,10 +157,12 @@ agent config set|get|show|reset           # manage defaults
 
 # Fleet & Pipelines
 agent fleet manifest.yaml [--dry-run]      # spawn agents from manifest
+agent fleet status                         # show running fleet progress
 agent pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
 
 # Analytics
 agent cost <name>                          # estimate API spend
+agent cost --history [7d]                  # historical cost from audit log
 agent audit [--lines N]                    # show operation log
 ```
 
@@ -155,7 +171,7 @@ agent audit [--lines N]                    # show operation log
 | Default | Override |
 |---------|----------|
 | SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
-| Per-session auth (ephemeral volume) | `--reuse-auth` |
+| Shared auth volume (default) | `--ephemeral-auth` for one-off sessions |
 | AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
 | Security preamble injected into CLAUDE.md / AGENTS.md | — |
