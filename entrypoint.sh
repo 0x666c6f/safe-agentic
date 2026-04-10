@@ -252,7 +252,7 @@ fi
 # ---------------------------------------------------------------------------
 if [ -n "${REPOS:-}" ]; then
   # Support both comma and space delimiters (bash CLI used commas, Go CLI uses spaces)
-  local repos_normalized="${REPOS//,/ }"
+  repos_normalized="${REPOS//,/ }"
   IFS=' ' read -ra REPO_LIST <<< "$repos_normalized"
   for repo_url in "${REPO_LIST[@]}"; do
     repo_url=$(echo "$repo_url" | xargs)  # trim whitespace
