@@ -291,6 +291,12 @@ func executeSpawn(opts SpawnOpts) error {
 				cmd.AddEnv(k, v)
 			}
 		}
+		// Inject support files: CLAUDE.md, hooks/, commands/, statusline-command.sh
+		if envs, err := inject.ReadClaudeSupportFiles(claudeDir); err == nil {
+			for k, v := range envs {
+				cmd.AddEnv(k, v)
+			}
+		}
 	}
 	if opts.AgentType == "codex" || opts.AgentType == "shell" {
 		if envs, err := inject.ReadCodexConfig(codexHome); err == nil {

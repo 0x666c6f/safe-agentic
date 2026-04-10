@@ -360,8 +360,8 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 // specToSpawnOpts converts an AgentSpec from a fleet or pipeline manifest into
 // SpawnOpts suitable for executeSpawn.
 func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
-	var repos []string
-	if spec.Repo != "" {
+	repos := spec.Repos
+	if len(repos) == 0 && spec.Repo != "" {
 		repos = []string{spec.Repo}
 	}
 	return SpawnOpts{

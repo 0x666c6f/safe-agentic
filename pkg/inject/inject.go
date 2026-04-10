@@ -1,8 +1,12 @@
 package inject
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +44,111 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	}
 	envs["SAFE_AGENTIC_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
+}
+
+// ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
+// from configDir and returns them as SAFE_AGENTIC_CLAUDE_SUPPORT_B64.
+// The entrypoint extracts this into ~/.claude/ inside the container.
+func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
+	envs := make(map[string]string)
+
+	type entry struct {
+		path  string
+		isDir bool
+	}
+	var entries []entry
+
+	for _, name := range []string{"CLAUDE.md", "statusline-command.sh"} {
+		p := filepath.Join(configDir, name)
+		if _, err := os.Stat(p); err == nil {
+			entries = append(entries, entry{name, false})
+		}
+	}
+	for _, name := range []string{"hooks", "commands"} {
+		p := filepath.Join(configDir, name)
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			entries = append(entries, entry{name, true})
+		}
+	}
+
+	if len(entries) == 0 {
+		return envs, nil
+	}
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	for _, e := range entries {
+		fullPath := filepath.Join(configDir, e.path)
+		if e.isDir {
+			if err := tarDir(tw, configDir, e.path); err != nil {
+				tw.Close()
+				gw.Close()
+				return nil, fmt.Errorf("tar %s: %w", e.path, err)
+			}
+		} else {
+			if err := tarFile(tw, fullPath, e.path); err != nil {
+				tw.Close()
+				gw.Close()
+				return nil, fmt.Errorf("tar %s: %w", e.path, err)
+			}
+		}
+	}
+
+	tw.Close()
+	gw.Close()
+	envs["SAFE_AGENTIC_CLAUDE_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	return envs, nil
+}
+
+func tarFile(tw *tar.Writer, fullPath, name string) error {
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return err
+	}
+	hdr := &tar.Header{
+		Name: name,
+		Mode: 0644,
+		Size: int64(len(data)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err = tw.Write(data)
+	return err
+}
+
+func tarDir(tw *tar.Writer, baseDir, dirName string) error {
+	root := filepath.Join(baseDir, dirName)
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(baseDir, path)
+		if info.IsDir() {
+			hdr := &tar.Header{
+				Typeflag: tar.TypeDir,
+				Name:     rel + "/",
+				Mode:     0755,
+			}
+			return tw.WriteHeader(hdr)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		hdr := &tar.Header{
+			Name: rel,
+			Mode: 0644,
+			Size: int64(len(data)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		_, err = io.Copy(tw, bytes.NewReader(data))
+		return err
+	})
 }
 
 func ReadCodexConfig(codexHome string) (map[string]string, error) {

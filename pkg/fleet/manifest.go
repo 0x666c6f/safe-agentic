@@ -14,10 +14,11 @@ import (
 //	network, memory, cpus, aws, docker, reuse_gh_auth,
 //	depends_on, on_failure, retry, when, outputs
 type AgentSpec struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Repo        string `yaml:"repo"`
-	Prompt      string `yaml:"prompt"`
+	Name        string   `yaml:"name"`
+	Type        string   `yaml:"type"`
+	Repo        string   `yaml:"repo"`
+	Repos       []string `yaml:"repos"`
+	Prompt      string   `yaml:"prompt"`
 	SSH         bool   `yaml:"ssh"`
 	ReuseAuth   bool   `yaml:"reuse_auth"`
 	ReuseGHAuth bool   `yaml:"reuse_gh_auth"`
