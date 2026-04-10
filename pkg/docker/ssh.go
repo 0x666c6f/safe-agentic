@@ -27,22 +27,25 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 		return fmt.Errorf("SSH_AUTH_SOCK not set in VM. Run 'ssh-add' on the host first")
 	}
 
-	// Set up socat relay for userns-remap compatibility
-	relayScript := fmt.Sprintf(
-		"#!/bin/bash\nexec socat UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s\n",
-		sshRelaySocket, vmSocket)
+	// Set up socat relay for userns-remap compatibility.
+	// Only start if not already running — multiple spawns share the same relay.
+	_, relayExists := exec.Run(ctx, "test", "-S", sshRelaySocket)
+	if relayExists != nil {
+		relayScript := fmt.Sprintf(
+			"#!/bin/bash\nexec socat UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s\n",
+			sshRelaySocket, vmSocket)
 
-	// Kill existing relay, create relay script, start as daemon
-	setupCmd := fmt.Sprintf(
-		"pkill -f 'socat.*safe-agentic-ssh-agent' 2>/dev/null || true; "+
-			"rm -f %s; "+
-			"printf '%%s' '%s' > /tmp/safe-agentic-ssh-relay.sh; "+
-			"chmod +x /tmp/safe-agentic-ssh-relay.sh",
-		sshRelaySocket, relayScript)
+		setupCmd := fmt.Sprintf(
+			"pkill -f 'socat.*safe-agentic-ssh-agent' 2>/dev/null || true; "+
+				"rm -f %s; "+
+				"printf '%%s' '%s' > /tmp/safe-agentic-ssh-relay.sh; "+
+				"chmod +x /tmp/safe-agentic-ssh-relay.sh",
+			sshRelaySocket, relayScript)
 
-	exec.Run(ctx, "bash", "-c", setupCmd)
-	exec.Run(ctx, "start-stop-daemon", "--start", "--background",
-		"--exec", "/tmp/safe-agentic-ssh-relay.sh")
+		exec.Run(ctx, "bash", "-c", setupCmd)
+		exec.Run(ctx, "start-stop-daemon", "--start", "--background",
+			"--exec", "/tmp/safe-agentic-ssh-relay.sh")
+	}
 
 	// Wait for relay socket to appear (up to 1s)
 	relayOK := false
