@@ -127,3 +127,31 @@ func TestRemoveDinDRuntime_VolumesRemoved(t *testing.T) {
 		t.Fatalf("expected at least 2 docker volume rm calls, got %d", len(volCmds))
 	}
 }
+
+func TestCleanupAllDinD(t *testing.T) {
+	fake := orb.NewFake()
+	err := CleanupAllDinD(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("CleanupAllDinD() error = %v", err)
+	}
+	// Should have run docker rm and docker volume rm
+	rmCmds := fake.CommandsMatching("docker rm")
+	if len(rmCmds) == 0 {
+		t.Fatal("expected at least one docker rm command")
+	}
+	volCmds := fake.CommandsMatching("docker volume rm")
+	if len(volCmds) == 0 {
+		t.Fatal("expected at least one docker volume rm command")
+	}
+}
+
+func TestWaitForDinD_ContextCancel(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetError("docker exec", "not ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	err := waitForDinD(ctx, fake, "test-dind")
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+}

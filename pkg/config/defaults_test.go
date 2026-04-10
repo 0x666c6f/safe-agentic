@@ -174,6 +174,29 @@ func TestLoadDefaults_WhitespaceInBareValue(t *testing.T) {
 	}
 }
 
+func TestLoadDefaults_NoEqualsSign(t *testing.T) {
+	// A line with no '=' sign should return an error.
+	content := "SAFE_AGENTIC_DEFAULT_CPUS\n"
+	path := writeTemp(t, content)
+	_, err := LoadDefaults(path)
+	if err == nil {
+		t.Error("expected error for line without '=', got nil")
+	}
+}
+
+func TestLoadDefaults_OpenError(t *testing.T) {
+	// Create a file and remove read permission so Open fails with a non-IsNotExist error.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "defaults.sh")
+	if err := os.WriteFile(path, []byte("SAFE_AGENTIC_DEFAULT_CPUS=4\n"), 0o000); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	_, err := LoadDefaults(path)
+	if err == nil {
+		t.Error("expected error opening unreadable file, got nil")
+	}
+}
+
 func TestKeyAllowed(t *testing.T) {
 	allowed := []string{
 		"SAFE_AGENTIC_DEFAULT_CPUS",
@@ -218,6 +241,16 @@ func TestDefaultsPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	path := DefaultsPath()
 	expected := filepath.Join(dir, "safe-agentic", "defaults.sh")
+	if path != expected {
+		t.Errorf("DefaultsPath() = %q, want %q", path, expected)
+	}
+}
+
+func TestDefaultsPath_FallbackToHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := DefaultsPath()
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".config", "safe-agentic", "defaults.sh")
 	if path != expected {
 		t.Errorf("DefaultsPath() = %q, want %q", path, expected)
 	}

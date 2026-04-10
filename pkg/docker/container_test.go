@@ -150,3 +150,24 @@ func TestIsRunning_False(t *testing.T) {
 		t.Error("expected container to not be running")
 	}
 }
+
+func TestInspectLabel_Error(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetError("docker inspect", "not found")
+	_, err := InspectLabel(context.Background(), fake, "missing", "some-label")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestIsRunning_Error(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetError("docker inspect --format {{.State.Running}}", "not found")
+	running, err := IsRunning(context.Background(), fake, "missing")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if running {
+		t.Fatal("should not be running on error")
+	}
+}

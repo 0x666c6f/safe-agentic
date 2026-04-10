@@ -1,8 +1,20 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestDetectGitIdentity_Format(t *testing.T) {
+	result := DetectGitIdentity()
+	if result == "" {
+		t.Skip("git identity not configured on this machine")
+	}
+	// Must match "Name <email>" format
+	if !strings.Contains(result, "<") || !strings.Contains(result, ">") {
+		t.Errorf("DetectGitIdentity() = %q, doesn't match 'Name <email>' format", result)
+	}
+}
 
 func TestParseIdentity(t *testing.T) {
 	t.Run("valid identities", func(t *testing.T) {
