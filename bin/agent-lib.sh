@@ -819,3 +819,88 @@ prepare_network() {
     fi
   fi
 }
+
+# --- Budget Enforcement ---
+
+# Emit a structured event to a JSONL file.
+# If emit_event is already defined (e.g. by another module), skip redefinition.
+if ! declare -F emit_event >/dev/null 2>&1; then
+emit_event() {
+  local file="$1" event_type="$2" data="$3"
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$file")"
+  printf '{"ts":"%s","event":"%s","data":%s}\n' "$ts" "$event_type" "$data" >> "$file"
+}
+fi
+
+# Compute running cost from session JSONL files.
+# Prints cost as decimal string (e.g., "22.50").
+compute_running_cost() {
+  local jsonl_file="$1"
+  [ -f "$jsonl_file" ] || { echo "0.00"; return 0; }
+  python3 -c "
+import json, sys
+PRICES = {
+    'claude-opus-4-6':   (15.0, 75.0),
+    'claude-sonnet-4-6': (3.0, 15.0),
+    'claude-haiku-4-5':  (0.80, 4.0),
+    'gpt-5.4':           (2.50, 10.0),
+    'o3':                (10.0, 40.0),
+    'o4-mini':           (1.10, 4.40),
+}
+DEFAULT_PRICE = (3.0, 15.0)
+total = 0.0
+for line in open('$jsonl_file'):
+    line = line.strip()
+    if not line: continue
+    try:
+        obj = json.loads(line)
+        msg = obj.get('message', obj)
+        usage = msg.get('usage', {})
+        model = msg.get('model', '')
+        inp = usage.get('input_tokens', 0) + usage.get('cache_creation_input_tokens', 0)
+        out = usage.get('output_tokens', 0)
+        price = PRICES.get(model, DEFAULT_PRICE)
+        total += (inp / 1_000_000) * price[0] + (out / 1_000_000) * price[1]
+    except (json.JSONDecodeError, KeyError): continue
+print(f'{total:.2f}')
+" 2>/dev/null || echo "0.00"
+}
+
+# Check if running cost exceeds budget. Returns 0 if under, 1 if over.
+check_budget() {
+  local jsonl_file="$1" max_cost="$2"
+  local current_cost
+  current_cost=$(compute_running_cost "$jsonl_file")
+  python3 -c "import sys; sys.exit(0 if float('$current_cost') <= float('$max_cost') else 1)" 2>/dev/null
+}
+
+# Start background budget monitor for a container.
+# Polls session JSONL every 10s, kills agent if budget exceeded.
+start_budget_monitor() {
+  local container_name="$1" max_cost="$2" events_file="$3"
+  (
+    while true; do
+      sleep 10
+      local state
+      state=$(vm_exec docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || echo "gone")
+      [ "$state" = "running" ] || break
+      local tmp_jsonl
+      tmp_jsonl=$(mktemp)
+      vm_exec docker exec "$container_name" \
+        find /home/agent/.claude /home/agent/.codex -name '*.jsonl' -not -path '*/subagents/*' -exec cat {} + 2>/dev/null > "$tmp_jsonl" || true
+      if ! check_budget "$tmp_jsonl" "$max_cost"; then
+        local current_cost
+        current_cost=$(compute_running_cost "$tmp_jsonl")
+        warn "Budget exceeded for $container_name: \$$current_cost > \$$max_cost — stopping agent"
+        [ -n "$events_file" ] && emit_event "$events_file" "agent.budget_exceeded" \
+          "$(printf '{"name":"%s","estimated_cost":%s,"budget":%s}' "$container_name" "$current_cost" "$max_cost")" 2>/dev/null || true
+        vm_exec docker stop "$container_name" 2>/dev/null || true
+        rm -f "$tmp_jsonl"
+        break
+      fi
+      rm -f "$tmp_jsonl"
+    done
+  ) &
+}

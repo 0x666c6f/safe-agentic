@@ -1075,11 +1075,21 @@ cmd_spawn() {
     run_container_detached
     ok "Container: $container_name"
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      local events_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic"
+      local events_file="$events_dir/events.jsonl"
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
     auto_attach_tmux_session "$container_name"
   else
     run_container "$managed_network" "$network_name"
     ok "Container: $container_name"
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      local events_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic"
+      local events_file="$events_dir/events.jsonl"
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
   fi
 }
 
