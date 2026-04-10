@@ -40,6 +40,15 @@ func (d *DockerRunCmd) AddEphemeralVolume(dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,dst=%s", dst))
 }
 func (d *DockerRunCmd) AddTmpfs(path, size string, noexec, nosuid bool) {
+	d.addTmpfs(path, size, noexec, nosuid, 0, 0)
+}
+
+// AddTmpfsOwned adds a tmpfs mount owned by a specific uid/gid.
+func (d *DockerRunCmd) AddTmpfsOwned(path, size string, noexec, nosuid bool, uid, gid int) {
+	d.addTmpfs(path, size, noexec, nosuid, uid, gid)
+}
+
+func (d *DockerRunCmd) addTmpfs(path, size string, noexec, nosuid bool, uid, gid int) {
 	opts := "rw"
 	if noexec {
 		opts += ",noexec"
@@ -49,6 +58,12 @@ func (d *DockerRunCmd) AddTmpfs(path, size string, noexec, nosuid bool) {
 	}
 	if size != "" {
 		opts += ",size=" + size
+	}
+	if uid > 0 {
+		opts += fmt.Sprintf(",uid=%d", uid)
+	}
+	if gid > 0 {
+		opts += fmt.Sprintf(",gid=%d", gid)
 	}
 	d.tmpfs = append(d.tmpfs, fmt.Sprintf("%s:%s", path, opts))
 }
@@ -133,8 +148,8 @@ func AppendRuntimeHardening(cmd *DockerRunCmd, opts HardeningOpts) {
 	cmd.AddTmpfs("/var/tmp", "256m", true, true)
 	cmd.AddTmpfs("/run", "16m", true, true)
 	cmd.AddTmpfs("/dev/shm", "64m", true, true)
-	cmd.AddTmpfs("/home/agent/.config", "32m", true, false)
-	cmd.AddTmpfs("/home/agent/.ssh", "1m", true, false)
+	cmd.AddTmpfsOwned("/home/agent/.config", "32m", true, false, 1000, 1000)
+	cmd.AddTmpfsOwned("/home/agent/.ssh", "1m", true, false, 1000, 1000)
 	cmd.AddEphemeralVolume("/workspace")
 }
 
