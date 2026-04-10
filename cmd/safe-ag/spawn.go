@@ -266,15 +266,14 @@ func executeSpawn(opts SpawnOpts) error {
 	if opts.FleetVolume != "" && !opts.EphemeralAuth {
 		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
 		perContainerVol := containerName + "-auth"
-		// Create per-container volume and seed credentials from shared volume
+		// Create per-container volume and seed ALL contents from shared volume
 		if !opts.DryRun {
 			exec.Run(ctx, "docker", "volume", "create", perContainerVol)
-			// Copy credentials from shared auth volume
 			exec.Run(ctx, "docker", "run", "--rm",
 				"-v", sharedVol+":/src:ro",
 				"-v", perContainerVol+":/dst",
 				"alpine", "sh", "-c",
-				"cp -a /src/.credentials.json /src/.claude.json /src/settings.json /dst/ 2>/dev/null; true")
+				"cp -a /src/. /dst/ 2>/dev/null; true")
 		}
 		cmd.AddLabel(labels.AuthType, "fleet-isolated")
 		cmd.AddNamedVolume(perContainerVol, authDestination(opts.AgentType))
