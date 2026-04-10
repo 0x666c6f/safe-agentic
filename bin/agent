@@ -52,14 +52,18 @@ DEFAULT_CPUS="${SAFE_AGENTIC_DEFAULT_CPUS:-4}"
 DEFAULT_MEMORY="${SAFE_AGENTIC_DEFAULT_MEMORY:-8g}"
 DEFAULT_PIDS_LIMIT="${SAFE_AGENTIC_DEFAULT_PIDS_LIMIT:-512}"
 DEFAULT_NETWORK="${SAFE_AGENTIC_DEFAULT_NETWORK:-}"
-DEFAULT_REUSE_AUTH=false
-DEFAULT_REUSE_GH_AUTH=false
+DEFAULT_REUSE_AUTH=true
+DEFAULT_REUSE_GH_AUTH=true
 DEFAULT_SSH=false
 DEFAULT_DOCKER=false
 DEFAULT_DOCKER_SOCKET=false
 
-bool_is_true "${SAFE_AGENTIC_DEFAULT_REUSE_AUTH:-}" && DEFAULT_REUSE_AUTH=true
-bool_is_true "${SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH:-}" && DEFAULT_REUSE_GH_AUTH=true
+if [ -n "${SAFE_AGENTIC_DEFAULT_REUSE_AUTH:-}" ]; then
+  bool_is_true "$SAFE_AGENTIC_DEFAULT_REUSE_AUTH" && DEFAULT_REUSE_AUTH=true || DEFAULT_REUSE_AUTH=false
+fi
+if [ -n "${SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH:-}" ]; then
+  bool_is_true "$SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH" && DEFAULT_REUSE_GH_AUTH=true || DEFAULT_REUSE_GH_AUTH=false
+fi
 bool_is_true "${SAFE_AGENTIC_DEFAULT_SSH:-}" && DEFAULT_SSH=true
 bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER:-}" && DEFAULT_DOCKER=true
 bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET:-}" && DEFAULT_DOCKER_SOCKET=true
@@ -814,6 +818,11 @@ cmd_spawn() {
         ;;
       --reuse-auth)
         reuse_auth=true
+        shift
+        ;;
+      --ephemeral-auth|--no-reuse-auth)
+        reuse_auth=false
+        reuse_gh_auth=false
         shift
         ;;
       --reuse-gh-auth)
