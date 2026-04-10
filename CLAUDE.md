@@ -16,14 +16,14 @@ brew tap 0x666c6f/tap && brew install safe-agentic
 
 This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
 
-**From source:** Clone the repo and add `bin/` to your PATH. When running from source, the commands are `agent`, `agent-claude`, and `agent-codex` (via `bin/agent`).
+**From source:** Clone the repo, run `make build`, and add `bin/` to your PATH. The binary is `safe-ag`.
 
-All documentation below uses `agent` as the command name. Substitute `safe-ag` if installed via Homebrew.
+All documentation below uses `safe-ag` as the command name.
 
 ## Architecture
 
 ```
-macOS Host (bin/agent CLI)
+macOS Host (safe-ag Go CLI)
   └── OrbStack VM "safe-agentic" (Ubuntu 24.04, hardened)
        └── Docker containers (ephemeral, per-agent)
             ├── Read-only rootfs + tmpfs scratch
@@ -39,80 +39,94 @@ Full diagrams in `docs/architecture.md`.
 
 ## Key Files & Relationships
 
-- **`bin/agent`** — Host-side CLI dispatcher. All commands (`spawn`, `setup`, `update`, etc.) are `cmd_*` functions. Sources `bin/agent-lib.sh` for container/network helpers. Talks to VM via `orb run -m safe-agentic`.
-- **`bin/agent-lib.sh`** — Shared functions: input validation (`validate_name_component`, `validate_network_name`), network lifecycle (`create_managed_network`, `remove_managed_network`), container runtime construction (`build_container_runtime`, `append_runtime_hardening`), volume helpers. Docker commands built as bash arrays to prevent injection.
-- **`bin/agent-claude`, `bin/agent-codex`** — Quick aliases that auto-detect SSH URLs (`git@`, `ssh://`) and delegate to `bin/agent spawn`.
-- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack (blocks macOS mounts with tmpfs, removes `open`/`osascript`/`code`, masks OrbStack integration dirs), installs Docker CE with `userns-remap`, installs socat for SSH relay and MCP bridging. Re-run on every `agent vm start`.
-- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Codex CLI installed via `npm ci` with lockfile; Claude Code installed via official installer (version-pinned, verified by `claude --version`). Non-root `agent` user, no sudo, no supplemental groups.
-- **`entrypoint.sh`** — Container init: copies baked SSH config to tmpfs, writes git config from host env vars (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`), injects host config (`~/.codex/config.toml`, `~/.claude/settings.json`) if not already present in the auth volume, injects security preamble into `~/.claude/CLAUDE.md` (Claude) or `~/.codex/AGENTS.md` (Codex) with runtime context (SSH, network, Docker, resources), writes AWS credentials if injected, validates and clones repos via `repo_clone_path()` (rejects traversal/injection), launches agent inside tmux or starts interactive shell.
-- **`bin/agent-session.sh`** — Agent session wrapper launched inside tmux. Handles Claude (`--dangerously-skip-permissions` via `script` PTY), Codex (`--yolo`), and shell modes. Detects resume vs fresh start via state file.
-- **`config/bashrc`** — Shell environment inside containers. Modern tool aliases (rg, fd, bat, eza).
-- **`config/security-preamble.md`** — Template for container security context injected into CLAUDE.md / AGENTS.md. Uses `{{PLACEHOLDER}}` tokens substituted at runtime by `inject_security_preamble()` in entrypoint.
-- **`package.json`, `package-lock.json`** — Pins Codex CLI version for reproducible `npm ci` installs.
-- **`op-env.sh`** — Template for optional 1Password secret injection. Not used for base OAuth flow.
+### Go CLI (runs on macOS host)
+
+- **`cmd/safe-ag/`** — Cobra CLI binary. `main.go` (root command), `spawn.go` (spawn/run), `lifecycle.go` (list/attach/stop/cleanup/retry), `observe.go` (peek/output/summary/cost/audit/sessions/replay), `workflow.go` (diff/checkpoint/todo/pr/review), `fleet.go` (fleet/pipeline), `setup.go` (setup/update/vm/diagnose), `config_cmd.go` (config/template/mcp-login/aws-refresh).
+- **`pkg/orb/`** — `Executor` interface wrapping `orb run -m safe-agentic`. All Docker/VM commands go through this. `FakeExecutor` for testing.
+- **`pkg/docker/`** — `DockerRunCmd` builder (type-safe replacement for bash arrays), container/volume/network/SSH/DinD management.
+- **`pkg/validate/`** — Input validation: container names, network names, PIDs limits.
+- **`pkg/repourl/`** — URL parsing with traversal prevention.
+- **`pkg/config/`** — `defaults.sh` loading, git identity detection/parsing.
+- **`pkg/inject/`** — Base64 encoding, Claude/Codex/AWS config injection.
+- **`pkg/audit/`** — JSONL append-only audit log.
+- **`pkg/tmux/`** — Tmux session management, pane capture.
+- **`pkg/events/`** — Event emission, notification targets, budget monitoring.
+- **`pkg/cost/`** — API cost computation with model pricing table.
+- **`pkg/fleet/`** — YAML manifest parsing for fleet/pipeline orchestration.
+- **`pkg/labels/`** — All `safe-agentic.*` Docker label constants.
+
+### Container-side (runs inside Docker)
+
+- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack, installs Docker CE with `userns-remap`, installs socat for SSH relay.
+- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Non-root `agent` user, no sudo.
+- **`entrypoint.sh`** — Container init: SSH config, git config, host config injection, security preamble, repo cloning, agent launch.
+- **`bin/agent-session.sh`** — Agent session wrapper inside tmux. Handles Claude/Codex/shell modes.
+- **`config/bashrc`** — Shell environment inside containers.
+- **`config/security-preamble.md`** — Template for container security context.
+- **`package.json`, `package-lock.json`** — Pins Codex CLI version.
 
 ## Commands
 
 ```bash
 # First-time setup (creates VM, installs Docker, builds image)
-agent setup
+safe-ag setup
 
 # Spawn agents
-agent spawn claude --ssh --repo git@github.com:org/repo.git
-agent spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
-agent spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
-agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
-agent spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
-agent spawn claude --background --auto-trust --on-exit 'agent output --latest --json > out.json' --repo ...
+safe-ag spawn claude --ssh --repo git@github.com:org/repo.git
+safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
+safe-ag spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
+safe-ag spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+safe-ag spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
+safe-ag spawn claude --background --auto-trust --on-exit 'safe-ag output --latest --json > out.json' --repo ...
 
 # Quick start with smart defaults (auto-enables --ssh for SSH URLs, --reuse-auth)
-agent run git@github.com:org/repo.git "Fix the CI tests"
-agent run https://github.com/org/repo.git "Add unit tests" --type codex
+safe-ag run git@github.com:org/repo.git "Fix the CI tests"
+safe-ag run https://github.com/org/repo.git "Add unit tests" --type codex
 
 # Quick aliases (auto-detect SSH from URL)
-agent-claude git@github.com:org/repo.git
-agent-codex https://github.com/org/repo.git
+safe-ag run git@github.com:org/repo.git
+safe-ag run https://github.com/org/repo.git
 
 # Management
-agent list                     # shows running + stopped containers
-agent tui                      # k9s-style interactive dashboard (build: make -C tui)
-agent dashboard [--bind host:port]  # start web dashboard
-agent attach <name>            # reattach (restarts stopped containers)
-agent stop <name|--all>        # stop + remove
-agent cleanup                  # removes containers + managed networks (keeps auth)
+safe-ag list                     # shows running + stopped containers
+safe-ag tui                      # k9s-style interactive dashboard (build: make -C tui)
+safe-ag dashboard [--bind host:port]  # start web dashboard
+safe-ag attach <name>            # reattach (restarts stopped containers)
+safe-ag stop <name|--all>        # stop + remove
+safe-ag cleanup                  # removes containers + managed networks (keeps auth)
 
 # MCP OAuth login (token persists in auth volume)
-agent mcp-login linear
-agent mcp-login <container> notion
+safe-ag mcp-login linear
+safe-ag mcp-login <container> notion
 
 # Export session history
-agent sessions <container>
-agent sessions --latest ~/sessions/
+safe-ag sessions <container>
+safe-ag sessions --latest ~/sessions/
 
 # Peek at agent output without attaching
-agent peek <container>                 # last 30 lines of tmux pane
-agent peek --latest --lines 50         # more lines
+safe-ag peek <container>                 # last 30 lines of tmux pane
+safe-ag peek --latest --lines 50         # more lines
 
 # AWS credentials
-agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:org/repo.git
-agent aws-refresh <container>              # refresh expired credentials
-agent aws-refresh --latest my-profile      # refresh with different profile
+safe-ag spawn claude --ssh --aws my-aws-profile --repo git@github.com:org/repo.git
+safe-ag aws-refresh <container>              # refresh expired credentials
+safe-ag aws-refresh --latest my-profile      # refresh with different profile
 
 # Image rebuild
-agent update                   # cached build
-agent update --quick           # bust only AI CLI layer
-agent update --full            # no cache
+safe-ag update                   # cached build
+safe-ag update --quick           # bust only AI CLI layer
+safe-ag update --full            # no cache
 
 # VM management
-agent vm ssh                   # debug the VM
-agent vm start                 # start + re-harden
-agent vm stop
+safe-ag vm ssh                   # debug the VM
+safe-ag vm start                 # start + re-harden
+safe-ag vm stop
 
 # Resource tuning
-agent spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
+safe-ag spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
 
 # Untrusted repos (no SSH, no internet)
-agent spawn claude --repo https://... --network agent-isolated
+safe-ag spawn claude --repo https://... --network agent-isolated
 ```
 
 ```bash
@@ -124,46 +138,46 @@ agent spawn claude --repo https://... --network agent-isolated
 #   --max-cost N.NN         Kill agent if estimated cost exceeds budget
 
 # Workflow
-agent diff <name>|--latest [--stat]       # show git diff from agent working tree
-agent checkpoint create <name> [label]     # snapshot working tree
-agent checkpoint list <name>               # list snapshots
-agent checkpoint revert <name> <ref>       # revert to snapshot
-agent checkpoint fork <name> <new-name> [label]  # fork from checkpoint snapshot
-agent todo add <name> "text"               # add merge requirement
-agent todo list <name>                     # show todos
-agent todo check <name> <index>            # mark done
-agent pr <name> [--title T --base B]       # create GitHub PR
-agent review <name> [--base B]             # AI code review
+safe-ag diff <name>|--latest [--stat]       # show git diff from agent working tree
+safe-ag checkpoint create <name> [label]     # snapshot working tree
+safe-ag checkpoint list <name>               # list snapshots
+safe-ag checkpoint revert <name> <ref>       # revert to snapshot
+safe-ag checkpoint fork <name> <new-name> [label]  # fork from checkpoint snapshot
+safe-ag todo add <name> "text"               # add merge requirement
+safe-ag todo list <name>                     # show todos
+safe-ag todo check <name> <index>            # mark done
+safe-ag pr <name> [--title T --base B]       # create GitHub PR
+safe-ag review <name> [--base B]             # AI code review
 
 # Output & inspection
-agent output <name>|--latest              # last agent message
-agent output --diff <name>                # git diff
-agent output --files <name>               # list changed files
-agent output --commits <name>             # git log
-agent output --json <name>                # all as JSON
-agent summary <name>|--latest             # one-screen overview
-agent replay <name>|--latest              # replay session from event log
+safe-ag output <name>|--latest              # last agent message
+safe-ag output --diff <name>                # git diff
+safe-ag output --files <name>               # list changed files
+safe-ag output --commits <name>             # git log
+safe-ag output --json <name>                # all as JSON
+safe-ag summary <name>|--latest             # one-screen overview
+safe-ag replay <name>|--latest              # replay session from event log
 
 # Retry
-agent retry <name>|--latest [--feedback "text"]  # re-run with same config
+safe-ag retry <name>|--latest [--feedback "text"]  # re-run with same config
 
 # Templates
-agent template list                       # list built-in + custom templates
-agent template show <name>                # print template prompt
-agent template create <name>              # create custom template
+safe-ag template list                       # list built-in + custom templates
+safe-ag template show <name>                # print template prompt
+safe-ag template create <name>              # create custom template
 
 # Config
-agent config set|get|show|reset           # manage defaults
+safe-ag config set|get|show|reset           # manage defaults
 
 # Fleet & Pipelines
-agent fleet manifest.yaml [--dry-run]      # spawn agents from manifest
-agent fleet status                         # show running fleet progress
-agent pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
+safe-ag fleet manifest.yaml [--dry-run]      # spawn agents from manifest
+safe-ag fleet status                         # show running fleet progress
+safe-ag pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
 
 # Analytics
-agent cost <name>                          # estimate API spend
-agent cost --history [7d]                  # historical cost from audit log
-agent audit [--lines N]                    # show operation log
+safe-ag cost <name>                          # estimate API spend
+safe-ag cost --history [7d]                  # historical cost from audit log
+safe-ag audit [--lines N]                    # show operation log
 ```
 
 ## Security Model
@@ -189,57 +203,49 @@ Unsafe Docker flags (`--privileged`, `host` network, `--` passthrough) are block
 ## Testing
 
 ```bash
-# Run all tests (27 suites, 714 assertions)
-bash tests/run-all.sh
+# Run Go tests (13 packages, 156+ tests)
+make test
 
-# Run a single suite
+# Run all tests (Go + legacy bash)
+make test && bash tests/run-all.sh
+
+# Run a single Go package
+go test ./pkg/docker/ -v
+
+# Run a single bash suite
 bash tests/test-docker-cmd.sh
-
-# Syntax check only
-bash tests/test-syntax.sh
 ```
 
-Test files in `tests/`:
-- `test-syntax.sh` — `bash -n` on all scripts
-- `test-validation.sh` — name and network input validation
-- `test-repo-clone-path.sh` — URL parsing, traversal, injection
-- `test-docker-cmd.sh` — security flags, volumes, SSH, git identity
+Go test packages in `pkg/` and `cmd/safe-ag/`:
+- `pkg/validate` — name, network, PIDs validation
+- `pkg/orb` — Executor interface and FakeExecutor
+- `pkg/repourl` — URL parsing, traversal prevention
+- `pkg/config` — defaults loading, identity parsing
+- `pkg/inject` — base64, config injection
+- `pkg/audit` — JSONL audit log
+- `pkg/docker` — DockerRunCmd, container, volume, network, SSH, DinD
+- `pkg/tmux` — session management
+- `pkg/events` — event emission, notifications, budget
+- `pkg/cost` — model pricing, cost computation
+- `pkg/fleet` — YAML manifest parsing
+- `cmd/safe-ag` — spawn parity, container name resolution, retry reconstruction
+
+Legacy bash tests in `tests/` (for entrypoint, Dockerfile, VM setup — things that still run in bash):
 - `test-dockerfile.sh` — checksums, no curl|bash, non-root user
 - `test-entrypoint.sh` — git config, clone validation, agent launch
-- `test-entrypoint-runtime.sh` — runtime entrypoint behavior
 - `test-vm-setup.sh` — mount blocking, userns-remap, fstab
-- `test-cli-dispatch.sh` — help, errors, aliases, multi-repo
-- `test-agent-lifecycle.sh` — attach, stop, cleanup, custom networks
-- `test-management-commands.sh` — management command coverage
-- `test-update.sh` — tracked-only build context, --quick/--full
-- `test-audit.sh` — audit logging
-- `test-checkpoint.sh` — checkpoint create/list/revert
-- `test-copy-command.sh` — file copy commands
-- `test-cost.sh` — cost estimation
-- `test-diagnose.sh` — diagnostic commands
-- `test-diff.sh` — diff display
-- `test-fleet.sh` — fleet manifest parsing and spawning
-- `test-lifecycle-scripts.sh` — safe-agentic.json lifecycle scripts
-- `test-pipeline.sh` — pipeline YAML parsing and execution
-- `test-pr.sh` — PR creation
-- `test-review.sh` — code review command
-- `test-todo.sh` — todo management
-- `test-live-integration.sh` — real VM/Docker smoke tests (optional, skip-aware)
-- `test-live-agent-clis.sh` — live agent CLI tests (optional)
-- `agent-cli-security.sh` — end-to-end security regressions
-
-Tests use a fake `orb` binary to capture docker commands without a real VM.
+- `test-live-integration.sh` — real VM/Docker smoke tests (optional)
 
 ## Conventions
 
-- All bash scripts use `set -euo pipefail`.
-- Docker commands built as bash arrays (`local -a docker_cmd=(...)`) to prevent injection.
-- VM operations go through `vm_exec()` / `orb run -m "$VM_NAME"`.
+- Go CLI uses cobra for commands, `pkg/orb.Executor` interface for all VM/Docker interaction.
+- `DockerRunCmd` builder replaces bash `docker_cmd=()` arrays with type-safe methods.
+- All container/network names validated via `pkg/validate` before use.
+- Repo clone paths validated by `pkg/repourl.ClonePath()`: rejects traversal, dot-prefixed names, special characters.
+- Tests use `orb.FakeExecutor` — no real OrbStack/Docker needed.
+- Container-side scripts (entrypoint, agent-session) remain bash — they run inside Docker where Go isn't installed.
 - Dockerfile uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]` and verifies all downloads (SHA256 or GPG).
-- Read-only rootfs pattern: bake configs into `.ssh.baked/`, entrypoint copies to tmpfs at runtime.
-- Repo clone paths validated by `repo_clone_path()`: rejects traversal, dot-prefixed names, special characters; only `https://` and `ssh://` URL schemes plus scp-style `git@host:org/repo`.
 - Build context uses `git ls-files -c` filtered by `test -e` — only tracked files that exist on disk.
-- Input validation: container names via `validate_name_component`, network names via `validate_network_name` (blocks `host`, `bridge`, `container:*`).
 
 ## Documentation
 
@@ -275,13 +281,13 @@ Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
 4. Packages tarball, creates GitHub Release with changelog
 5. Updates Homebrew tap (`0x666c6f/homebrew-tap`) with new formula
 
-**Version injection:** `bin/agent` has `VERSION="dev"` at the top. The release workflow replaces it with the real version via `sed` in the tarball. `agent --version` prints `safe-agentic vX.Y.Z`.
+**Version injection:** `cmd/safe-ag/main.go` has `var Version = "dev"`. The release workflow injects the real version via `-ldflags "-X main.Version=X.Y.Z"`. `safe-ag --version` prints `safe-agentic vX.Y.Z`.
 
 **No release?** If all commits since last tag are `docs:`, `chore:`, `ci:`, or `test:`, no release is created.
 
 ## Known Limitations
 
-- OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `agent vm start`.
+- OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `safe-ag vm start`.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
 - Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
 - Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.

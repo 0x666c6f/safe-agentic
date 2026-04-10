@@ -1,4 +1,4 @@
-.PHONY: build build-tui test test-go test-bash clean
+.PHONY: build build-all build-tui install test test-go test-bash clean
 
 VERSION ?= dev
 
@@ -8,13 +8,20 @@ build:
 build-tui:
 	go build -o bin/agent-tui ./tui
 
+build-all: build build-tui
+
+install: build
+	cp bin/safe-ag /usr/local/bin/safe-ag
+
 test: test-go
 
 test-go:
-	go test ./... -v
+	go test ./...
 
 test-bash:
 	bash tests/run-all.sh
+
+test-all: test-go test-bash
 
 clean:
 	rm -f bin/safe-ag bin/agent-tui
