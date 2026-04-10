@@ -65,6 +65,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	cleanupTestContainers()
+	cleanupDetContainers()
 	os.Exit(code)
 }
 
