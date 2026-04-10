@@ -908,6 +908,21 @@ cmd_spawn() {
     ensure_ssh_for_repos "$enable_ssh"
   fi
 
+  # Auto-detect git identity from host ~/.gitconfig if no identity was set
+  if [[ -z "${GIT_AUTHOR_NAME:-}" ]]; then
+    local detected_identity
+    detected_identity=$(detect_git_identity)
+    if [ -n "$detected_identity" ]; then
+      GIT_AUTHOR_NAME="${detected_identity%%<*}"
+      GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME% }"  # trim trailing space
+      GIT_AUTHOR_EMAIL="${detected_identity#*<}"
+      GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL%>}"
+      GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+      GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+      export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+    fi
+  fi
+
   require_cmd orb
   require_vm
   ensure_vm_runtime_hardening
@@ -1171,6 +1186,21 @@ cmd_shell() {
     ensure_ssh_for_repos "$enable_ssh" "${repos[@]}"
   else
     ensure_ssh_for_repos "$enable_ssh"
+  fi
+
+  # Auto-detect git identity from host ~/.gitconfig if no identity was set
+  if [[ -z "${GIT_AUTHOR_NAME:-}" ]]; then
+    local detected_identity
+    detected_identity=$(detect_git_identity)
+    if [ -n "$detected_identity" ]; then
+      GIT_AUTHOR_NAME="${detected_identity%%<*}"
+      GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME% }"  # trim trailing space
+      GIT_AUTHOR_EMAIL="${detected_identity#*<}"
+      GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL%>}"
+      GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+      GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+      export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+    fi
   fi
 
   require_cmd orb
