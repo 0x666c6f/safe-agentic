@@ -231,6 +231,12 @@ case "${AGENT_TYPE:-}" in
   *)      ensure_codex_config; ensure_claude_support_files; ensure_claude_config ;;
 esac
 
+# Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/
+# which places .claude.json at ~/.claude/.claude.json. Symlink so both paths work.
+if [ -f "$HOME/.claude/.claude.json" ] && [ ! -e "$HOME/.claude.json" ]; then
+  ln -sf "$HOME/.claude/.claude.json" "$HOME/.claude.json" 2>/dev/null || true
+fi
+
 # Inject security preamble into user-level CLAUDE.md / AGENTS.md
 inject_security_preamble
 
@@ -245,7 +251,9 @@ fi
 # Clone repositories
 # ---------------------------------------------------------------------------
 if [ -n "${REPOS:-}" ]; then
-  IFS=',' read -ra REPO_LIST <<< "$REPOS"
+  # Support both comma and space delimiters (bash CLI used commas, Go CLI uses spaces)
+  local repos_normalized="${REPOS//,/ }"
+  IFS=' ' read -ra REPO_LIST <<< "$repos_normalized"
   for repo_url in "${REPO_LIST[@]}"; do
     repo_url=$(echo "$repo_url" | xargs)  # trim whitespace
     clone_path=$(repo_clone_path "$repo_url") || {
