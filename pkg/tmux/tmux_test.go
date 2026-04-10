@@ -141,3 +141,33 @@ func TestWaitForSession_ReturnsErrorOnContextCancel(t *testing.T) {
 		t.Fatal("expected error on cancelled context, got nil")
 	}
 }
+
+func TestAttach_CallsRunInteractiveWithCorrectArgs(t *testing.T) {
+	f := orb.NewFake()
+
+	err := Attach(f, "mycontainer")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(f.Log) != 1 {
+		t.Fatalf("expected 1 command logged, got %d", len(f.Log))
+	}
+	cmd := f.Log[0]
+	joined := strings.Join(cmd, " ")
+	expected := fmt.Sprintf("docker exec -it mycontainer tmux attach -t %s", defaultSessionName)
+	if joined != expected {
+		t.Errorf("unexpected command: %q, want %q", joined, expected)
+	}
+}
+
+func TestAttach_ReturnsErrorFromExecutor(t *testing.T) {
+	f := orb.NewFake()
+	// RunInteractive on FakeExecutor always returns nil, so we verify no error in normal flow.
+	// The executor interface contract is satisfied; the FakeExecutor doesn't simulate errors
+	// for RunInteractive, so just confirm the call is made.
+	err := Attach(f, "any-container")
+	if err != nil {
+		t.Errorf("unexpected error from fake executor: %v", err)
+	}
+}

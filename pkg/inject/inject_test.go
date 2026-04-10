@@ -126,3 +126,131 @@ func TestReadAWSCredentialsMissingProfile(t *testing.T) {
 		t.Error("expected error for missing profile, got nil")
 	}
 }
+
+func TestReadAWSCredentialsMissingFile(t *testing.T) {
+	_, err := ReadAWSCredentials("/nonexistent/path/credentials", "default")
+	if err == nil {
+		t.Error("expected error for missing credentials file, got nil")
+	}
+}
+
+func TestReadAWSCredentialsForwardsRegionEnvVars(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "credentials")
+	content := "[my-profile]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+	if err := os.WriteFile(credPath, []byte(content), 0600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+	t.Setenv("AWS_REGION", "us-west-2")
+
+	envs, err := ReadAWSCredentials(credPath, "my-profile")
+	if err != nil {
+		t.Fatalf("ReadAWSCredentials error: %v", err)
+	}
+
+	if envs["AWS_DEFAULT_REGION"] != "us-east-1" {
+		t.Errorf("AWS_DEFAULT_REGION = %q, want %q", envs["AWS_DEFAULT_REGION"], "us-east-1")
+	}
+	if envs["AWS_REGION"] != "us-west-2" {
+		t.Errorf("AWS_REGION = %q, want %q", envs["AWS_REGION"], "us-west-2")
+	}
+}
+
+func TestEncodeFileB64_ReadsAndEncodesFile(t *testing.T) {
+	dir := t.TempDir()
+	content := "hello, this is a test file\nwith multiple lines\n"
+	path := filepath.Join(dir, "testfile.txt")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	encoded, err := EncodeFileB64(path)
+	if err != nil {
+		t.Fatalf("EncodeFileB64 error: %v", err)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if string(decoded) != content {
+		t.Errorf("decoded content = %q, want %q", string(decoded), content)
+	}
+}
+
+func TestEncodeFileB64_MissingFile(t *testing.T) {
+	_, err := EncodeFileB64("/nonexistent/path/file.txt")
+	if err == nil {
+		t.Error("expected error for missing file, got nil")
+	}
+}
+
+func TestReadCodexConfig_WithConfigToml(t *testing.T) {
+	dir := t.TempDir()
+	content := `model = "gpt-5.2"
+model_reasoning_effort = "xhigh"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	envs, err := ReadCodexConfig(dir)
+	if err != nil {
+		t.Fatalf("ReadCodexConfig error: %v", err)
+	}
+
+	val, ok := envs["SAFE_AGENTIC_CODEX_CONFIG_B64"]
+	if !ok {
+		t.Fatal("expected SAFE_AGENTIC_CODEX_CONFIG_B64 key in result")
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(val)
+	if err != nil {
+		t.Fatalf("decode env var value: %v", err)
+	}
+	if string(decoded) != content {
+		t.Errorf("decoded content = %q, want %q", string(decoded), content)
+	}
+}
+
+func TestReadCodexConfig_MissingDir(t *testing.T) {
+	envs, err := ReadCodexConfig("/nonexistent/path/that/does/not/exist")
+	if err != nil {
+		t.Fatalf("ReadCodexConfig missing dir returned error: %v", err)
+	}
+	if len(envs) != 0 {
+		t.Errorf("expected empty map for missing dir, got %v", envs)
+	}
+}
+
+func TestReadClaudeConfig_PermissionDenied(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("cannot test permission denial as root")
+	}
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{}`), 0000); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+	_, err := ReadClaudeConfig(dir)
+	if err == nil {
+		t.Error("expected error for unreadable settings.json, got nil")
+	}
+}
+
+func TestReadCodexConfig_PermissionDenied(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("cannot test permission denial as root")
+	}
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-5.2\"\n"), 0000); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+	_, err := ReadCodexConfig(dir)
+	if err == nil {
+		t.Error("expected error for unreadable config.toml, got nil")
+	}
+}

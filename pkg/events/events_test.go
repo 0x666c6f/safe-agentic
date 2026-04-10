@@ -125,3 +125,52 @@ func TestDefaultEventsPath(t *testing.T) {
 		t.Errorf("expected basename events.jsonl, got %q", filepath.Base(path))
 	}
 }
+
+func TestDefaultEventsPath_WithXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg/config")
+	path := DefaultEventsPath()
+	expected := "/custom/xdg/config/safe-agentic/events.jsonl"
+	if path != expected {
+		t.Errorf("DefaultEventsPath = %q, want %q", path, expected)
+	}
+}
+
+func TestDefaultEventsPath_WithoutXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := DefaultEventsPath()
+	if filepath.Base(path) != "events.jsonl" {
+		t.Errorf("expected basename events.jsonl, got %q", filepath.Base(path))
+	}
+	if filepath.Base(filepath.Dir(path)) != "safe-agentic" {
+		t.Errorf("expected parent dir safe-agentic, got %q", filepath.Base(filepath.Dir(path)))
+	}
+}
+
+func TestEmit_FailsWhenPathIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// Create a directory at the path where we'd normally create the events file
+	targetPath := filepath.Join(dir, "events.jsonl")
+	if err := os.Mkdir(targetPath, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Emit should fail because the "file" path is actually a directory
+	err := Emit(targetPath, "test.event", nil)
+	if err == nil {
+		t.Error("expected error when event file path is a directory, got nil")
+	}
+}
+
+func TestEmit_FailsWhenMkdirAllFails(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file where MkdirAll would need to create a directory
+	blockingFile := filepath.Join(dir, "blocking")
+	if err := os.WriteFile(blockingFile, []byte("x"), 0644); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	// Path under the blocking file — MkdirAll will fail because blocking is a file not a dir
+	path := filepath.Join(blockingFile, "subdir", "events.jsonl")
+	err := Emit(path, "test.event", nil)
+	if err == nil {
+		t.Error("expected error when MkdirAll fails, got nil")
+	}
+}
