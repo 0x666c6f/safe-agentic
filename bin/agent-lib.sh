@@ -819,3 +819,16 @@ prepare_network() {
     fi
   fi
 }
+
+# Auto-detect git identity from host's global config.
+# Prints "Name <email>" if both are configured, empty string otherwise.
+detect_git_identity() {
+  local git_name git_email
+  git_name=$(git config --global user.name 2>/dev/null || echo "")
+  git_email=$(git config --global user.email 2>/dev/null || echo "")
+  if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+    echo "$git_name <$git_email>"
+  else
+    echo ""
+  fi
+}
