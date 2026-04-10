@@ -239,6 +239,30 @@ Agent skills in `.claude/skills/` and `.codex/skills/`:
 - `agent-manage` — list/attach/stop/cleanup
 - `agent-setup` — first-time setup, rebuild, troubleshooting
 
+## Commit Style & Releases
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Commit prefixes drive automated releases:
+
+| Prefix | Effect | Example |
+|--------|--------|---------|
+| `feat:` | minor bump | `v0.1.0` → `v0.2.0` |
+| `fix:` | patch bump | `v0.1.0` → `v0.1.1` |
+| `feat!:` or `BREAKING CHANGE` in body | major bump | `v0.1.0` → `v1.0.0` |
+| `docs:`, `chore:`, `ci:`, `test:` | no release | — |
+
+Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
+
+**Automated pipeline:** Every push to `main` triggers `.github/workflows/release.yml`:
+1. Runs full CI suite
+2. Computes semver from commit prefixes since last tag
+3. Builds universal macOS TUI binary (`lipo` amd64 + arm64)
+4. Packages tarball, creates GitHub Release with changelog
+5. Updates Homebrew tap (`0x666c6f/homebrew-tap`) with new formula
+
+**Version injection:** `bin/agent` has `VERSION="dev"` at the top. The release workflow replaces it with the real version via `sed` in the tarball. `agent --version` prints `safe-agentic vX.Y.Z`.
+
+**No release?** If all commits since last tag are `docs:`, `chore:`, `ci:`, or `test:`, no release is created.
+
 ## Known Limitations
 
 - OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `agent vm start`.

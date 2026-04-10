@@ -229,9 +229,21 @@ Repo-local skills currently cover:
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 
-## Commit Guidance
+## Commit Style & Releases
 
-- use Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, etc.
-- keep commits focused
-- before handoff, prefer full gate over partial checks
-- screenshots usually unnecessary; terminal evidence better
+Use [Conventional Commits](https://www.conventionalcommits.org/). Commit prefixes drive automated semver releases:
+
+| Prefix | Effect |
+|--------|--------|
+| `feat:` | minor bump |
+| `fix:` | patch bump |
+| `feat!:` or `BREAKING CHANGE` in body | major bump |
+| `docs:`, `chore:`, `ci:`, `test:` | no release |
+
+Scopes optional: `feat(tui):`, `fix(ci):`, etc.
+
+Every push to `main` triggers `.github/workflows/release.yml` which runs CI, computes version, builds a universal macOS TUI binary, creates a GitHub Release with changelog, and updates the Homebrew tap (`0x666c6f/homebrew-tap`).
+
+`bin/agent` has `VERSION="dev"` at line 5. The release workflow injects the real version. `agent --version` prints `safe-agentic vX.Y.Z`.
+
+Keep commits focused. Before handoff, prefer full gate over partial checks.
