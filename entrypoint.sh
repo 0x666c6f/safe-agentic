@@ -33,11 +33,12 @@ ensure_codex_config() {
 
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
-  [ -f "$codex_config" ] && return 0
+  # Always overwrite config from host if injected
   if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
     echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
+  [ -f "$codex_config" ] && return 0
 
   cat >"$codex_config" 2>/dev/null <<'EOF' || true
 approval_policy = "never"
@@ -62,11 +63,12 @@ ensure_claude_config() {
     fi
   fi
 
-  [ -f "$claude_config" ] && return 0
+  # Always overwrite settings from host if injected (even if volume has stale copy)
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
+  [ -f "$claude_config" ] && return 0
 
   cat >"$claude_config" 2>/dev/null <<'EOF' || true
 {
@@ -359,6 +361,12 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
+    # Decode base64 prompt from Go CLI if present
+    if [ -n "${SAFE_AGENTIC_PROMPT_B64:-}" ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+      mkdir -p "$SESSION_STATE_DIR"
+      echo "$SAFE_AGENTIC_PROMPT_B64" | base64 -d > "$SESSION_STATE_DIR/pending-prompt"
+    fi
+
     # Auto-accept trust prompt and/or send pending prompt via tmux keystrokes.
     if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       (
