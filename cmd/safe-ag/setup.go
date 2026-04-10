@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"safe-agentic/pkg/orb"
-
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +60,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		fmt.Println("✓ VM safe-agentic already exists")
 	}
 
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 
 	// Step 4: Copy and run setup script.
 	fmt.Println()
@@ -118,7 +116,7 @@ func init() {
 
 func runUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 
 	buildArgs := []string{"docker", "build", "-t", "safe-agentic:latest", "."}
 
@@ -173,7 +171,7 @@ func init() {
 }
 
 func runVMSSH(cmd *cobra.Command, args []string) error {
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 	return orbRunner.RunInteractive()
 }
 
@@ -260,7 +258,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 
 	// 3. Check Docker running in VM.
 	_, dockerErr := orbRunner.Run(ctx, "docker", "info")

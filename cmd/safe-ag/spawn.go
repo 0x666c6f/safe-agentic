@@ -14,7 +14,6 @@ import (
 	"safe-agentic/pkg/events"
 	"safe-agentic/pkg/inject"
 	"safe-agentic/pkg/labels"
-	"safe-agentic/pkg/orb"
 	"safe-agentic/pkg/repourl"
 	"safe-agentic/pkg/tmux"
 	"safe-agentic/pkg/validate"
@@ -151,7 +150,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 
 func executeSpawn(opts SpawnOpts) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	// Validation
 	switch opts.AgentType {

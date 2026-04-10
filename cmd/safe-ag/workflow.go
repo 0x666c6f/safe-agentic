@@ -39,7 +39,7 @@ func init() {
 
 func runDiff(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -89,7 +89,7 @@ func init() {
 
 func runCheckpointCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := args[0]
 	label := "snapshot"
@@ -140,7 +140,7 @@ func init() {
 
 func runCheckpointList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -179,7 +179,7 @@ func init() {
 
 func runCheckpointRevert(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := args[0]
 	ref := args[1]
@@ -263,7 +263,7 @@ func init() {
 
 func runTodoAdd(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := args[0]
 	text := args[1]
@@ -303,7 +303,7 @@ func init() {
 
 func runTodoList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -370,7 +370,7 @@ func runTodoUncheck(cmd *cobra.Command, args []string) error {
 
 func setTodoDone(args []string, done bool) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := args[0]
 	var idx int
@@ -428,7 +428,7 @@ func init() {
 
 func runPR(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -480,7 +480,7 @@ func init() {
 
 func runReview(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {

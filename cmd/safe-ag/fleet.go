@@ -102,7 +102,7 @@ func runFleet(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	// Create shared fleet volume
 	if _, err := exec.Run(ctx, "docker", "volume", "create",
@@ -140,7 +140,7 @@ var fleetStatusCmd = &cobra.Command{
 
 func runFleetStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	out, err := exec.Run(ctx, "docker", "ps", "-a",
 		"--filter", "label=safe-agentic.fleet",
@@ -259,7 +259,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	copy(remaining, m.Stages)
 
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	for len(remaining) > 0 {
 		// Find stages ready to run (all depends_on satisfied)

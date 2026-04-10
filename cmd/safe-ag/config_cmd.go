@@ -13,7 +13,6 @@ import (
 	"safe-agentic/pkg/docker"
 	"safe-agentic/pkg/inject"
 	"safe-agentic/pkg/labels"
-	"safe-agentic/pkg/orb"
 
 	"github.com/spf13/cobra"
 )
@@ -498,13 +497,13 @@ func runMCPLogin(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 2 {
 		container := args[1]
-		orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+		orbRunner := newExecutor()
 		return orbRunner.RunInteractive("docker", "exec", "-it", container, "mcp-login", service)
 	}
 
 	// Resolve the most recent running container, if any.
 	ctx := context.Background()
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 	name, err := docker.ResolveTarget(ctx, orbRunner, "--latest")
 	if err == nil {
 		fmt.Printf("Logging in to MCP service %q in container %s…\n", service, name)
@@ -537,7 +536,7 @@ func init() {
 
 func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	orbRunner := &orb.OrbExecutor{VMName: "safe-agentic"}
+	orbRunner := newExecutor()
 
 	target := ""
 	profileArg := ""

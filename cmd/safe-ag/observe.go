@@ -41,7 +41,7 @@ func init() {
 
 func runPeek(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -105,7 +105,7 @@ func init() {
 
 func runOutput(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -190,7 +190,7 @@ func init() {
 
 func runSummary(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -264,7 +264,7 @@ func init() {
 
 func runCost(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	if costHistory != "" {
 		return runCostHistory(ctx, exec, costHistory)
@@ -522,7 +522,7 @@ func init() {
 
 func runSessions(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	dest := ""
@@ -631,7 +631,7 @@ func init() {
 
 func runReplay(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {

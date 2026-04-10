@@ -32,7 +32,7 @@ func init() {
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	var format string
 	if listJSON {
@@ -74,7 +74,7 @@ func init() {
 
 func runAttach(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
@@ -151,7 +151,7 @@ func init() {
 
 func runStop(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	if stopAll {
 		return stopAllContainers(ctx, exec)
@@ -228,7 +228,7 @@ func init() {
 
 func runCleanup(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	// 1. Stop all running agent containers
 	runningOut, _ := exec.Run(ctx, "docker", "ps",
@@ -299,7 +299,7 @@ func init() {
 
 func runRetry(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	exec := &orb.OrbExecutor{VMName: "safe-agentic"}
+	exec := newExecutor()
 
 	target := ""
 	if len(args) > 0 {
