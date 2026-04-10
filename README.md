@@ -63,6 +63,20 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 - Modern CLI: ripgrep, fd, bat, eza, zoxide, fzf, jq, yq, delta, gh, socat
 - Runtimes: Node.js 22, pnpm, Bun, Python 3.12, Go 1.23
 
+## Installation
+
+**Homebrew (recommended):**
+
+```bash
+brew tap 0x666c6f/tap && brew install safe-agentic
+```
+
+This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
+
+**From source:** Clone the repo, add `bin/` to your PATH, and use `agent`, `agent-claude`, `agent-codex`.
+
+> The rest of this README uses `agent` as the command name. Substitute `safe-ag` if installed via Homebrew.
+
 ## Quick Start
 
 ```bash
@@ -155,10 +169,7 @@ agent spawn claude --repo <untrusted-repo> --network agent-isolated
 2. **1Password Desktop App** (for SSH keys):
    - Settings → Developer → Enable "Use the SSH Agent"
    - SSH key for GitHub configured in 1Password
-3. **PATH**: Add `safe-agentic/bin` to your shell:
-   ```bash
-   export PATH="$PATH:/path/to/safe-agentic/bin"
-   ```
+3. **CLI**: Install via Homebrew (see [Installation](#installation) above), or add `safe-agentic/bin` to your PATH for source installs
 
 ## Setup
 

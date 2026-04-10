@@ -6,6 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An isolated environment for running AI coding agents (Claude Code, Codex) inside an OrbStack VM with per-agent Docker containers. The design philosophy is **safe by default** — dangerous features (SSH forwarding, auth persistence) require explicit opt-in flags.
 
+## Installation
+
+**Homebrew (recommended):**
+
+```bash
+brew tap 0x666c6f/tap && brew install safe-agentic
+```
+
+This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
+
+**From source:** Clone the repo and add `bin/` to your PATH. When running from source, the commands are `agent`, `agent-claude`, and `agent-codex` (via `bin/agent`).
+
+All documentation below uses `agent` as the command name. Substitute `safe-ag` if installed via Homebrew.
+
 ## Architecture
 
 ```

@@ -2,6 +2,8 @@
 
 > See [architecture.md](architecture.md) for system diagrams and sequence flows.
 
+> **Homebrew users:** When installed via `brew install safe-agentic`, the commands are `safe-ag`, `safe-ag-claude`, and `safe-ag-codex` instead of `agent`, `agent-claude`, and `agent-codex`. All flags and subcommands are identical. Run `safe-ag --version` to check the installed version.
+
 ## Commands at a glance
 
 | Command | What it does |

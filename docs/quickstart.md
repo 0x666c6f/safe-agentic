@@ -2,23 +2,33 @@
 
 Get a sandboxed Claude Code or Codex session in under 5 minutes.
 
-## 1. Install prerequisites
+## 1. Install
+
+**Option A: Homebrew (recommended)**
 
 ```bash
 brew install orbstack
+brew tap 0x666c6f/tap && brew install safe-agentic
 ```
+
+This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Verify with `safe-ag --version`.
+
+**Option B: From source**
+
+```bash
+brew install orbstack
+# Clone the repo, then add bin/ to your PATH:
+export PATH="$PATH:/path/to/safe-agentic/bin"
+```
+
+When running from source, the commands are `agent`, `agent-claude`, and `agent-codex`.
 
 Enable 1Password SSH agent (optional, needed for private repos):
 **1Password → Settings → Developer → "Use the SSH Agent"**
 
-## 2. Add to PATH
+> **Note:** The rest of this guide uses `agent` as the command name. Substitute `safe-ag` if installed via Homebrew.
 
-```bash
-# Add to ~/.zshrc or ~/.bashrc
-export PATH="$PATH:/path/to/safe-agentic/bin"
-```
-
-## 3. One-time setup
+## 2. One-time setup
 
 ```bash
 agent setup
@@ -26,7 +36,7 @@ agent setup
 
 This creates a hardened OrbStack VM, installs Docker inside it, and builds the agent image. Takes ~5 minutes on first run.
 
-## 4. Spawn an agent
+## 3. Spawn an agent
 
 ```bash
 # Public repo (no SSH needed)
@@ -44,7 +54,7 @@ agent-claude --reuse-auth --identity 'You <you@example.com>' git@github.com:myor
 
 That's it. The agent launches inside a hardened container with your repo cloned. Claude and Codex use `tmux` for reattach. On first run, you'll see an OAuth URL — open it in your browser to log in.
 
-## 5. When you're done
+## 4. When you're done
 
 If you're in a tmux-backed agent session, detach and leave it running with `Ctrl-b d`. If the session exits, the container persists and you can reattach with `agent attach --latest`. To remove containers:
 
