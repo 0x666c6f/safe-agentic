@@ -485,6 +485,41 @@ remove_managed_network() {
   vm_exec docker network rm "$network_name" >/dev/null 2>&1 || true
 }
 
+# --- Notifications ---
+
+# Send a notification via a specific sink type.
+# Usage: send_notification <type> <target> <agent_name> <status> [details]
+send_notification() {
+  local ntype="$1" target="$2" agent_name="$3" status="$4" details="${5:-}"
+  case "$ntype" in
+    terminal)
+      if command -v osascript &>/dev/null; then
+        osascript -e "display notification \"Agent $agent_name: $status\" with title \"safe-agentic\"" 2>/dev/null || true
+      elif command -v notify-send &>/dev/null; then
+        notify-send "safe-agentic" "Agent $agent_name: $status" 2>/dev/null || true
+      fi
+      ;;
+    slack)
+      local webhook_url="${target:-}"
+      [ -n "$webhook_url" ] && curl -s -X POST -H "Content-Type: application/json" \
+        -d "{\"text\":\"Agent $agent_name: $status. $details\"}" "$webhook_url" 2>/dev/null || true
+      ;;
+    command:*|command)
+      local cmd="${target:-${ntype#command:}}"
+      [ -n "$cmd" ] && eval "$cmd" 2>/dev/null || true
+      ;;
+    *)
+      warn "Unknown notification type: $ntype" ;;
+  esac
+}
+
+# Parse comma-separated notify targets into lines.
+# Usage: parse_notify_targets "terminal,slack,command:my-script"
+parse_notify_targets() {
+  local input="$1"
+  echo "$input" | tr ',' '\n'
+}
+
 append_ephemeral_volume() {
   local destination="$1"
   docker_cmd+=(--mount "type=volume,dst=$destination")

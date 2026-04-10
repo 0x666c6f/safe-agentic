@@ -931,6 +931,7 @@ cmd_spawn() {
   local on_complete_cmd=""
   local on_fail_cmd=""
   local max_cost=""
+  local notify_targets=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
   [ -n "$custom_network_name" ] && managed_network=false
@@ -1056,6 +1057,11 @@ cmd_spawn() {
       --max-cost)
         require_option_value "$topic" "--max-cost" "${2:-}"
         max_cost="$2"
+        shift 2
+        ;;
+      --notify)
+        require_option_value "$topic" "--notify" "${2:-}"
+        notify_targets="$2"
         shift 2
         ;;
       --dry-run)
@@ -1194,6 +1200,15 @@ cmd_spawn() {
   if [ -n "$max_cost" ]; then
     docker_cmd+=(--label "safe-agentic.max-cost=$max_cost")
     info "Max cost: \$$max_cost budget set"
+  fi
+
+  # Notification targets: base64-encoded to survive label/env transport
+  if [ -n "$notify_targets" ]; then
+    local notify_b64
+    notify_b64=$(printf '%s' "$notify_targets" | base64 | tr -d '\n')
+    docker_cmd+=(--label "safe-agentic.notify-b64=$notify_b64")
+    docker_cmd+=(-e "SAFE_AGENTIC_NOTIFY_B64=$notify_b64")
+    info "Notify: $notify_targets"
   fi
 
   if $reuse_auth; then
