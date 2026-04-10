@@ -14,15 +14,22 @@ type modelPricing struct {
 }
 
 var pricing = map[string]modelPricing{
+	// Claude model IDs (as reported by API)
+	"claude-opus-4":     {15.0, 75.0},
+	"claude-sonnet-4":   {3.0, 15.0},
+	"claude-haiku-4":    {0.80, 4.0},
 	"claude-3-opus":     {15.0, 75.0},
 	"claude-3-sonnet":   {3.0, 15.0},
 	"claude-3-haiku":    {0.25, 1.25},
 	"claude-3.5-sonnet": {3.0, 15.0},
 	"claude-3.5-haiku":  {0.80, 4.0},
+	// Legacy naming
 	"claude-4-opus":     {15.0, 75.0},
 	"claude-4-sonnet":   {3.0, 15.0},
+	// OpenAI
 	"gpt-4o":            {2.5, 10.0},
 	"gpt-4o-mini":       {0.15, 0.6},
+	"gpt-5":             {2.5, 10.0},
 	"o3":                {10.0, 40.0},
 	"o4-mini":           {1.1, 4.4},
 	"codex":             {3.0, 15.0},
