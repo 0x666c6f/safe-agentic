@@ -213,6 +213,8 @@ Options:
   --instructions 'TEXT'
   --instructions-file PATH
   --on-exit 'COMMAND'
+  --on-complete 'COMMAND'
+  --on-fail 'COMMAND'
   --max-cost N
   --aws PROFILE
   --identity 'Name <email@example.com>'
@@ -227,6 +229,8 @@ Notes:
   - --instructions injects text as /workspace/AGENT-INSTRUCTIONS.md (Claude picks it up automatically)
   - --instructions-file reads instructions from a local file
   - --on-exit runs a shell command after the agent exits (e.g. webhook notification)
+  - --on-complete runs a shell command when the agent exits successfully (exit 0)
+  - --on-fail runs a shell command when the agent exits with an error (exit != 0)
   - --max-cost sets a cost budget label (shown in TUI cost overlay)
   - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
   - --background runs headless (no tmux, not attachable, output via docker logs)
@@ -924,6 +928,8 @@ cmd_spawn() {
   local aws_profile=""
   local agent_instructions=""
   local on_exit_cmd=""
+  local on_complete_cmd=""
+  local on_fail_cmd=""
   local max_cost=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
@@ -1035,6 +1041,16 @@ cmd_spawn() {
       --on-exit)
         require_option_value "$topic" "--on-exit" "${2:-}"
         on_exit_cmd="$2"
+        shift 2
+        ;;
+      --on-complete)
+        require_option_value "$topic" "--on-complete" "${2:-}"
+        on_complete_cmd="$2"
+        shift 2
+        ;;
+      --on-fail)
+        require_option_value "$topic" "--on-fail" "${2:-}"
+        on_fail_cmd="$2"
         shift 2
         ;;
       --max-cost)
@@ -1156,6 +1172,24 @@ cmd_spawn() {
     info "On-exit callback: registered"
   fi
 
+  # On-complete callback: stored as env var + label, run when agent exits 0
+  if [ -n "$on_complete_cmd" ]; then
+    local on_complete_b64
+    on_complete_b64=$(printf '%s' "$on_complete_cmd" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_ON_COMPLETE_B64=$on_complete_b64")
+    docker_cmd+=(--label "safe-agentic.on-complete-b64=$on_complete_b64")
+    info "On-complete callback: registered"
+  fi
+
+  # On-fail callback: stored as env var + label, run when agent exits non-zero
+  if [ -n "$on_fail_cmd" ]; then
+    local on_fail_b64
+    on_fail_b64=$(printf '%s' "$on_fail_cmd" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_ON_FAIL_B64=$on_fail_b64")
+    docker_cmd+=(--label "safe-agentic.on-fail-b64=$on_fail_b64")
+    info "On-fail callback: registered"
+  fi
+
   # Max-cost budget: stored as a label for TUI / cost comparison
   if [ -n "$max_cost" ]; then
     docker_cmd+=(--label "safe-agentic.max-cost=$max_cost")
@@ -1244,15 +1278,22 @@ cmd_spawn() {
   if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
     start_internal_docker_runtime "$container_name" "$network_name"
   fi
+  local events_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic"
+  local events_file="$events_dir/events.jsonl"
+
   if [ "$agent_type" = "codex" ] || [ "$agent_type" = "claude" ]; then
     run_container_detached
     ok "Container: $container_name"
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    emit_event "$events_file" "agent.spawned" \
+      "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
     auto_attach_tmux_session "$container_name"
   else
     run_container "$managed_network" "$network_name"
     ok "Container: $container_name"
     audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    emit_event "$events_file" "agent.spawned" \
+      "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
   fi
 }
 
@@ -3726,6 +3767,14 @@ for agent in agents:
     if on_exit:
         cmd += ['--on-exit', str(on_exit)]
 
+    on_complete = agent.get('on_complete', '')
+    if on_complete:
+        cmd += ['--on-complete', str(on_complete)]
+
+    on_fail = agent.get('on_fail', '')
+    if on_fail:
+        cmd += ['--on-fail', str(on_fail)]
+
     max_cost = agent.get('max_cost', '')
     if max_cost:
         cmd += ['--max-cost', str(max_cost)]
@@ -3850,7 +3899,7 @@ print("pipeline_name=" + enc(pipeline_name))
 for step in steps:
     parts = []
     for field in ('name', 'type', 'repo', 'prompt', 'ssh', 'reuse_auth',
-                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'max_cost'):
+                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'on_complete', 'on_fail', 'max_cost'):
         val = step.get(field, '')
         parts.append(field + '=' + enc(val))
     print(' '.join(parts))
@@ -3980,7 +4029,7 @@ cmd_pipeline() {
     local step_line="$1"
     [ -z "$step_line" ] && return 1
 
-    local name type repo prompt template ssh reuse_auth auto_trust background on_failure retry depends_on instructions on_exit max_cost
+    local name type repo prompt template ssh reuse_auth auto_trust background on_failure retry depends_on instructions on_exit on_complete on_fail max_cost
     name=$(        echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     type=$(        echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     repo=$(        echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -3995,6 +4044,8 @@ cmd_pipeline() {
     depends_on=$(  echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     instructions=$(echo "$step_line" | grep -o 'instructions=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     on_exit=$(     echo "$step_line" | grep -o 'on_exit=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_complete=$( echo "$step_line" | grep -o 'on_complete=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_fail=$(     echo "$step_line" | grep -o 'on_fail=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     max_cost=$(    echo "$step_line" | grep -o 'max_cost=[^ ]*'     | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
 
     [ -z "$type" ]  && type="claude"
@@ -4024,6 +4075,8 @@ cmd_pipeline() {
     fi
     [ -n "$instructions" ] && spawn_args+=(--instructions "$instructions")
     [ -n "$on_exit" ] && spawn_args+=(--on-exit "$on_exit")
+    [ -n "$on_complete" ] && spawn_args+=(--on-complete "$on_complete")
+    [ -n "$on_fail" ] && spawn_args+=(--on-fail "$on_fail")
     [ -n "$max_cost" ] && spawn_args+=(--max-cost "$max_cost")
     [[ "$ssh" == "true" ]] && spawn_args+=(--ssh)
     [[ "$reuse_auth" == "true" ]] && spawn_args+=(--reuse-auth)
@@ -4480,11 +4533,13 @@ Previous attempt failed. Feedback: ${feedback}. Try a different approach."
     fi
   fi
 
-  # Read env vars we need to reconstruct (instructions, on-exit)
-  local all_envs instructions_b64_val on_exit_b64_val repos_env
+  # Read env vars we need to reconstruct (instructions, on-exit, on-complete, on-fail)
+  local all_envs instructions_b64_val on_exit_b64_val on_complete_b64_val on_fail_b64_val repos_env
   all_envs=$(vm_exec docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || echo "")
   instructions_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_INSTRUCTIONS_B64=' | cut -d= -f2- || echo "")
   on_exit_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_EXIT_B64=' | cut -d= -f2- || echo "")
+  on_complete_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_COMPLETE_B64=' | cut -d= -f2- || echo "")
+  on_fail_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_FAIL_B64=' | cut -d= -f2- || echo "")
   repos_env=$(printf '%s\n' "$all_envs" | grep '^REPOS=' | cut -d= -f2- || echo "")
 
   info "Stopping $name..."
@@ -4527,6 +4582,18 @@ Previous attempt failed. Feedback: ${feedback}. Try a different approach."
     local decoded_on_exit
     decoded_on_exit=$(printf '%s' "$on_exit_b64_val" | base64 -d 2>/dev/null || echo "")
     [ -n "$decoded_on_exit" ] && spawn_args+=(--on-exit "$decoded_on_exit")
+  fi
+
+  if [ -n "$on_complete_b64_val" ]; then
+    local decoded_on_complete
+    decoded_on_complete=$(printf '%s' "$on_complete_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_on_complete" ] && spawn_args+=(--on-complete "$decoded_on_complete")
+  fi
+
+  if [ -n "$on_fail_b64_val" ]; then
+    local decoded_on_fail
+    decoded_on_fail=$(printf '%s' "$on_fail_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_on_fail" ] && spawn_args+=(--on-fail "$decoded_on_fail")
   fi
 
   [ -n "$max_cost_label" ] && spawn_args+=(--max-cost "$max_cost_label")

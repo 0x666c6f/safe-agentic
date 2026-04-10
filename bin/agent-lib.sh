@@ -820,6 +820,32 @@ prepare_network() {
   fi
 }
 
+# --- Event System ---
+
+# Emit an event as a JSONL line to a file.
+# Usage: emit_event <file> <event_type> <json_data>
+emit_event() {
+  local file="$1" event_type="$2" data="$3"
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$file")"
+  printf '{"ts":"%s","event":"%s","data":%s}\n' "$ts" "$event_type" "$data" >> "$file"
+}
+
+# Dispatch an event to a sink.
+# Usage: dispatch_event <sink_type> <sink_target> <event_type> <json_data>
+dispatch_event() {
+  local sink_type="$1" sink_target="$2" event_type="$3" data="$4"
+  case "$sink_type" in
+    command)
+      eval "$sink_target" ;;
+    webhook)
+      curl -s -X POST -H "Content-Type: application/json" -d "$data" "$sink_target" 2>/dev/null || true ;;
+    file)
+      emit_event "$sink_target" "$event_type" "$data" ;;
+  esac
+}
+
 # Auto-detect git identity from host's global config.
 # Prints "Name <email>" if both are configured, empty string otherwise.
 detect_git_identity() {
