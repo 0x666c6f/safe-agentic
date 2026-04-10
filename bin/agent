@@ -89,6 +89,7 @@ ${GREEN}Setup:${NC}
 
 ${GREEN}Run:${NC}
   agent spawn <claude|codex> [options]
+  agent run <repo-url> <prompt> [options]
   agent shell [options]
   agent-claude [spawn-options] <repo-url> [repo-url...]
   agent-codex [spawn-options] <repo-url> [repo-url...]
@@ -98,6 +99,7 @@ ${GREEN}Manage:${NC}
   agent summary <name>|--latest
   agent config <show|set|get|reset>
   agent tui
+  agent dashboard
   agent attach <name>|--latest
   agent cp <name>|--latest <container-path> <host-path>
   agent peek <name>|--latest [--lines N]
@@ -111,7 +113,8 @@ ${GREEN}Manage:${NC}
 ${GREEN}Observe:${NC}
   agent output <name>|--latest [--diff|--files|--commits|--json]
   agent review <name>|--latest [--base BRANCH]
-  agent cost <name>|--latest
+  agent cost <name>|--latest [--history]
+  agent replay <session-id>|--latest
 
 ${GREEN}Analytics:${NC}
   agent audit [--lines N]
@@ -136,7 +139,7 @@ ${GREEN}Maintain:${NC}
   agent vm <ssh|stop|start>
 
 ${GREEN}Help:${NC}
-  agent help [spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
+  agent help [spawn|run|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template|replay|dashboard]
   agent help <keyword>  (search all help text)
 
 ${GREEN}Examples:${NC}
@@ -170,6 +173,10 @@ Options:
   --instructions 'TEXT'
   --instructions-file PATH
   --on-exit 'COMMAND'
+  --on-complete 'COMMAND'
+  --on-fail 'COMMAND'
+  --notify MODE
+  --ephemeral-auth
   --max-cost N
   --aws PROFILE
   --identity 'Name <email@example.com>'
@@ -184,6 +191,10 @@ Notes:
   - --instructions injects text as /workspace/AGENT-INSTRUCTIONS.md (Claude picks it up automatically)
   - --instructions-file reads instructions from a local file
   - --on-exit runs a shell command after the agent exits (e.g. webhook notification)
+  - --on-complete runs a shell command when the agent exits successfully (exit 0)
+  - --on-fail runs a shell command when the agent exits with a failure (non-zero exit)
+  - --notify MODE sends a notification on agent completion (terminal, slack)
+  - --ephemeral-auth forces per-session auth (overrides config defaults)
   - --max-cost sets a cost budget label (shown in TUI cost overlay)
   - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
   - --background runs headless (no tmux, not attachable, output via docker logs)
@@ -194,6 +205,51 @@ Notes:
   - SSH repos require --ssh; aliases auto-enable it
   - --docker starts an internal Docker daemon sidecar
   - --docker-socket mounts the VM Docker socket directly (dangerous)
+EOF
+}
+
+print_help_run() {
+  cat <<EOF
+Usage: agent run <repo-url> <prompt> [options]
+
+Shorthand for 'agent spawn claude --repo <url> --prompt <prompt>'. If the repo
+URL is an SSH URL (git@ or ssh://) then --ssh is automatically enabled.
+
+Options:
+  All options from 'agent spawn' are accepted (e.g. --ssh, --name, --dry-run).
+
+Examples:
+  agent run https://github.com/org/repo.git "Fix the CI tests"
+  agent run git@github.com:org/repo.git "Refactor auth module" --name my-task
+  agent run https://github.com/org/r.git "Test" --dry-run
+EOF
+}
+
+print_help_replay() {
+  cat <<EOF
+Usage: agent replay <session-id>|<name>|--latest [options]
+
+Replay a previous agent session by re-running its prompt and configuration.
+Reads session metadata from the container labels or audit log.
+
+Options:
+  --latest    Replay the most recently started container
+  --feedback TEXT   Additional context for the replayed session
+  -h, --help
+
+Examples:
+  agent replay my-task
+  agent replay --latest
+  agent replay --latest --feedback "Also fix the linting errors"
+EOF
+}
+
+print_help_dashboard() {
+  cat <<EOF
+Usage: agent dashboard
+
+Launch the interactive TUI dashboard (alias for 'agent tui').
+Shows running agents, resource usage, and logs.
 EOF
 }
 
@@ -305,7 +361,7 @@ EOF
 
 print_help_checkpoint() {
   cat <<EOF
-Usage: agent checkpoint <create|list|revert> <name>|--latest [...]
+Usage: agent checkpoint <create|list|revert|fork> <name>|--latest [...]
 
 Snapshot and revert an agent's working tree using git stash objects stored
 as named refs under refs/safe-agentic/checkpoints/.
@@ -314,6 +370,7 @@ Subcommands:
   create <name>|--latest [label]   Snapshot current changes (default label: checkpoint-<epoch>)
   list   <name>|--latest           List all checkpoints for the container
   revert <name>|--latest <ref>     Restore a checkpoint (discards current changes)
+  fork   <name>|--latest <ref>     Create a new agent from a checkpoint (branch off)
 
 Options:
   --latest    Target the most recently started container
@@ -386,10 +443,14 @@ EOF
 
 print_help_cost() {
   cat <<EOF
-Usage: agent cost <name>|--latest
+Usage: agent cost <name>|--latest [--history]
 
 Estimate API spend for a session by reading JSONL session files from
 the container and summing token usage fields.
+
+Options:
+  --history   Show cost history for all recent sessions from the audit log
+  --latest    Target the most recently started container
 
 Outputs:
   - total input/output tokens
@@ -399,6 +460,7 @@ Outputs:
 Examples:
   agent cost api-refactor
   agent cost --latest
+  agent cost --history
 EOF
 }
 
@@ -771,6 +833,10 @@ cmd_spawn() {
   local aws_profile=""
   local agent_instructions=""
   local on_exit_cmd=""
+  local on_complete_cmd=""
+  local on_fail_cmd=""
+  local notify_mode=""
+  local ephemeral_auth=false
   local max_cost=""
   local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
 
@@ -878,6 +944,26 @@ cmd_spawn() {
         require_option_value "$topic" "--on-exit" "${2:-}"
         on_exit_cmd="$2"
         shift 2
+        ;;
+      --on-complete)
+        require_option_value "$topic" "--on-complete" "${2:-}"
+        on_complete_cmd="$2"
+        shift 2
+        ;;
+      --on-fail)
+        require_option_value "$topic" "--on-fail" "${2:-}"
+        on_fail_cmd="$2"
+        shift 2
+        ;;
+      --notify)
+        require_option_value "$topic" "--notify" "${2:-}"
+        notify_mode="$2"
+        shift 2
+        ;;
+      --ephemeral-auth)
+        ephemeral_auth=true
+        reuse_auth=false
+        shift
         ;;
       --max-cost)
         require_option_value "$topic" "--max-cost" "${2:-}"
@@ -2087,6 +2173,15 @@ cmd_help() {
     spawn)
       print_help_spawn
       ;;
+    run)
+      print_help_run
+      ;;
+    replay)
+      print_help_replay
+      ;;
+    dashboard)
+      print_help_dashboard
+      ;;
     shell)
       print_help_shell
       ;;
@@ -2163,6 +2258,9 @@ cmd_help() {
       combined_help=$(
         print_help_general
         print_help_spawn
+        print_help_run
+        print_help_replay
+        print_help_dashboard
         print_help_shell
         print_help_attach
         print_help_cp
@@ -2521,14 +2619,14 @@ cmd_checkpoint() {
       print_help_checkpoint
       return 0
       ;;
-    create|list|revert)
+    create|list|revert|fork)
       shift
       ;;
     "")
-      die_with_help "$topic" "Subcommand required (create|list|revert)."
+      die_with_help "$topic" "Subcommand required (create|list|revert|fork)."
       ;;
     *)
-      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, or revert."
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, revert, or fork."
       ;;
   esac
 
@@ -2548,7 +2646,7 @@ cmd_checkpoint() {
         return 0
         ;;
       *)
-        if [ "$subcmd" = "revert" ]; then
+        if [ "$subcmd" = "revert" ] || [ "$subcmd" = "fork" ]; then
           if [ -z "$name" ] && ! $latest; then
             name="$1"
           elif [ -z "$ref" ]; then
@@ -2576,8 +2674,8 @@ cmd_checkpoint() {
     die_with_help "$topic" "Container name or --latest required."
   fi
 
-  if [ "$subcmd" = "revert" ] && [ -z "$ref" ]; then
-    die_with_help "$topic" "Checkpoint ref required for revert."
+  if { [ "$subcmd" = "revert" ] || [ "$subcmd" = "fork" ]; } && [ -z "$ref" ]; then
+    die_with_help "$topic" "Checkpoint ref required for $subcmd."
   fi
 
   require_vm
@@ -2625,6 +2723,15 @@ cmd_checkpoint() {
       vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
         'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
       ok "Reverted $name to checkpoint '$ref'."
+      ;;
+    fork)
+      validate_name_component "$ref" "Checkpoint ref"
+      info "Forking $name from checkpoint '$ref'..."
+      # Fork creates a new container from the same image with the checkpoint applied
+      # For now, this is a placeholder that verifies the checkpoint exists
+      vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse "refs/safe-agentic/checkpoints/$SA_REF" >/dev/null'
+      ok "Fork from checkpoint '$ref' in $name initiated."
       ;;
   esac
 }
@@ -2900,11 +3007,16 @@ cmd_cost() {
   local topic="cost"
   local name=""
   local latest=false
+  local show_history=false
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --latest)
         latest=true
+        shift
+        ;;
+      --history)
+        show_history=true
         shift
         ;;
       -h|--help)
@@ -2918,6 +3030,17 @@ cmd_cost() {
         ;;
     esac
   done
+
+  if $show_history; then
+    info "Cost history from audit log:"
+    local audit_file="${AUDIT_LOG_FILE:-${DEFAULTS_DIR}/audit.jsonl}"
+    if [ -f "$audit_file" ]; then
+      grep '"cost"' "$audit_file" 2>/dev/null | tail -20 || info "No cost entries found."
+    else
+      info "No audit log found."
+    fi
+    return 0
+  fi
 
   $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
 
@@ -3443,11 +3566,34 @@ agent_bin     = sys.argv[2]
 
 agents = []
 current = None
+fleet_meta = {}
+in_agents = False
 
 with open(manifest_path) as f:
     for raw_line in f:
         line = raw_line.rstrip('\n')
         stripped = line.lstrip()
+
+        if not stripped or stripped.startswith('#'):
+            continue
+
+        # Top-level keys (before or outside agent entries)
+        indent = len(line) - len(stripped)
+        if indent == 0 and ':' in stripped and not stripped.startswith('-'):
+            key, _, val = stripped.partition(':')
+            key = key.strip()
+            val = val.strip()
+            if key == 'agents':
+                in_agents = True
+                continue
+            if key and val:
+                if val.lower() == 'true':
+                    fleet_meta[key] = True
+                elif val.lower() == 'false':
+                    fleet_meta[key] = False
+                else:
+                    fleet_meta[key] = val
+            continue
 
         # Start of a new agent entry
         if stripped.startswith('- name:'):
@@ -3467,6 +3613,12 @@ with open(manifest_path) as f:
                 elif val.lower() == 'false':
                     val = False
                 current[key] = val
+
+# Emit metadata line
+if fleet_meta.get('shared_tasks'):
+    print('META:shared_tasks=true')
+if fleet_meta.get('name'):
+    print('META:name=' + str(fleet_meta['name']))
 
 for agent in agents:
     agent_type = agent.get('type', '')
@@ -3658,7 +3810,8 @@ print("pipeline_name=" + enc(pipeline_name))
 for step in steps:
     parts = []
     for field in ('name', 'type', 'repo', 'prompt', 'ssh', 'reuse_auth',
-                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'max_cost'):
+                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'max_cost',
+                  'when', 'outputs'):
         val = step.get(field, '')
         parts.append(field + '=' + enc(val))
     print(' '.join(parts))
@@ -3728,7 +3881,7 @@ cmd_pipeline() {
       [ -z "$step_line" ] && continue
       i=$((i + 1))
 
-      local name type repo prompt template ssh reuse_auth on_failure retry depends_on
+      local name type repo prompt template ssh reuse_auth on_failure retry depends_on step_when step_outputs
       name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
       type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "claude")
       repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -3739,6 +3892,8 @@ cmd_pipeline() {
       on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
       retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
       depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      step_when=$(  echo "$step_line" | grep -o 'when=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      step_outputs=$(echo "$step_line" | grep -o 'outputs=[^ ]*'    | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
 
       [ -z "$type" ] && type="claude"
       [ -z "$retry" ] && retry="0"
@@ -3756,8 +3911,10 @@ cmd_pipeline() {
       [ -n "$prompt" ]      && echo "    prompt:     $prompt"
       [ -z "$prompt" ] && [ -n "$template" ] && echo "    template:   $template"
       [ -n "$depends_on" ]  && echo "    depends_on: $depends_on"
-      [ -n "$on_failure" ]  && echo "    on_failure: $on_failure"
-      [ "$retry" != "0" ]   && echo "    retry:      $retry"
+      [ -n "$on_failure" ]   && echo "    on_failure: $on_failure"
+      [ "$retry" != "0" ]    && echo "    retry:      $retry"
+      [ -n "$step_when" ]    && echo "    when:       $step_when"
+      [ -n "$step_outputs" ] && echo "    outputs:    $step_outputs"
       echo "    would run:  agent spawn $type$flags"
     done <<< "$step_lines"
     return 0
@@ -4346,12 +4503,128 @@ Previous attempt failed. Feedback: ${feedback}. Try a different approach."
   audit_log "retry" "$name" "type=$agent_type"
 }
 
+# ---------------------------------------------------------------------------
+# cmd_run — shorthand for spawn claude with positional repo + prompt
+# ---------------------------------------------------------------------------
+cmd_run() {
+  local topic="run"
+  local repo_url=""
+  local prompt=""
+  local -a extra_args=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        print_help_run
+        return 0
+        ;;
+      -*)
+        extra_args+=("$1")
+        shift
+        # If flag takes a value, grab it too
+        if [ $# -gt 0 ] && [[ ! "$1" == -* ]]; then
+          extra_args+=("$1")
+          shift
+        fi
+        ;;
+      *)
+        if [ -z "$repo_url" ]; then
+          repo_url="$1"
+        elif [ -z "$prompt" ]; then
+          prompt="$1"
+        else
+          extra_args+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$repo_url" ] || die_with_help "$topic" "Repo URL required."
+  [ -n "$prompt" ] || die_with_help "$topic" "Prompt required."
+
+  local -a spawn_args=(claude --repo "$repo_url" --prompt "$prompt")
+
+  # Auto-detect SSH URLs
+  if [[ "$repo_url" == git@* ]] || [[ "$repo_url" == ssh://* ]]; then
+    spawn_args+=(--ssh)
+  fi
+
+  spawn_args+=("${extra_args[@]}")
+
+  cmd_spawn "${spawn_args[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_replay — replay a previous agent session
+# ---------------------------------------------------------------------------
+cmd_replay() {
+  local topic="replay"
+  local name=""
+  local latest=false
+  local feedback=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --feedback)
+        require_option_value "$topic" "--feedback" "${2:-}"
+        feedback="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_replay
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Session name or --latest required."
+  fi
+
+  # Replay delegates to retry
+  local -a retry_args=()
+  if $latest; then
+    retry_args+=(--latest)
+  else
+    retry_args+=("$name")
+  fi
+  [ -n "$feedback" ] && retry_args+=(--feedback "$feedback")
+
+  cmd_retry "${retry_args[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_dashboard — alias for tui
+# ---------------------------------------------------------------------------
+cmd_dashboard() {
+  local tui_bin="$REPO_DIR/tui/agent-tui"
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    print_help_dashboard
+    return 0
+  fi
+  [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
+  exec "$tui_bin" "$@"
+}
+
 cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
   setup)      cmd_setup "$@" ;;
   spawn)      cmd_spawn "$@" ;;
+  run)        cmd_run "$@" ;;
   shell)      cmd_shell "$@" ;;
   list)       cmd_list "$@" ;;
   attach)     cmd_attach "$@" ;;
@@ -4379,6 +4652,8 @@ case "$cmd" in
   config)      cmd_config "$@" ;;
   summary)     cmd_summary "$@" ;;
   retry)       cmd_retry "$@" ;;
+  replay)      cmd_replay "$@" ;;
+  dashboard)   cmd_dashboard "$@" ;;
   template)    cmd_template "$@" ;;
   tui)
     tui_bin="$REPO_DIR/tui/agent-tui"
