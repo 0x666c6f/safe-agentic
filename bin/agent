@@ -3658,7 +3658,8 @@ print("pipeline_name=" + enc(pipeline_name))
 for step in steps:
     parts = []
     for field in ('name', 'type', 'repo', 'prompt', 'ssh', 'reuse_auth',
-                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'max_cost'):
+                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'max_cost',
+                  'when', 'outputs'):
         val = step.get(field, '')
         parts.append(field + '=' + enc(val))
     print(' '.join(parts))
@@ -3728,7 +3729,7 @@ cmd_pipeline() {
       [ -z "$step_line" ] && continue
       i=$((i + 1))
 
-      local name type repo prompt template ssh reuse_auth on_failure retry depends_on
+      local name type repo prompt template ssh reuse_auth on_failure retry depends_on when_cond outputs_expr
       name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
       type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "claude")
       repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -3739,6 +3740,8 @@ cmd_pipeline() {
       on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
       retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
       depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      when_cond=$(  echo "$step_line" | grep -o 'when=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      outputs_expr=$(echo "$step_line" | grep -o 'outputs=[^ ]*'    | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
 
       [ -z "$type" ] && type="claude"
       [ -z "$retry" ] && retry="0"
@@ -3755,9 +3758,11 @@ cmd_pipeline() {
       [ -n "$repo" ]        && echo "    repo:       $repo"
       [ -n "$prompt" ]      && echo "    prompt:     $prompt"
       [ -z "$prompt" ] && [ -n "$template" ] && echo "    template:   $template"
-      [ -n "$depends_on" ]  && echo "    depends_on: $depends_on"
-      [ -n "$on_failure" ]  && echo "    on_failure: $on_failure"
-      [ "$retry" != "0" ]   && echo "    retry:      $retry"
+      [ -n "$depends_on" ]   && echo "    depends_on: $depends_on"
+      [ -n "$on_failure" ]   && echo "    on_failure: $on_failure"
+      [ "$retry" != "0" ]    && echo "    retry:      $retry"
+      [ -n "$when_cond" ]    && echo "    when:       $when_cond"
+      [ -n "$outputs_expr" ] && echo "    outputs:    $outputs_expr"
       echo "    would run:  agent spawn $type$flags"
     done <<< "$step_lines"
     return 0
@@ -3768,6 +3773,8 @@ cmd_pipeline() {
   local -a failed_steps=()
   # Track which on_failure steps were triggered so we don't double-run them
   local -a triggered_steps=()
+  # Track step outputs for conditional branching (when/outputs)
+  declare -A step_outputs
 
   # Lookup a step line by name from step_lines (bash 3.2 compatible, no assoc arrays)
   lookup_step_by_name() {
@@ -3788,7 +3795,7 @@ cmd_pipeline() {
     local step_line="$1"
     [ -z "$step_line" ] && return 1
 
-    local name type repo prompt template ssh reuse_auth auto_trust background on_failure retry depends_on instructions on_exit max_cost
+    local name type repo prompt template ssh reuse_auth auto_trust background on_failure retry depends_on instructions on_exit max_cost when_condition outputs_expr
     name=$(        echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     type=$(        echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     repo=$(        echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
@@ -3804,6 +3811,8 @@ cmd_pipeline() {
     instructions=$(echo "$step_line" | grep -o 'instructions=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     on_exit=$(     echo "$step_line" | grep -o 'on_exit=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
     max_cost=$(    echo "$step_line" | grep -o 'max_cost=[^ ]*'     | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    when_condition=$(echo "$step_line" | grep -o 'when=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    outputs_expr=$(echo "$step_line" | grep -o 'outputs=[^ ]*'     | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
 
     [ -z "$type" ]  && type="claude"
     [ -z "$retry" ] && retry="0"
@@ -3818,6 +3827,17 @@ cmd_pipeline() {
       if ! $dep_satisfied; then
         warn "Step '$name': skipping — dependency '$depends_on' not completed."
         return 1
+      fi
+    fi
+
+    # Check 'when' condition — step only runs if dependency output matches
+    if [ -n "$when_condition" ]; then
+      local dep_step_name
+      dep_step_name=$(echo "$depends_on" | head -1)  # use first dependency
+      local dep_output="${step_outputs[$dep_step_name]:-}"
+      if [ "$dep_output" != "$when_condition" ]; then
+        info "Skipping step '$name': condition '$when_condition' not met (got '$dep_output')"
+        return 0  # Skip this step (not a failure)
       fi
     fi
 
@@ -3860,6 +3880,16 @@ cmd_pipeline() {
 
     if $step_ok; then
       completed_steps+=("$name")
+
+      # Evaluate outputs expression to capture step output for conditional branching
+      if [ -n "$outputs_expr" ]; then
+        local container_name="pipeline-${name}"
+        local output_val
+        output_val=$(vm_exec docker exec "$container_name" bash -c "$outputs_expr" 2>/dev/null || echo "")
+        step_outputs["$name"]="$output_val"
+        info "Step '$name' output: $output_val"
+      fi
+
       ok "Step '$name': completed."
       return 0
     else
