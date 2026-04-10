@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -210,6 +213,54 @@ var diagnoseCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(diagnoseCmd)
+	rootCmd.AddCommand(tuiCmd)
+	dashboardCmd.Flags().StringVar(&dashboardBind, "bind", "localhost:8420", "Bind address for web dashboard")
+	rootCmd.AddCommand(dashboardCmd)
+}
+
+// ─── tui / dashboard ──────────────────────────────────────────────────────
+
+var tuiCmd = &cobra.Command{
+	Use:   "tui",
+	Short: "Launch interactive TUI dashboard",
+	RunE:  runTUI,
+}
+
+var dashboardBind string
+
+var dashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Start web dashboard",
+	RunE:  runDashboard,
+}
+
+func findTUIBinary() (string, error) {
+	// Check next to safe-ag binary first
+	self, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(self), "agent-tui")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	// Fall back to PATH
+	return exec.LookPath("agent-tui")
+}
+
+func runTUI(cmd *cobra.Command, args []string) error {
+	bin, err := findTUIBinary()
+	if err != nil {
+		return fmt.Errorf("agent-tui not found. Build with: make build-tui")
+	}
+	return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
+}
+
+func runDashboard(cmd *cobra.Command, args []string) error {
+	bin, err := findTUIBinary()
+	if err != nil {
+		return fmt.Errorf("agent-tui not found. Build with: make build-tui")
+	}
+	return syscall.Exec(bin, []string{bin, "--dashboard", "--bind", dashboardBind}, os.Environ())
 }
 
 func runDiagnose(cmd *cobra.Command, args []string) error {
