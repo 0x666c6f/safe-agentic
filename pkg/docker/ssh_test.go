@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-func TestAppendSSHMount_Success(t *testing.T) {
+func TestAppendSSHMount_WithRelay(t *testing.T) {
 	fake := orb.NewFake()
-	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/run/ssh-relay.sock")
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/opt/orbstack-guest/run/host-ssh-agent.sock")
+	fake.SetResponse("test -S", "") // relay socket exists
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err != nil {
@@ -19,8 +20,28 @@ func TestAppendSSHMount_Success(t *testing.T) {
 	if !strings.Contains(cmdStr, "SSH_AUTH_SOCK="+sshSocketPath) {
 		t.Errorf("missing SSH_AUTH_SOCK env in: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "/run/ssh-relay.sock:"+sshSocketPath) {
-		t.Errorf("missing socket volume mount in: %s", cmdStr)
+	// Should use the relay socket, not the original
+	if !strings.Contains(cmdStr, sshRelaySocket+":"+sshSocketPath) {
+		t.Errorf("should mount relay socket, got: %s", cmdStr)
+	}
+}
+
+func TestAppendSSHMount_FallbackDirect(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/opt/orbstack-guest/run/host-ssh-agent.sock")
+	fake.SetError("test -S", "not found") // relay socket doesn't exist
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	err := AppendSSHMount(context.Background(), fake, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmdStr := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(cmdStr, "SSH_AUTH_SOCK="+sshSocketPath) {
+		t.Errorf("missing SSH_AUTH_SOCK env in: %s", cmdStr)
+	}
+	// Fallback: direct mount with :ro
+	if !strings.Contains(cmdStr, "/opt/orbstack-guest/run/host-ssh-agent.sock:"+sshSocketPath+":ro") {
+		t.Errorf("should fallback to direct mount, got: %s", cmdStr)
 	}
 }
 
