@@ -3,9 +3,19 @@ set -euo pipefail
 
 SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
 SESSION_STATE_FILE="$SESSION_STATE_DIR/started"
+SESSION_EVENTS_DIR="$SESSION_STATE_DIR"
+SESSION_EVENTS_FILE="$SESSION_EVENTS_DIR/session-events.jsonl"
 AGENT_TYPE="${AGENT_TYPE:-shell}"
 
 mkdir -p "$SESSION_STATE_DIR"
+
+write_session_event() {
+  local event_type="$1" data="${2:-"{}"}"
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$SESSION_EVENTS_DIR"
+  printf '{"ts":"%s","type":"%s","data":%s}\n' "$ts" "$event_type" "$data" >> "$SESSION_EVENTS_FILE"
+}
 
 resuming=false
 if [ -f "$SESSION_STATE_FILE" ]; then
@@ -33,7 +43,8 @@ launch_codex() {
   fi
 
   if $resuming; then
-    exec codex --yolo resume --last
+    codex --yolo resume --last || return $?
+    return 0
   fi
 
   if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
@@ -41,17 +52,19 @@ launch_codex() {
     # Output goes to stdout → docker logs. No tmux.
     local rendered
     rendered=$(quote_cmd codex --yolo "$@")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 
   if [ $# -gt 0 ]; then
     # Run the prompt first, then continue into interactive mode so the
     # session stays alive for attach/peek in detached containers.
     codex --yolo "$@"
-    exec codex --yolo resume --last
+    codex --yolo resume --last || return $?
+    return 0
   fi
 
-  exec codex --yolo
+  codex --yolo || return $?
 }
 
 trust_workspace() {
@@ -121,7 +134,8 @@ launch_claude() {
     # Background mode: run with -p via script PTY (needed for OAuth refresh).
     # Output goes to stdout → docker logs. No tmux.
     rendered=$(quote_cmd "${cmd[@]}")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 
   if $has_prompt; then
@@ -143,25 +157,36 @@ launch_claude() {
     # interactive mode with live output visible in the tmux pane.
     echo "$prompt_text" > "$SESSION_STATE_DIR/pending-prompt"
     rendered=$(quote_cmd claude --dangerously-skip-permissions)
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   else
     rendered=$(quote_cmd "${cmd[@]}")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 }
 
 launch_shell() {
-  exec bash -il "$@"
+  bash -il "$@" || return $?
 }
 
+write_session_event "session.start" \
+  "$(printf '{"agent":"%s","repos":"%s"}' "${AGENT_TYPE:-unknown}" "${REPOS:-}")"
+
+agent_exit_code=0
 case "$AGENT_TYPE" in
   codex)
-    launch_codex "$@"
+    launch_codex "$@" || agent_exit_code=$?
     ;;
   claude)
-    launch_claude "$@"
+    launch_claude "$@" || agent_exit_code=$?
     ;;
   *)
-    launch_shell "$@"
+    launch_shell "$@" || agent_exit_code=$?
     ;;
 esac
+
+write_session_event "session.end" \
+  "$(printf '{"exit_code":%d}' "$agent_exit_code")"
+
+exit "$agent_exit_code"
