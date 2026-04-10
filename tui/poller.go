@@ -64,6 +64,15 @@ func (p *Poller) Stop() {
 	}
 }
 
+// GetAgents returns a copy of the current agent list (thread-safe).
+func (p *Poller) GetAgents() []Agent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := make([]Agent, len(p.agents))
+	copy(result, p.agents)
+	return result
+}
+
 // ForceRefresh triggers an immediate poll outside the regular interval.
 func (p *Poller) ForceRefresh() {
 	go p.poll()
