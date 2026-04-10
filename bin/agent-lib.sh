@@ -351,12 +351,14 @@ auth_volume_exists() {
 volume_contains_file() {
   local volume_name="$1"
   local relative_path="$2"
-  local mountpoint=""
 
-  mountpoint=$(vm_exec docker volume inspect --format '{{.Mountpoint}}' "$volume_name" 2>/dev/null || true)
-  mountpoint=$(trim_whitespace "$mountpoint")
-  [ -n "$mountpoint" ] || return 1
-  vm_exec test -f "$mountpoint/$relative_path" >/dev/null 2>&1
+  vm_exec docker run --rm --pull=never \
+    -e "SA_RELATIVE_PATH=$relative_path" \
+    -v "$volume_name:/mnt" \
+    --entrypoint bash \
+    "$IMAGE_NAME:$IMAGE_TAG" \
+    -lc 'test -f "/mnt/$SA_RELATIVE_PATH"' \
+    >/dev/null 2>&1
 }
 
 managed_network_summary() {

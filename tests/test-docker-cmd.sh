@@ -58,9 +58,6 @@ case "$cmd" in
       case "${3:-}" in
         inspect)
           if [ "${TEST_CODEX_AUTH_READY:-0}" = "1" ]; then
-            if [ "${4:-}" = "--format" ]; then
-              echo "/var/lib/docker/volumes/agent-codex-auth/_data"
-            fi
             exit 0
           fi
           exit 1
@@ -68,9 +65,8 @@ case "$cmd" in
         create|rm) exit 0 ;;
       esac
     fi
-    if [ "${1:-}" = "test" ] && [ "${2:-}" = "-f" ] && [[ "${3:-}" == */agent-codex-auth/_data/auth.json ]]; then
-      [ "${TEST_CODEX_AUTH_READY:-0}" = "1" ] && exit 0
-      exit 1
+    if [ "${1:-}" = "docker" ] && [ "${2:-}" = "run" ] && [ "${TEST_CODEX_AUTH_READY:-0}" = "1" ] && [[ "$*" == *"agent-codex-auth:/mnt"* ]] && [[ "$*" == *'test -f "/mnt/$SA_RELATIVE_PATH"'* ]]; then
+      exit 0
     fi
     if [ "${1:-}" = "docker" ] && [ "${2:-}" = "exec" ] && [ "${4:-}" = "docker" ] && [ "${5:-}" = "--host" ] && [[ "${6:-}" == *safe-agentic-docker/docker.sock ]] && [ "${7:-}" = "info" ]; then
       exit 0
