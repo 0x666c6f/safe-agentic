@@ -237,6 +237,11 @@ func executeSpawn(opts SpawnOpts) error {
 	})
 	docker.AppendCacheMounts(cmd)
 
+	// Auto-trust: tell entrypoint to use --dangerously-skip-permissions
+	if opts.AutoTrust {
+		cmd.AddEnv("SAFE_AGENTIC_AUTO_TRUST", "1")
+	}
+
 	// SSH
 	if opts.SSH {
 		if opts.DryRun {
