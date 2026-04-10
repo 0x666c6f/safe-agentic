@@ -195,7 +195,7 @@ assert_contains "$run" "--mount type=volume,dst=/workspace"               "ephem
 assert_contains "$run" "--mount type=volume,dst=/home/agent/.npm"         "ephemeral npm cache"
 assert_contains "$run" "--mount type=volume,dst=/home/agent/.cache/pip"   "ephemeral pip cache"
 assert_contains "$run" "--mount type=volume,dst=/home/agent/go"           "ephemeral go cache"
-assert_contains "$run" "--mount type=volume,dst=/home/agent/.claude"      "ephemeral claude auth"
+assert_contains "$run" "src=agent-claude-auth,dst=/home/agent/.claude"    "default shared claude auth"
 assert_not_contains "$run" "volume-nocopy"                                "no volume-nocopy"
 
 # =============================================================================
@@ -376,7 +376,7 @@ assert_contains "$shell_run" "--memory 8g"                           "shell: mem
 run_agent "$REPO_DIR/bin/agent" spawn codex --name cdx --repo https://github.com/a/b.git >/dev/null 2>&1
 codex_run="$(last_docker_run)"
 assert_contains "$codex_run" "AGENT_TYPE=codex"                                "codex agent type"
-assert_contains "$codex_run" "--mount type=volume,dst=/home/agent/.codex"      "codex ephemeral auth"
+assert_contains "$codex_run" "src=agent-codex-auth,dst=/home/agent/.codex"     "codex default shared auth"
 # .claude tmpfs is present (entrypoint writes claude config even for codex agents)
 # but no auth volume mount for .claude
 assert_not_contains "$codex_run" "--mount type=volume,dst=/home/agent/.claude" "codex no claude auth volume"
