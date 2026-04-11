@@ -43,6 +43,9 @@ ensure_codex_config() {
   cat >"$codex_config" 2>/dev/null <<'EOF' || true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+[projects."/workspace"]
+trust_level = "trusted"
 EOF
 }
 
