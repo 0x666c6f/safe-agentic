@@ -2,8 +2,8 @@
 
 **Date:** 2026-04-11
 **Branch:** `feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation`
-**Reviewer:** Claude (automated)
-**Test runner:** `go test ./... -cover`
+**Reviewer:** Claude Opus 4.6 (deep review, 25 test files)
+**Test runner:** `go test ./... -cover` (could not run — Go 1.25.5 required, only 1.23.4 available in container; coverage numbers below from prior run)
 
 ---
 
@@ -24,9 +24,9 @@
 | **pkg/fleet** | **58.2%** | **FAIL** |
 | **pkg/inject** | **41.5%** | **FAIL** |
 | **tui** | **6.2%** | **FAIL** |
-| pkg/labels | N/A (build tool issue) | UNKNOWN |
+| pkg/labels | N/A (no test file) | **FAIL** |
 
-**4 packages below 90%. 1 package could not report coverage.**
+**4 packages below 90%. 1 package has no tests at all.**
 
 ---
 
@@ -34,161 +34,197 @@
 
 ### 1. tui/ — 6.2% coverage (CRITICAL)
 
-Only `tui/actions_test.go` (105 lines, 8 tests) exists. The following source files have **zero test coverage**:
+Only `tui/actions_test.go` (105 lines, 8 tests) exists. The TUI has ~2000 lines of source across 10 files.
 
-| File | Lines | Untested Functions |
-|------|-------|--------------------|
-| app.go | 382 | `NewApp`, `Run`, `handleInput` (155-line switch), `handleCommand`, `rebuildLayout`, `updatePreview` |
-| model.go | 180 | `SortAgents`, `fieldByColumn` (14 cases), `FilterAgents`, `VisibleColumns` |
-| table.go | 265 | `Update`, `SetSort`, `refresh` (107-line rendering), `restoreSelection` |
-| poller.go | 293 | `Start`, `Stop`, `poll`, `fetchAgents`, `probeProcessActivity`, `parsePSOutput`, `mergeStats` |
-| footer.go | 248 | `ShowFilter`, `ShowCommand`, `ShowConfirm`, `HandleConfirmKey` |
-| overlay.go | 278 | `ShowOverlay`, `ShowCopyForm`, `ShowSpawnForm`, `shellQuoteArgs` |
-| preview.go | 85 | `Toggle`, `Update`, `SetUnavailable` |
-| dashboard.go | 154 | `Start` (HTTP server), `handleIndex`, `handleAgentDetail`, `handleAgentLogs` (SSE), `handleAPIAgents` |
-| main.go | 98 | `main`, `preflight` |
+**Security-critical untested functions:**
 
-**Existing tests are weak:**
-- `TestBuildAttachArgs` / `TestBuildTmuxAttachArgs`: Only happy path, no edge cases for empty/special-char names.
-- `TestParseSessionMeta`: No test for malformed JSON, missing fields, or empty payloads.
-- `TestRenderSessionLogCurrentCodexFormat`: Only `strings.Contains` checks, doesn't validate structure.
+| Function | File | Risk | Why |
+|----------|------|------|-----|
+| `shellQuoteArgs` | overlay.go | **CRITICAL** | Constructs shell commands run inside containers. Zero tests for adversarial inputs (single quotes, backticks, `$()`, newlines, null bytes). A quoting bug = command injection. |
+| `parsePSOutput` | poller.go | **HIGH** | Parses tab-separated Docker output feeding the entire TUI. Malformed output from a compromised VM could inject fake agent data. |
+| `handleAPIStop` | dashboard.go | **HIGH** | Accepts agent name from URL path, passes to `docker stop`. Name extracted with `strings.TrimPrefix` — no input validation. |
+| `parseLabels` | poller.go | **MEDIUM** | Splits on `,` — breaks when label values contain commas. |
+
+**Untested pure functions (easily testable):**
+
+| Function | File | Notes |
+|----------|------|-------|
+| `SortAgents` | model.go | Complex fleet grouping logic |
+| `FilterAgents` / `matchesFilter` | model.go | Case-insensitive matching; omits `Activity` and `Fleet` fields (possible bug) |
+| `VisibleColumns` | model.go | Priority-based column dropping — edge cases like width=0 untested |
+| `extractText` | actions.go | Parses untrusted JSON from session files |
+| `renderSessionLog` | actions.go | Only Codex format partially tested; Claude format completely untested |
+| `resumeCLIArgs` | actions.go | Returns `--dangerously-skip-permissions` / `--yolo` flags; error path for unknown types untested |
+
+**Existing test weaknesses:**
+- `TestBuildResumeExecArgs`: Only tests `"codex"` and `"claude"` types, never tests error path for unknown types.
+- `TestParseSessionMeta`: No test for malformed JSON, missing fields, empty input, or multiple `session_meta` entries.
+- `TestRenderSessionLogCurrentCodexFormat`: Only `strings.Contains` checks — function could return garbage and test would pass.
 - No negative tests in the entire package.
 
 ### 2. pkg/inject — 41.5% coverage (HIGH)
 
-**Three functions completely untested:**
+**Completely untested functions:**
 
 | Function | Lines | Description |
 |----------|-------|-------------|
-| `ReadClaudeSupportFiles` | 52-103 | Tar/gzip archive creation from support files |
+| `ReadClaudeSupportFiles` | 52-103 | Complex tar/gzip archive creation from support files — a bug could inject wrong files or produce corrupt archives |
 | `tarFile` | 105-120 | Single-file tar header writing |
 | `tarDir` | 122-152 | Directory traversal and tar archiving |
 
-**Existing tests have gaps:**
+**Existing test gaps:**
 - `TestReadClaudeConfigWithSettingsJSON`: No test for malformed JSON, empty file, or missing fields.
-- `TestReadAWSCredentialsProfileFound`: No test for malformed credentials file, empty profile name, or special characters.
-- `TestReadClaudeConfig_PermissionDenied` / `TestReadCodexConfig_PermissionDenied`: Skips if root — environment-dependent.
+- `TestReadAWSCredentialsProfileFound`: No test for malformed credentials file or special characters in profile names.
+- Permission-denied tests skip if root — environment-dependent.
 - No test for `EncodeFileB64` with symlinks, large files, or permission-denied paths.
 
 ### 3. pkg/fleet — 58.2% coverage (HIGH)
 
-**Two functions entirely untested:**
+**Completely untested features:**
 
-| Function | Lines | Description |
-|----------|-------|-------------|
-| `mergeDefaults` | 199-240 | Merges manifest defaults into 14 agent fields |
-| `interpolateVars` | 243-248 | Variable interpolation in YAML values |
-
-**Complex logic untested:**
-- Model expansion in `ParsePipeline` (lines 129-150): Expands `models: [a, b]` into multiple agents.
-- `depends_on` reference fixing with model expansion (lines 154-179).
-- Vars interpolation in `ParseFleet` (line 96-98 path).
+| Feature | Source Lines | Complexity |
+|---------|-------------|------------|
+| `mergeDefaults` | 199-240 | Merges 14 agent fields from manifest defaults |
+| `interpolateVars` | 243-248 | Variable interpolation — security concern if user-controlled vars injected into prompts |
+| Model expansion | 131-152 | Expands `models: [a, b]` into multiple agents |
+| `depends_on` fixing | 157-181 | Adjusts references after model expansion (iterates map — non-deterministic order) |
 
 **Missing negative tests:**
-- No test for malformed YAML (syntax errors, not just missing file).
-- No test for circular `depends_on` references.
-- No test for invalid field values (negative memory/cpus, unknown agent type).
-- No test for duplicate stage names in pipelines.
+- No test for malformed YAML syntax
+- No test for circular `depends_on` references
+- No test for invalid field values (negative memory/cpus, unknown agent type)
+- No test for duplicate stage names in pipelines
 
 ### 4. cmd/safe-ag — 61.9% coverage (HIGH)
 
-**Major untested source files / functions:**
+**Entire files/features with zero unit test coverage:**
 
-| File | Function | Issue |
-|------|----------|-------|
-| spawn.go | `executeSpawn` (lines 151-458) | Only dry-run tested; no unit tests for template loading, SSH key setup, auth injection, identity parsing |
-| lifecycle.go | `runRetry` (lines 347-378) | Zero tests for retry command logic |
-| observe.go | `renderLogEntry`, `extractTokenUsage`, `runLogs`, `runPeek`, `runOutput`, `runCost` | Minimal or no coverage for session log parsing, token extraction |
-| config_cmd.go | `runTemplateList`, `runTemplateShow`, `runTemplateCreate` | No tests for template operations |
-| fleet.go | `specToSpawnOpts`, `depsmet`, `waitForContainers` | No tests for fleet orchestration helpers |
-| workflow.go | Todo, checkpoint, PR review operations | Minimal unit tests, no persistence verification |
+| File/Feature | Functions | Notes |
+|---|---|---|
+| `cron.go` (300+ lines, 14 functions) | `runCronAdd`, `runCronList`, `runCronRemove`, `runCronEnable`, `runCronDisable`, `runCronRun`, `runCronDaemon`, `setCronEnabled`, `executeCronJob`, `shouldRun`, `parseSchedule`, `loadCronConfig`, `saveCronConfig`, `cronConfigPath` | **Largest untested file in cmd/safe-ag** |
+| `observe.go` | `runLogs`, `renderLogEntry`, `extractAssistantText`, `sessionSearchDirs`, `ensureRunning`, `jsonString` | Session log parsing/rendering |
+| `fleet.go` pipeline | `runPipeline`, `runPipelineManifest`, `waitForContainers`, `printPipelineTree`, `printStageAgents` | Pipeline orchestration |
+| `setup.go` | `runVMStart`, `runVMStop`, `findTUIBinary`, `runTUI`, `runDashboard` | VM management |
+| `workflow.go` | `readTodos`, `writeTodos`, `workspaceFindCmd`, `workspaceExec` | Workflow helpers |
+
+### 5. pkg/labels — No tests at all
+
+The `ContainerFilter()` function returns a hardcoded label string used for container filtering. While trivial, a single test would prevent accidental breakage.
 
 ---
 
 ## Quality Issues by Category
 
-### A. Weak Assertions
+### A. Weak Assertions (16+ `_ = output` patterns)
 
 | File | Test | Issue |
 |------|------|-------|
-| cmd/safe-ag/command_test.go | `TestListCommandJSON` | Checks `{{json .}}` in command string, never validates JSON output |
-| cmd/safe-ag/command_test.go | `TestStopCommand_All` | Asserts stopCmds exist but never validates container names match |
-| cmd/safe-ag/command_test.go | `TestCheckpointCreate` | Only checks "Checkpoint created" string, never validates SHA |
-| cmd/safe-ag/command_test.go | All `TestOutput*` tests | Never validate actual output content, only that commands were invoked |
-| pkg/docker/container_test.go | `TestResolveTarget_NotFound` | Only `strings.Contains(err, "not found")`, not exact error |
-| pkg/docker/volume_test.go | `TestCreateLabeledVolume_VerifyLabels` | Checks label presence, not exact format |
-| pkg/docker/network_test.go | `TestCreateManagedNetwork` | `strings.Contains` allows false positives |
-| pkg/docker/runtime_test.go | `TestAppendRuntimeHardening_NoOptional` | Fragile trailing-space matching |
-| pkg/events/events_test.go | `TestEmitTypeField` | Timestamp only checked for empty string, not RFC3339 format |
-| pkg/events/notify_test.go | All tests | Check field count only, not field values |
-| tui/actions_test.go | `TestRenderSessionLogCurrentCodexFormat` | Only `strings.Contains` checks |
+| cmd/safe-ag/command_test.go | `TestListCommand`, `TestPeekCommand`, `TestDiffCommand`, `TestOutputCommand_Files`, `TestConfigGet_NotSet`, `TestCheckpointRevert`, `TestPRCommand`, `TestReviewCommand` + 8 others | Output captured but **never asserted** (`_ = output`). Function could print garbage and test passes. |
+| cmd/safe-ag/command_test.go | `TestDiagnoseCommand_AllOK` | Comment: "We just verify it completes without panic" — zero assertions on content. |
+| cmd/safe-ag/command_test.go | `TestSetupCommand_*` | Explicitly "just want to exercise the code path" — not real tests. |
+| cmd/safe-ag/command_test.go | `TestRunRetry_WithFeedback` | `_ = err` — ignores whether function succeeded or failed. |
+| cmd/safe-ag/command_test.go | `TestVMSSHCommand` | No verification that `RunInteractive` was called. |
+| cmd/safe-ag/deterministic_test.go | `TestDet_NodeVersion` | `strings.HasPrefix(out, "v")` — string "vanity" would also pass. |
+| cmd/safe-ag/deterministic_test.go | `TestDet_SafeAgOutputFiles` | Captures output, only logs it (`t.Logf`) — **zero assertions**. |
+| cmd/safe-ag/deterministic_test.go | `TestDet_SafeAgPeek` | Accepts both success and failure as valid (`if err == nil { return }`) — **can never fail**. |
+| cmd/safe-ag/deterministic_test.go | `TestDet_SafeAgCost` | Same: accepts errors as "expected" — **can never fail**. |
+| cmd/safe-ag/integration_test.go | `TestE2E_DiffCommand` | Logs error as non-fatal and returns early — test passes even when diff fails. |
+| cmd/safe-ag/integration_test.go | `TestE2E_PeekShowsOutput` | `t.Skipf` on failure — **can never fail**. |
+| pkg/docker/container_test.go | `TestInspectLabel` | FakeExecutor prefix matching means any `docker inspect --format` command matches — doesn't verify the correct label was queried. |
+| pkg/docker/dind_test.go | `TestStartDinDRuntime` | Checks `docker run -d` was called but doesn't verify network name, volume mounts, labels, or image args. DinD runs `--privileged` — full command verification is security-critical. |
+| pkg/docker/dind_test.go | `TestCleanupAllDinD` | Doesn't verify correct filter labels are being used — implementation that skips label filter would still pass. |
+| pkg/orb/orb_test.go | `TestFakeExecutor_MultiplePrefixMatches_ErrorTakesPriority` | **Literally cannot fail** — success case uses `t.Log` instead of assertion. |
+| tui/actions_test.go | `TestRenderSessionLogCurrentCodexFormat` | Only `strings.Contains` — doesn't validate structure or completeness. |
 
 ### B. Missing Negative Tests
 
 | Package | Missing |
 |---------|---------|
-| cmd/safe-ag | No tests for: docker ps failure, docker stop failure, docker rm failure, spawn with invalid repo URL, network unreachable, image pull failure, stop on already-stopped container |
-| pkg/fleet | No tests for: malformed YAML, circular deps, invalid field values, duplicate names |
-| pkg/inject | No tests for: malformed JSON/TOML, empty credentials file, tar write errors |
-| pkg/docker | No tests for: multiple partial matches in `ResolveTarget`, `waitForDinD` timeout, DinD start failure (all retries exhausted) |
-| pkg/events | No tests for: concurrent `Emit` calls (race condition), extremely large payloads |
-| pkg/repourl | No tests for: IPv6 addresses, URLs with auth, query parameters, fragments |
-| pkg/validate | No tests for: Unicode/emoji names, max-length names |
+| cmd/safe-ag | `runList` when docker ps errors; `runAttach` with empty container name; `runCleanup` with `--auth` flag; `runPR`/`runReview` with docker exec errors; `runFleet` with invalid YAML; `runMCPLogin` with 0 args; `runAWSRefresh` entirely; spawn with invalid agent type; double-spawn same name |
+| pkg/docker | Multiple partial matches in `ResolveTarget` (first match wins silently); `waitForDinD` timeout (40-iteration exhaustion); DinD start failure; `RemoveDinDRuntime`/`CleanupAllDinD` error swallowing; `PrepareNetwork` with `"bridge"` and `"container:*"` modes |
+| pkg/fleet | Malformed YAML; circular deps; invalid field values; duplicate names |
+| pkg/inject | Malformed JSON/TOML; empty credentials; tar write errors; symlinks in tarDir |
+| pkg/config | CRLF line endings; empty-quoted values; duplicate keys; line `export =value` |
+| pkg/repourl | `http://` URLs; URLs with ports, auth tokens, query params, fragments; null bytes |
+| pkg/events | Concurrent `Emit` calls; extremely large payloads; symlink paths |
+| pkg/validate | Unicode/emoji names; null bytes; max-length strings; `"container:"` with empty suffix |
+| pkg/cost | Empty model string; negative token counts; case sensitivity inconsistency |
+| tui | All of the above plus: `resumeCLIArgs` unknown types; `parseSessionMeta` malformed input |
 
 ### C. Flaky Patterns
 
 | File | Pattern | Risk |
 |------|---------|------|
-| cmd/safe-ag/deterministic_test.go | Shared container via `sync.Once` + hardcoded `time.Sleep(5s)` + 40-iteration polling | Fails on slow CI |
-| cmd/safe-ag/deterministic_test.go | `time.Now().Unix()` in test filenames | Collision if two tests run same second |
-| cmd/safe-ag/integration_test.go | `waitForContainer` polls 30s with 500ms sleep | May not be enough on CI |
-| cmd/safe-ag/integration_test.go | Hardcoded `testPrefix = "agent-e2e-test"` | Cross-contamination with concurrent suites |
-| cmd/safe-ag/command_test.go | Global flag state (`listJSON`, `outputDiff`) mutated without isolation | Parallel test failure risk |
-| pkg/docker/dind_test.go | `waitForDinD` has 40×500ms polling loop but test mocks bypass it | Real timeout behavior untested |
-| pkg/docker/ssh_test.go | SSH relay wait loop (5×200ms) is mocked away | Actual wait/timeout behavior untested |
-| pkg/config/defaults_test.go | `TestLoadDefaults_OpenError` assumes non-root for permission test | Fails as root |
-| pkg/inject/inject_test.go | `PermissionDenied` tests skip if root | Environment-dependent |
-| pkg/orb/orb_test.go | VM name `"safe-agentic-test-nonexistent-vm-12345"` assumed nonexistent | Could exist in some environments |
+| cmd/safe-ag/deterministic_test.go | Shared container via `sync.Once` + `time.Sleep(5s)` + 40-iteration polling | Fails on slow CI |
+| cmd/safe-ag/deterministic_test.go | Tests modify shared container state (files, branches) without cleanup | Order-dependent failures |
+| cmd/safe-ag/integration_test.go | `waitForContainer` polls 30s × 500ms; other tests use `time.Sleep(2-5s)` | Timing-dependent on slow machines |
+| cmd/safe-ag/integration_test.go | Hardcoded `testPrefix = "agent-e2e-test"` | Cross-contamination if concurrent |
+| cmd/safe-ag/command_test.go | 20+ global flag variables mutated with `defer` reset | Parallel test failure; leaked state if panic |
+| cmd/safe-ag/command_test.go | `captureOutput` redirects `os.Stdout` globally | Not goroutine-safe — any `t.Parallel()` corrupts output |
+| pkg/config/identity_test.go | `TestDetectGitIdentity_Format` calls real `git config` | Environment-dependent; skips in CI |
+| pkg/cost/pricing.go | `lookupPricing` iterates map for prefix matching | Non-deterministic: `"gpt-4o-mini-2024"` could match `"gpt-4o"` or `"gpt-4o-mini"` depending on iteration order — **latent bug** |
+| pkg/docker/dind.go | `RemoveDinDRuntime` and `CleanupAllDinD` return nil unconditionally | Silent failure to clean up privileged DinD containers |
+| pkg/docker/container.go + volume.go | `ContainerExists` and `VolumeExists` treat any error as "not found" | Docker daemon down → silently returns false |
 
 ### D. Tests That Don't Verify Behavior
 
 | File | Test | Issue |
 |------|------|-------|
-| cmd/safe-ag/command_test.go | `TestRetryFeedbackAppended` | String concatenation, not actual retry logic |
-| cmd/safe-ag/command_test.go | `TestContainerEnvVar` | Tests env var parsing helper, never verifies propagation to containers |
-| cmd/safe-ag/spawn_test.go | `TestSpawnDryRunContainsSecurityFlags` | Constructs command manually, doesn't test actual dry-run output |
-| cmd/safe-ag/spawn_test.go | `TestCoalesce` | Tautological: `coalesce("a", "b")` always returns "a" |
-| cmd/safe-ag/integration_test.go | `TestE2E_DiffCommand` | Never creates file changes before running diff |
-| cmd/safe-ag/integration_test.go | `TestE2E_TodoWorkflow` | Adds todo, marks done, but never retrieves to confirm state |
-| pkg/docker/* | All tests using `fake.SetResponse` | Substring-based mock matching allows false positives |
+| cmd/safe-ag/command_test.go | `TestSetupCommand_DockerAvailable` / `_NotAvailable` | Explicitly: "just want to exercise the code path" — zero assertions. |
+| cmd/safe-ag/command_test.go | `TestRunAuditCommand_WithEntries` | `_ = output` — no assertion on what audit printed. |
+| cmd/safe-ag/lifecycle_test.go | `TestRetryFeedbackAppended` / `_NoOriginalPrompt` | Tests manual string concatenation, **not** the actual `runRetry` function. Would pass even if real implementation changed. |
+| cmd/safe-ag/spawn_test.go | `TestSpawnDryRunContainsSecurityFlags` | Constructs command manually — doesn't test actual dry-run output. |
+| All pkg/docker/* tests | FakeExecutor prefix matching | `fake.SetResponse("docker inspect --format", ...)` matches **any** `docker inspect --format` command regardless of label or container. Tests appear to verify behavior but actually only verify a command with the right prefix was called. |
+
+### E. Systemic Issues
+
+1. **FakeExecutor prefix matching is overly permissive.** `strings.HasPrefix` means `fake.SetResponse("docker inspect", "...")` matches both `docker inspect` and `docker inspect --format '{{.State.Running}}'`. Multiple tests appear to verify correct behavior but actually only verify that *some* docker command with the right prefix was called. For a security-focused project, verifying exact command arguments is critical.
+
+2. **No concurrency tests anywhere.** For a tool managing Docker containers and networks, there are no tests for concurrent spawn, concurrent stop, or race conditions in shared auth volume access.
+
+3. **No context timeout tests.** The source uses `context.Context` throughout, but only one test (`TestWaitForDinD_ContextCancel`) tests cancellation — and it cancels immediately rather than testing a deadline.
+
+4. **Error swallowing in production code uncovered by tests.** `ContainerExists`, `VolumeExists`, `RemoveDinDRuntime`, and `CleanupAllDinD` all silently swallow errors. No test documents or asserts this behavior.
+
+5. **Global mutable state in cmd/safe-ag.** 20+ package-level variables for CLI flags are mutated in tests with `defer` reset. This makes parallel test execution impossible and risks state leaks on panic.
 
 ---
 
 ## Recommendations
 
-### Priority 1 — Coverage gaps (target: all packages >= 90%)
+### Priority 1 — Security-critical coverage gaps
 
-1. **tui/**: Add tests for `SortAgents`, `FilterAgents`, `VisibleColumns`, `parsePSOutput`, `mergeStats`. These are pure functions testable without a terminal. Defer UI interaction tests.
-2. **pkg/inject**: Add tests for `ReadClaudeSupportFiles`, `tarFile`, `tarDir`. Create temp directories with known files and verify tar output.
-3. **pkg/fleet**: Add tests for `mergeDefaults` (all 14 fields), `interpolateVars`, and model expansion logic.
-4. **cmd/safe-ag**: Add unit tests for `renderLogEntry`, `extractTokenUsage`, `parsePeriod` edge cases, template operations.
+1. **`shellQuoteArgs` (tui/overlay.go)** — Add adversarial input tests: single quotes, backticks, `$()`, newlines, null bytes, empty args. This is the #1 security risk in the test suite.
+2. **`parsePSOutput` (tui/poller.go)** — Add tests for malformed tab-separated output, missing fields, extra tabs, empty lines.
+3. **`handleAPIStop` (tui/dashboard.go)** — Add input validation tests for agent names from URL paths.
+4. **`ReadClaudeSupportFiles` (pkg/inject)** — Add tests with known temp files, verify tar output contents.
+5. **`interpolateVars` (pkg/fleet)** — Add tests ensuring user-controlled vars can't inject shell commands into prompts.
 
-### Priority 2 — Negative tests
+### Priority 2 — Coverage targets (all packages >= 90%)
 
-5. Add error-path tests for all docker operations (stop failure, rm failure, network create failure).
-6. Add malformed-input tests for YAML/JSON/TOML parsers in fleet, inject, config.
-7. Add boundary tests for `truncate` (maxLen=0, negative, Unicode), `coalesce` (both non-empty), all name validators (Unicode, max-length).
+6. **tui/**: Test `SortAgents`, `FilterAgents`, `VisibleColumns`, `extractText`, `renderSessionLog` (Claude format). All pure functions.
+7. **pkg/inject**: Test `ReadClaudeSupportFiles`, `tarFile`, `tarDir`.
+8. **pkg/fleet**: Test `mergeDefaults` (all 14 fields), model expansion, `depends_on` fixing.
+9. **cmd/safe-ag**: Test `cron.go` (14 functions, 300+ lines, zero coverage), `renderLogEntry`, `extractTokenUsage`, template operations.
 
-### Priority 3 — Flaky pattern fixes
+### Priority 3 — Fix latent bugs found during review
 
-8. Replace hardcoded `time.Sleep` in deterministic_test.go with polling + deadline.
-9. Isolate global flag state in command_test.go (reset in `t.Cleanup`).
-10. Use unique per-test prefixes in integration_test.go instead of shared `testPrefix`.
-11. Replace `time.Now().Unix()` filename generation with `t.Name()` or UUID.
+10. **`lookupPricing` map iteration (pkg/cost)** — Non-deterministic prefix matching. Fix: sort keys by length descending (longest match first) or use a trie.
+11. **`matchesFilter` missing fields (tui/model.go)** — `Activity` and `Fleet` fields omitted from filter check. Likely a bug.
+12. **`RemoveDinDRuntime`/`CleanupAllDinD` silent error swallowing (pkg/docker/dind.go)** — At minimum, log errors. For security, consider returning them.
 
-### Priority 4 — Assertion quality
+### Priority 4 — Test infrastructure improvements
 
-12. Replace `strings.Contains(err.Error(), "not found")` with exact error type checks or `errors.Is`.
-13. Add content validation to all output/list/diff tests (not just "command was called").
-14. Validate timestamp fields against RFC3339 format, not just non-empty.
-15. Replace substring-based mock matching in docker fake with exact command matching.
+13. Replace FakeExecutor's `strings.HasPrefix` matching with exact command matching (or at least longest-prefix matching).
+14. Replace hardcoded `time.Sleep` in integration/deterministic tests with polling + deadline.
+15. Isolate global flag state in command_test.go using `t.Cleanup` or test-local structs.
+16. Replace `captureOutput` (os.Stdout redirect) with `bytes.Buffer` injection for goroutine safety.
+17. Add `t.Setenv` instead of `os.Setenv`/`os.Unsetenv` for environment variable mutation.
+
+### Priority 5 — Missing negative test categories
+
+18. Docker operation failures (stop, rm, network create, image pull).
+19. Malformed input (YAML, JSON, TOML, base64, credentials files).
+20. Boundary values (empty strings, nil slices, zero/negative numbers, unicode, max-length strings).
+21. Context cancellation and timeout paths.
+22. Concurrent access to shared resources.
