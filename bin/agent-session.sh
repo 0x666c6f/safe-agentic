@@ -141,10 +141,10 @@ launch_claude() {
   if $has_prompt; then
     if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
       # Fleet/pipeline mode: pass -p directly to Claude so it runs
-      # non-interactively and exits when done.
-      rendered=$(quote_cmd "${cmd[@]}")
-      script -qfc "$rendered" /dev/null || return $?
-      return 0
+      # non-interactively and exits when done. Run directly (no script
+      # wrapper) so output is visible in the tmux pane for preview.
+      exec "${cmd[@]}"
+      return $?
     fi
 
     # Interactive mode: extract prompt, save to file, send via tmux send-keys.
