@@ -238,19 +238,19 @@ func findTUIBinary() (string, error) {
 	// Check next to safe-ag binary first
 	self, err := os.Executable()
 	if err == nil {
-		candidate := filepath.Join(filepath.Dir(self), "agent-tui")
+		candidate := filepath.Join(filepath.Dir(self), "safe-ag-tui")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
 	}
 	// Fall back to PATH
-	return exec.LookPath("agent-tui")
+	return exec.LookPath("safe-ag-tui")
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
 	bin, err := findTUIBinary()
 	if err != nil {
-		return fmt.Errorf("agent-tui not found. Build with: make build-tui")
+		return fmt.Errorf("safe-ag-tui not found. Build with: make build-tui")
 	}
 	return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
 }
@@ -258,7 +258,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 func runDashboard(cmd *cobra.Command, args []string) error {
 	bin, err := findTUIBinary()
 	if err != nil {
-		return fmt.Errorf("agent-tui not found. Build with: make build-tui")
+		return fmt.Errorf("safe-ag-tui not found. Build with: make build-tui")
 	}
 	return syscall.Exec(bin, []string{bin, "--dashboard", "--bind", dashboardBind}, os.Environ())
 }
