@@ -175,11 +175,12 @@ func (at *AgentTable) refresh() {
 	at.rowToAgent = make(map[int]int)
 	lastFleet := ""
 	for agentIdx, agent := range at.agents {
-		// Insert fleet group header when fleet changes
+		// Insert fleet/pipeline group header when fleet changes
 		if agent.Fleet != "" && agent.Fleet != lastFleet {
-			cell := tview.NewTableCell(fmt.Sprintf("┄ %s ", agent.Fleet)).
-				SetTextColor(colorHeader).
-				SetAttributes(tcell.AttrDim).
+			icon := "🔄"
+			cell := tview.NewTableCell(fmt.Sprintf(" %s %s", icon, agent.Fleet)).
+				SetTextColor(tcell.ColorGreen).
+				SetAttributes(tcell.AttrBold).
 				SetSelectable(false).
 				SetExpansion(1)
 			at.table.SetCell(row, 0, cell)
@@ -190,8 +191,33 @@ func (at *AgentTable) refresh() {
 		}
 		lastFleet = agent.Fleet
 
+		// Determine tree connector for fleet agents
+		isFleetAgent := agent.Fleet != ""
+		isLastInFleet := isFleetAgent && (agentIdx+1 >= len(at.agents) || at.agents[agentIdx+1].Fleet != agent.Fleet)
+		treePrefix := ""
+		if isFleetAgent {
+			if isLastInFleet {
+				treePrefix = " └── "
+			} else {
+				treePrefix = " ├── "
+			}
+		}
+
 		for ci, colIdx := range visibleCols {
 			value := fieldByColumn(agent, colIdx)
+
+			// Add tree connector to name column
+			if colIdx == 0 && treePrefix != "" {
+				typeIcon := ""
+				switch agent.Type {
+				case "claude":
+					typeIcon = "🟠 "
+				case "codex":
+					typeIcon = "🔵 "
+				}
+				value = treePrefix + typeIcon + value
+			}
+
 			cell := tview.NewTableCell(padRight(value, columns[colIdx].Width)).
 				SetExpansion(1)
 
@@ -214,8 +240,8 @@ func (at *AgentTable) refresh() {
 					cell.SetTextColor(colorExited)
 				}
 			}
-			// Color type column
-			if colIdx == 1 {
+			// Color type column (skip if already icon-prefixed)
+			if colIdx == 1 && !isFleetAgent {
 				switch agent.Type {
 				case "claude":
 					cell.SetTextColor(tcell.ColorOrange)
