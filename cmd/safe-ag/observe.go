@@ -76,17 +76,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		configDir = "/home/agent/.codex"
 	}
 
-	// Ensure container is running for docker exec (auto-start if stopped)
-	stop, err := ensureRunning(ctx, exec, name)
-	if err != nil {
-		return err
-	}
-	defer stop()
-
 	// Find the session JSONL that matches this container.
 	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
 	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
 	searchDirs := sessionSearchDirs(configDir, repoLabel)
+	running, _ := docker.IsRunning(ctx, exec, name)
 
 	// Find the most recent JSONL (simpler than Python matching for reliability)
 	findCmd := fmt.Sprintf(
@@ -100,20 +94,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	_ = createdAt // used for future per-container matching refinement
 
-	out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
+	out, err := readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, logsLines*3, running)
 	if err != nil {
-		return fmt.Errorf("find session log: %w", err)
-	}
-	jsonlPath := strings.TrimSpace(string(out))
-	if jsonlPath == "" {
-		return fmt.Errorf("no session log found in %s", configDir)
-	}
-
-	// Read and render the JSONL
-	tailCmd := fmt.Sprintf("tail -n %d %s", logsLines*3, jsonlPath)
-	out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
-	if err != nil {
-		return fmt.Errorf("read session log: %w", err)
+		return err
 	}
 
 	count := 0
@@ -130,6 +113,62 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDir string, searchDirs []string, findCmd string, tailCount int, running bool) ([]byte, error) {
+	if running {
+		out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
+		if err != nil {
+			return nil, fmt.Errorf("find session log: %w", err)
+		}
+		jsonlPath := strings.TrimSpace(string(out))
+		if jsonlPath == "" {
+			return nil, fmt.Errorf("no session log found in %s", configDir)
+		}
+		tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, jsonlPath)
+		out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
+		if err != nil {
+			return nil, fmt.Errorf("read session log: %w", err)
+		}
+		return out, nil
+	}
+
+	tmpDir := "/tmp/safe-agentic-logs-" + strings.ReplaceAll(name, "/", "-")
+	if _, err := exec.Run(ctx, "bash", "-c", "rm -rf "+shellQuote(tmpDir)+" && mkdir -p "+shellQuote(tmpDir)); err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer exec.Run(context.Background(), "bash", "-c", "rm -rf "+shellQuote(tmpDir))
+
+	if _, err := exec.Run(ctx, "docker", "cp", name+":"+configDir, tmpDir+"/"); err != nil {
+		return nil, fmt.Errorf("copy session logs: %w", err)
+	}
+
+	localRoot := filepath.Join(tmpDir, filepath.Base(configDir))
+	localDirs := make([]string, 0, len(searchDirs))
+	for _, dir := range searchDirs {
+		localDirs = append(localDirs, filepath.Join(localRoot, strings.TrimPrefix(dir, configDir+"/")))
+	}
+	localFindCmd := fmt.Sprintf(
+		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		strings.Join(localDirs, " "))
+	out, err := exec.Run(ctx, "bash", "-c", localFindCmd)
+	if err != nil {
+		return nil, fmt.Errorf("find session log: %w", err)
+	}
+	jsonlPath := strings.TrimSpace(string(out))
+	if jsonlPath == "" {
+		return nil, fmt.Errorf("no session log found in %s", configDir)
+	}
+	tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, shellQuote(jsonlPath))
+	out, err = exec.Run(ctx, "bash", "-c", tailCmd)
+	if err != nil {
+		return nil, fmt.Errorf("read session log: %w", err)
+	}
+	return out, nil
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // ensureRunning starts a stopped container and returns a cleanup function

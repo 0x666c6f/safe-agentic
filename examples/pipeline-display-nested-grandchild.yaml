@@ -1,0 +1,13 @@
+name: display-nested-grandchild
+defaults:
+  auto_trust: true
+stages:
+  - name: grandchild-leaf
+    agents:
+      - name: grandchild-leaf
+        type: codex
+        prompt: Reply OK.
+  - name: level-3
+    depends_on:
+      - grandchild-leaf
+    pipeline: examples/pipeline-display-nested-greatgrandchild.yaml

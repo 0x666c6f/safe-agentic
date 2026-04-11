@@ -49,6 +49,7 @@ type SpawnOpts struct {
 	MaxCost          string
 	Notify           string
 	FleetVolume      string
+	Hierarchy        string
 	DryRun           bool
 }
 
@@ -391,6 +392,9 @@ func executeSpawn(opts SpawnOpts) error {
 		cmd.AddLabel(labels.Fleet, opts.FleetVolume)
 		// Tell agent-session.sh to pass -p directly to Claude (non-interactive exit)
 		cmd.AddEnv("SAFE_AGENTIC_FLEET", "1")
+	}
+	if opts.Hierarchy != "" {
+		cmd.AddLabel(labels.Hierarchy, opts.Hierarchy)
 	}
 
 	// Docker access

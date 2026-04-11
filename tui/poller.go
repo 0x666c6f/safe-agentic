@@ -212,6 +212,7 @@ func fetchAgents() ([]Agent, error) {
 		`{{.Label "safe-agentic.docker"}}`,
 		`{{.Label "safe-agentic.network-mode"}}`,
 		`{{.Label "safe-agentic.fleet"}}`,
+		`{{.Label "safe-agentic.hierarchy"}}`,
 		"{{.Status}}",
 	}, "\t")
 	psData, psErr := execOrb("docker", "ps", "-a",
@@ -246,10 +247,10 @@ func parsePSOutput(data []byte) []Agent {
 			continue
 		}
 		parts := strings.Split(string(line), "\t")
-		if len(parts) < 10 {
+		if len(parts) < 11 {
 			continue
 		}
-		running := strings.HasPrefix(parts[9], "Up")
+		running := strings.HasPrefix(parts[10], "Up")
 		agents = append(agents, Agent{
 			Name:        parts[0],
 			Type:        parts[1],
@@ -260,7 +261,8 @@ func parsePSOutput(data []byte) []Agent {
 			Docker:      parts[6],
 			NetworkMode: parts[7],
 			Fleet:       parts[8],
-			Status:      parts[9],
+			Hierarchy:   parts[9],
+			Status:      parts[10],
 			Running:     running,
 		})
 	}

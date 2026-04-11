@@ -415,6 +415,14 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
+    if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ]; then
+      (
+        # Codex trust prompt is interactive-only; accept it in tmux so
+        # fleet/pipeline runs can progress without manual input.
+        sleep 4
+        tmux send-keys -t "$TMUX_SESSION_NAME" Enter
+      ) &
+    fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     ;;
   *)

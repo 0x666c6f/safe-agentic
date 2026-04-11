@@ -31,6 +31,11 @@ func (ac *Actions) selectedOrWarn() *Agent {
 	agent := ac.app.table.SelectedAgent()
 	if agent == nil {
 		ac.app.footer.ShowStatus("No agent selected", true)
+		return nil
+	}
+	if agent.Deleting {
+		ac.app.footer.ShowStatus(fmt.Sprintf("%s is deleting", agent.Name), true)
+		return nil
 	}
 	return agent
 }
@@ -236,6 +241,7 @@ func (ac *Actions) StopAgent() {
 		if !yes {
 			return
 		}
+		ac.app.table.MarkDeleting(*agent)
 		ac.app.footer.ShowStatus(fmt.Sprintf("Stopping %s...", name), false)
 		go func() {
 			cmd := exec.Command(cliBinary, "stop", name)
@@ -243,8 +249,10 @@ func (ac *Actions) StopAgent() {
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
+					ac.app.table.ClearDeleting(name)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stop failed: %s", strings.TrimSpace(string(out))), true)
 				} else {
+					ac.app.table.FinishDeleting(name)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stopped %s", name), false)
 				}
 			})
@@ -782,15 +790,26 @@ func (ac *Actions) KillAll() {
 		if !yes {
 			return
 		}
+		for _, agent := range ac.app.table.allAgents {
+			ac.app.table.MarkDeleting(agent)
+		}
 		ac.app.footer.ShowStatus("Stopping all agents...", false)
 		go func() {
 			cmd := exec.Command(cliBinary, "stop", "--all")
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
+				var names []string
+				for _, agent := range ac.app.table.allAgents {
+					if agent.Deleting {
+						names = append(names, agent.Name)
+					}
+				}
 				if err != nil {
+					ac.app.table.ClearDeleting(names...)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stop all failed: %s", strings.TrimSpace(string(out))), true)
 				} else {
+					ac.app.table.FinishDeleting(names...)
 					ac.app.footer.ShowStatus("All agents stopped", false)
 				}
 			})

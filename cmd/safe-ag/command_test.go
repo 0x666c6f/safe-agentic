@@ -232,6 +232,36 @@ func TestStopCommand_All_NoContainers(t *testing.T) {
 	}
 }
 
+func TestRunLogs_StoppedContainerUsesCopy(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.agent-type"}}`, "claude\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.repo-display"}}`, "org/repo\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "false\n")
+	fake.SetResponse("docker cp "+containerName+":/home/agent/.claude", "")
+	fake.SetResponse("bash -c find", "/tmp/safe-agentic-logs-test/.claude/sessions/test.jsonl\n")
+	fake.SetResponse("bash -c tail -n", `{"type":"user","message":{"role":"user","content":"hello"}}`+"\n")
+
+	output := captureOutput(func() {
+		if err := runLogs(logsCmd, []string{containerName}); err != nil {
+			t.Fatalf("runLogs() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "> hello") {
+		t.Fatalf("expected rendered log output, got:\n%s", output)
+	}
+	if cmds := fake.CommandsMatching("docker start"); len(cmds) != 0 {
+		t.Fatalf("stopped logs should not start container, got %d docker start command(s)", len(cmds))
+	}
+	if cmds := fake.CommandsMatching("docker cp"); len(cmds) == 0 {
+		t.Fatal("expected docker cp for stopped container logs")
+	}
+}
+
 // ─── cleanup ──────────────────────────────────────────────────────────────────
 
 func TestCleanupCommand(t *testing.T) {
@@ -327,7 +357,7 @@ func TestDiffCommand(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -356,7 +386,7 @@ func TestDiffCommand_Stat(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -385,7 +415,7 @@ func TestOutputCommand_Diff(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -412,7 +442,7 @@ func TestOutputCommand_Files(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -440,7 +470,7 @@ func TestOutputCommand_Commits(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -589,7 +619,7 @@ func TestTodoAdd(t *testing.T) {
 	}
 
 	// Verify write was called
-	writeCmds := fake.CommandsMatching("docker exec "+containerName)
+	writeCmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(writeCmds) == 0 {
 		t.Fatal("expected docker exec write command")
 	}
@@ -1310,7 +1340,7 @@ func TestCheckpointRevert(t *testing.T) {
 	})
 	_ = output
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -1340,7 +1370,7 @@ func TestPRCommand(t *testing.T) {
 		}
 	})
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -1378,7 +1408,7 @@ func TestReviewCommand(t *testing.T) {
 	})
 	_ = output
 
-	cmds := fake.CommandsMatching("docker exec "+containerName)
+	cmds := fake.CommandsMatching("docker exec " + containerName)
 	if len(cmds) == 0 {
 		t.Fatal("expected docker exec command")
 	}
@@ -2653,6 +2683,31 @@ func TestSpawnCodex_DryRun(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestSpawnCodexAutoTrustWithHierarchy_DryRun(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	opts := SpawnOpts{
+		AgentType: "codex",
+		Repos:     []string{"https://github.com/org/repo.git"},
+		AutoTrust: true,
+		Hierarchy: "display-nested/display-nested-child",
+		DryRun:    true,
+	}
+	output := captureOutput(func() {
+		err := executeSpawn(opts)
+		if err != nil {
+			t.Fatalf("executeSpawn codex hierarchy error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "SAFE_AGENTIC_AUTO_TRUST=1") {
+		t.Fatalf("dry-run missing auto-trust env:\n%s", output)
+	}
+	if !strings.Contains(output, "safe-agentic.hierarchy=display-nested/display-nested-child") {
+		t.Fatalf("dry-run missing hierarchy label:\n%s", output)
 	}
 }
 

@@ -17,6 +17,7 @@ const (
 	OnFailB64     = "safe-agentic.on-fail-b64"
 	NotifyB64     = "safe-agentic.notify-b64"
 	Fleet         = "safe-agentic.fleet"
+	Hierarchy     = "safe-agentic.hierarchy"
 	Terminal      = "safe-agentic.terminal"
 	ForkedFrom    = "safe-agentic.forked-from"
 	ForkLabel     = "safe-agentic.fork-label"

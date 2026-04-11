@@ -208,15 +208,22 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 	timestamp := time.Now().Format("20060102-150405")
-	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp)
+	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp, "", nil)
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
-func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string) error {
+func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
 	name := m.Name
 	if name == "" {
 		name = "(inline)"
 	}
+	if rootLabel == "" {
+		rootLabel = name
+		if rootLabel == "(inline)" {
+			rootLabel = "pipeline-" + timestamp
+		}
+	}
+	currentPath := append(append([]string{}, parentPath...), name)
 
 	completed := make(map[string]bool)
 	remaining := make([]fleet.PipelineStage, len(m.Stages))
@@ -251,7 +258,7 @@ func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.Pipeli
 				if err != nil {
 					return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 				}
-				if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp); err != nil {
+				if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp, rootLabel, currentPath); err != nil {
 					return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 				}
 				continue
@@ -261,11 +268,8 @@ func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.Pipeli
 				if spec.Type == "" {
 					continue
 				}
-				fleetLabel := name
-				if fleetLabel == "(inline)" {
-					fleetLabel = "pipeline-" + timestamp
-				}
-				opts := specToSpawnOpts(spec, fleetLabel)
+				opts := specToSpawnOpts(spec, rootLabel)
+				opts.Hierarchy = strings.Join(currentPath, "/")
 				opts.Background = true
 				if err := executeSpawn(opts); err != nil {
 					return fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
@@ -348,21 +352,21 @@ func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
 		repos = []string{spec.Repo}
 	}
 	return SpawnOpts{
-		AgentType:   spec.Type,
-		Repos:       repos,
-		Name:        spec.Name,
-		Prompt:      spec.Prompt,
-		SSH:         spec.SSH,
-		ReuseAuth:   spec.ReuseAuth,
-		ReuseGHAuth: spec.ReuseGHAuth,
-		AutoTrust:   spec.AutoTrust,
-		Background:  spec.Background,
+		AgentType:    spec.Type,
+		Repos:        repos,
+		Name:         spec.Name,
+		Prompt:       spec.Prompt,
+		SSH:          spec.SSH,
+		ReuseAuth:    spec.ReuseAuth,
+		ReuseGHAuth:  spec.ReuseGHAuth,
+		AutoTrust:    spec.AutoTrust,
+		Background:   spec.Background,
 		DockerAccess: spec.Docker,
-		Network:     spec.Network,
-		Memory:      spec.Memory,
-		CPUs:        spec.CPUs,
-		AWSProfile:  spec.AWS,
-		FleetVolume: fleetVolume,
+		Network:      spec.Network,
+		Memory:       spec.Memory,
+		CPUs:         spec.CPUs,
+		AWSProfile:   spec.AWS,
+		FleetVolume:  fleetVolume,
 	}
 }
 

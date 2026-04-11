@@ -47,6 +47,13 @@ launch_codex() {
     return 0
   fi
 
+  if [ $# -gt 0 ] && { [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ] || [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; }; then
+    # Non-interactive pipeline/background runs must exit after the prompt.
+    # `codex exec` does that; interactive `codex PROMPT` drops into the TUI.
+    codex exec --dangerously-bypass-approvals-and-sandbox "$@" || return $?
+    return 0
+  fi
+
   if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
     # Background mode: run via script PTY (needed for auth refresh).
     # Output goes to stdout → docker logs. No tmux.
@@ -72,16 +79,19 @@ launch_codex() {
 }
 
 trust_workspace() {
-  # Auto-trust the current workspace so Claude doesn't prompt
+  # Auto-trust the current workspace so Claude/Codex don't prompt
   # "Do you trust this project?" which blocks non-interactive sessions.
   # Only enabled when SAFE_AGENTIC_AUTO_TRUST=1 (set via --auto-trust flag).
   [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || return 0
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local settings_local="$claude_dir/settings.json"
+  local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+  local codex_config="$codex_dir/config.toml"
   local cwd
   cwd="$(pwd)"
 
   mkdir -p "$claude_dir" 2>/dev/null || return 0
+  mkdir -p "$codex_dir" 2>/dev/null || return 0
 
   python3 -c "
 import json, sys, os, glob
@@ -114,6 +124,18 @@ if changed:
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
 " 2>/dev/null || true
+
+  if [ -d "$codex_dir" ] && [ -w "$codex_dir" ]; then
+    touch "$codex_config" 2>/dev/null || true
+    if [ -f "$codex_config" ] && [ -w "$codex_config" ]; then
+      local project
+      for project in /workspace "$cwd"; do
+        if ! grep -Fq "[projects.\"$project\"]" "$codex_config" 2>/dev/null; then
+          printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$project" >>"$codex_config"
+        fi
+      done
+    fi
+  fi
 }
 
 launch_claude() {
