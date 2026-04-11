@@ -57,8 +57,12 @@ launch_codex() {
   fi
 
   if [ $# -gt 0 ]; then
-    # Run the prompt first, then continue into interactive mode so the
-    # session stays alive for attach/peek in detached containers.
+    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+      # Fleet/pipeline mode: run prompt and exit when done.
+      exec codex --yolo "$@"
+      return $?
+    fi
+    # Interactive mode: run prompt, then keep session alive for attach/peek.
     codex --yolo "$@"
     codex --yolo resume --last || return $?
     return 0
