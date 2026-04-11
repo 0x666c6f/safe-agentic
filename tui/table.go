@@ -15,8 +15,9 @@ type AgentTable struct {
 	filter       string
 	sortCol      int
 	sortAsc      bool
-	selectedName string // track selection across refreshes by name
-	loading      bool   // true until first real Update
+	selectedName string       // track selection across refreshes by name
+	loading      bool         // true until first real Update
+	rowToAgent   map[int]int  // table row → agents index (skips separator rows)
 }
 
 // NewAgentTable creates the table view.
@@ -84,7 +85,13 @@ func (at *AgentTable) SetLoadingFrame(frame string) {
 // SelectedAgent returns the currently selected agent, or nil.
 func (at *AgentTable) SelectedAgent() *Agent {
 	row, _ := at.table.GetSelection()
-	idx := row - 1 // row 0 is header
+	if row < 1 {
+		return nil
+	}
+	idx, ok := at.rowToAgent[row]
+	if !ok {
+		return nil
+	}
 	if idx >= 0 && idx < len(at.agents) {
 		a := at.agents[idx]
 		return &a
@@ -163,8 +170,26 @@ func (at *AgentTable) refresh() {
 		return
 	}
 
-	// Data rows
-	for ri, agent := range at.agents {
+	// Data rows — group by fleet/pipeline if present
+	row := 1
+	at.rowToAgent = make(map[int]int)
+	lastFleet := ""
+	for agentIdx, agent := range at.agents {
+		// Insert fleet group header when fleet changes
+		if agent.Fleet != "" && agent.Fleet != lastFleet {
+			cell := tview.NewTableCell(fmt.Sprintf("┄ %s ", agent.Fleet)).
+				SetTextColor(colorHeader).
+				SetAttributes(tcell.AttrDim).
+				SetSelectable(false).
+				SetExpansion(1)
+			at.table.SetCell(row, 0, cell)
+			for ci := 1; ci < len(visibleCols); ci++ {
+				at.table.SetCell(row, ci, tview.NewTableCell("").SetSelectable(false))
+			}
+			row++
+		}
+		lastFleet = agent.Fleet
+
 		for ci, colIdx := range visibleCols {
 			value := fieldByColumn(agent, colIdx)
 			cell := tview.NewTableCell(padRight(value, columns[colIdx].Width)).
@@ -199,8 +224,10 @@ func (at *AgentTable) refresh() {
 				}
 			}
 
-			at.table.SetCell(ri+1, ci, cell)
+			at.table.SetCell(row, ci, cell)
 		}
+		at.rowToAgent[row] = agentIdx
+		row++
 	}
 
 	// Restore selection by name
@@ -209,20 +236,23 @@ func (at *AgentTable) refresh() {
 
 func (at *AgentTable) restoreSelection() {
 	if at.selectedName == "" {
-		if at.table.GetRowCount() > 1 {
-			at.table.Select(1, 0)
+		// Select first data row
+		for row, _ := range at.rowToAgent {
+			at.table.Select(row, 0)
+			return
 		}
 		return
 	}
-	for i, a := range at.agents {
-		if a.Name == at.selectedName {
-			at.table.Select(i+1, 0)
+	for row, idx := range at.rowToAgent {
+		if idx < len(at.agents) && at.agents[idx].Name == at.selectedName {
+			at.table.Select(row, 0)
 			return
 		}
 	}
 	// Name not found — select first data row
-	if at.table.GetRowCount() > 1 {
-		at.table.Select(1, 0)
+	for row, _ := range at.rowToAgent {
+		at.table.Select(row, 0)
+		return
 	}
 }
 

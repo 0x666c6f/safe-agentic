@@ -15,6 +15,7 @@ type Agent struct {
 	GHAuth      string
 	Docker      string
 	NetworkMode string
+	Fleet       string // fleet/pipeline volume name (empty if standalone)
 	Status      string
 	Running     bool
 	Activity    string // "Working", "Idle", "Stopped"
@@ -49,8 +50,21 @@ var columns = []Column{
 }
 
 // SortAgents sorts agents by column index.
+// Fleet/pipeline agents are grouped together (fleet first, then standalone).
 func SortAgents(agents []Agent, col int, ascending bool) {
 	sort.SliceStable(agents, func(i, j int) bool {
+		// Primary: group by fleet (fleet agents first, grouped together)
+		fi, fj := agents[i].Fleet, agents[j].Fleet
+		if fi != fj {
+			if fi == "" {
+				return false // standalone after fleet
+			}
+			if fj == "" {
+				return true // fleet before standalone
+			}
+			return fi < fj // different fleets sorted alphabetically
+		}
+		// Secondary: sort by selected column within group
 		a, b := fieldByColumn(agents[i], col), fieldByColumn(agents[j], col)
 		if ascending {
 			return a < b

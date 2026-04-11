@@ -246,6 +246,7 @@ func parsePSOutput(data []byte) []Agent {
 			GHAuth:      labels["safe-agentic.gh-auth"],
 			Docker:      labels["safe-agentic.docker"],
 			NetworkMode: labels["safe-agentic.network-mode"],
+			Fleet:       labels["safe-agentic.fleet"],
 			Status:      entry.Status,
 			Running:     running,
 		})
