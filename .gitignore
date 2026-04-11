@@ -1,3 +1,5 @@
 .env
 *.local
 site/
+bin/safe-ag
+bin/safe-ag-tui

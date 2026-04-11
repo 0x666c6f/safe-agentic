@@ -1,0 +1,13 @@
+name: display-nested
+defaults:
+  auto_trust: true
+stages:
+  - name: root-leaf
+    agents:
+      - name: root-leaf
+        type: codex
+        prompt: Reply OK.
+  - name: level-1
+    depends_on:
+      - root-leaf
+    pipeline: examples/pipeline-display-nested-child.yaml

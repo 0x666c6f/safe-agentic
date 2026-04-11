@@ -89,6 +89,15 @@ case "${1:-}" in
   start-server)
     exit 0
     ;;
+  send-keys)
+    shift
+    [ "${1:-}" = "-t" ] || { echo "unexpected tmux send-keys args: $*" >&2; exit 1; }
+    shift
+    session_name="${1:-}"
+    shift
+    printf 'tmux-send-keys|%s|%s\n' "$session_name" "$*" >>"${TEST_EXEC_LOG:?}"
+    exit 0
+    ;;
   set-option)
     exit 0
     ;;
@@ -286,6 +295,27 @@ assert_status 0 "codex with auth exits cleanly"
 codex_existing_log="$(cat "$EXEC_LOG")"
 assert_not_contains "$codex_existing_log" "login --device-auth" "codex skips login with auth"
 assert_contains "$codex_existing_log" "codex|$RUN_DIR|--yolo fix" "codex exec with auth"
+
+# --- codex auto-trust sends Enter to tmux session ---
+printf '{}\n' >"$HOME_DIR/.codex/auth.json"
+RUN_ARGS=(fix)
+run_entrypoint AGENT_TYPE=codex SAFE_AGENTIC_AUTO_TRUST=1
+assert_status 0 "codex auto-trust exits cleanly"
+assert_contains "$(cat "$EXEC_LOG")" "tmux-send-keys|safe-agentic|Enter" "codex auto-trust presses Enter"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" '[projects."/workspace"]' "codex auto-trust writes workspace project"
+assert_contains "$(cat "$HOME_DIR/.codex/config.toml")" 'trust_level = "trusted"' "codex auto-trust marks workspace trusted"
+
+# --- claude auto-trust tolerates read-only codex home ---
+RO_CODEX_HOME="$TMP_DIR/ro-codex"
+rm -rf "$RO_CODEX_HOME"
+mkdir -p "$RO_CODEX_HOME"
+chmod 555 "$RO_CODEX_HOME"
+RUN_ARGS=(--print foo)
+run_entrypoint AGENT_TYPE=claude SAFE_AGENTIC_AUTO_TRUST=1 "CODEX_HOME=$RO_CODEX_HOME"
+assert_status 0 "claude auto-trust with read-only codex home exits cleanly"
+assert_contains "$(cat "$EXEC_LOG")" "tmux-send-keys|safe-agentic|Enter" "claude auto-trust presses Enter"
+assert_not_contains "$(cat "$STDERR_LOG")" "config.toml" "claude auto-trust skips codex config write on read-only home"
+chmod 755 "$RO_CODEX_HOME"
 
 # --- existing config files are preserved ---
 cat >"$HOME_DIR/.codex/config.toml" <<'EOF'

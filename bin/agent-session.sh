@@ -3,9 +3,19 @@ set -euo pipefail
 
 SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
 SESSION_STATE_FILE="$SESSION_STATE_DIR/started"
+SESSION_EVENTS_DIR="$SESSION_STATE_DIR"
+SESSION_EVENTS_FILE="$SESSION_EVENTS_DIR/session-events.jsonl"
 AGENT_TYPE="${AGENT_TYPE:-shell}"
 
 mkdir -p "$SESSION_STATE_DIR"
+
+write_session_event() {
+  local event_type="$1" data="${2:-"{}"}"
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$SESSION_EVENTS_DIR"
+  printf '{"ts":"%s","type":"%s","data":%s}\n' "$ts" "$event_type" "$data" >> "$SESSION_EVENTS_FILE"
+}
 
 resuming=false
 if [ -f "$SESSION_STATE_FILE" ]; then
@@ -33,7 +43,15 @@ launch_codex() {
   fi
 
   if $resuming; then
-    exec codex --yolo resume --last
+    codex --yolo resume --last || return $?
+    return 0
+  fi
+
+  if [ $# -gt 0 ] && { [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ] || [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; }; then
+    # Non-interactive pipeline/background runs must exit after the prompt.
+    # `codex exec` does that; interactive `codex PROMPT` drops into the TUI.
+    codex exec --dangerously-bypass-approvals-and-sandbox "$@" || return $?
+    return 0
   fi
 
   if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
@@ -41,30 +59,39 @@ launch_codex() {
     # Output goes to stdout → docker logs. No tmux.
     local rendered
     rendered=$(quote_cmd codex --yolo "$@")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 
   if [ $# -gt 0 ]; then
-    # Run the prompt first, then continue into interactive mode so the
-    # session stays alive for attach/peek in detached containers.
+    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+      # Fleet/pipeline mode: run prompt and exit when done.
+      exec codex --yolo "$@"
+      return $?
+    fi
+    # Interactive mode: run prompt, then keep session alive for attach/peek.
     codex --yolo "$@"
-    exec codex --yolo resume --last
+    codex --yolo resume --last || return $?
+    return 0
   fi
 
-  exec codex --yolo
+  codex --yolo || return $?
 }
 
 trust_workspace() {
-  # Auto-trust the current workspace so Claude doesn't prompt
+  # Auto-trust the current workspace so Claude/Codex don't prompt
   # "Do you trust this project?" which blocks non-interactive sessions.
   # Only enabled when SAFE_AGENTIC_AUTO_TRUST=1 (set via --auto-trust flag).
   [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || return 0
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local settings_local="$claude_dir/settings.json"
+  local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+  local codex_config="$codex_dir/config.toml"
   local cwd
   cwd="$(pwd)"
 
   mkdir -p "$claude_dir" 2>/dev/null || return 0
+  mkdir -p "$codex_dir" 2>/dev/null || return 0
 
   python3 -c "
 import json, sys, os, glob
@@ -97,6 +124,18 @@ if changed:
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
 " 2>/dev/null || true
+
+  if [ -d "$codex_dir" ] && [ -w "$codex_dir" ]; then
+    touch "$codex_config" 2>/dev/null || true
+    if [ -f "$codex_config" ] && [ -w "$codex_config" ]; then
+      local project
+      for project in /workspace "$cwd"; do
+        if ! grep -Fq "[projects.\"$project\"]" "$codex_config" 2>/dev/null; then
+          printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$project" >>"$codex_config"
+        fi
+      done
+    fi
+  fi
 }
 
 launch_claude() {
@@ -121,11 +160,21 @@ launch_claude() {
     # Background mode: run with -p via script PTY (needed for OAuth refresh).
     # Output goes to stdout → docker logs. No tmux.
     rendered=$(quote_cmd "${cmd[@]}")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 
   if $has_prompt; then
-    # Extract the prompt text from args (-p "prompt text")
+    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+      # Fleet/pipeline mode: pass -p directly to Claude so it runs
+      # non-interactively and exits when done. Run directly (no script
+      # wrapper) so output is visible in the tmux pane for preview.
+      exec "${cmd[@]}"
+      return $?
+    fi
+
+    # Interactive mode: extract prompt, save to file, send via tmux send-keys.
+    # This keeps Claude in full interactive mode with live output in the pane.
     local prompt_text=""
     local skip_next=false
     for arg in "$@"; do
@@ -138,30 +187,38 @@ launch_claude() {
       fi
     done
 
-    # Save prompt to a file; the entrypoint will send it via tmux send-keys
-    # after the interactive session starts. This keeps Claude in full
-    # interactive mode with live output visible in the tmux pane.
     echo "$prompt_text" > "$SESSION_STATE_DIR/pending-prompt"
     rendered=$(quote_cmd claude --dangerously-skip-permissions)
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   else
     rendered=$(quote_cmd "${cmd[@]}")
-    exec script -qfc "$rendered" /dev/null
+    script -qfc "$rendered" /dev/null || return $?
+    return 0
   fi
 }
 
 launch_shell() {
-  exec bash -il "$@"
+  bash -il "$@" || return $?
 }
 
+write_session_event "session.start" \
+  "$(printf '{"agent":"%s","repos":"%s"}' "${AGENT_TYPE:-unknown}" "${REPOS:-}")"
+
+agent_exit_code=0
 case "$AGENT_TYPE" in
   codex)
-    launch_codex "$@"
+    launch_codex "$@" || agent_exit_code=$?
     ;;
   claude)
-    launch_claude "$@"
+    launch_claude "$@" || agent_exit_code=$?
     ;;
   *)
-    launch_shell "$@"
+    launch_shell "$@" || agent_exit_code=$?
     ;;
 esac
+
+write_session_event "session.end" \
+  "$(printf '{"exit_code":%d}' "$agent_exit_code")"
+
+exit "$agent_exit_code"

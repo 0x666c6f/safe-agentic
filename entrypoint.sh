@@ -33,15 +33,19 @@ ensure_codex_config() {
 
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
-  [ -f "$codex_config" ] && return 0
+  # Always overwrite config from host if injected
   if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
     echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
+  [ -f "$codex_config" ] && return 0
 
   cat >"$codex_config" 2>/dev/null <<'EOF' || true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+[projects."/workspace"]
+trust_level = "trusted"
 EOF
 }
 
@@ -62,11 +66,12 @@ ensure_claude_config() {
     fi
   fi
 
-  [ -f "$claude_config" ] && return 0
+  # Always overwrite settings from host if injected (even if volume has stale copy)
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
+  [ -f "$claude_config" ] && return 0
 
   cat >"$claude_config" 2>/dev/null <<'EOF' || true
 {
@@ -229,6 +234,12 @@ case "${AGENT_TYPE:-}" in
   *)      ensure_codex_config; ensure_claude_support_files; ensure_claude_config ;;
 esac
 
+# Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/
+# which places .claude.json at ~/.claude/.claude.json. Symlink so both paths work.
+if [ -f "$HOME/.claude/.claude.json" ] && [ ! -e "$HOME/.claude.json" ]; then
+  ln -sf "$HOME/.claude/.claude.json" "$HOME/.claude.json" 2>/dev/null || true
+fi
+
 # Inject security preamble into user-level CLAUDE.md / AGENTS.md
 inject_security_preamble
 
@@ -243,7 +254,9 @@ fi
 # Clone repositories
 # ---------------------------------------------------------------------------
 if [ -n "${REPOS:-}" ]; then
-  IFS=',' read -ra REPO_LIST <<< "$REPOS"
+  # Support both comma and space delimiters (bash CLI used commas, Go CLI uses spaces)
+  repos_normalized="${REPOS//,/ }"
+  IFS=' ' read -ra REPO_LIST <<< "$repos_normalized"
   for repo_url in "${REPO_LIST[@]}"; do
     repo_url=$(echo "$repo_url" | xargs)  # trim whitespace
     clone_path=$(repo_clone_path "$repo_url") || {
@@ -359,6 +372,12 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
+    # Decode base64 prompt from Go CLI if present
+    if [ -n "${SAFE_AGENTIC_PROMPT_B64:-}" ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+      mkdir -p "$SESSION_STATE_DIR"
+      echo "$SAFE_AGENTIC_PROMPT_B64" | base64 -d > "$SESSION_STATE_DIR/pending-prompt"
+    fi
+
     # Auto-accept trust prompt and/or send pending prompt via tmux keystrokes.
     if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       (
@@ -396,6 +415,14 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
+    if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ]; then
+      (
+        # Codex trust prompt is interactive-only; accept it in tmux so
+        # fleet/pipeline runs can progress without manual input.
+        sleep 4
+        tmux send-keys -t "$TMUX_SESSION_NAME" Enter
+      ) &
+    fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     ;;
   *)

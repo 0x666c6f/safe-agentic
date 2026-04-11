@@ -37,3 +37,13 @@ agent fleet examples/fleet-self-review.yaml
 ```bash
 agent pipeline examples/pipeline-security-hardening.yaml
 ```
+
+## Minimal nested pipeline for display checks
+
+Use this when you only want to validate pipeline tree rendering.
+
+```bash
+agent pipeline examples/pipeline-display-nested.yaml --dry-run
+```
+
+If you run it without `--dry-run`, each nesting level spawns exactly one tiny leaf agent with prompt `Reply OK.` and `auto_trust: true`, so the run can progress without waiting at the Codex trust prompt.

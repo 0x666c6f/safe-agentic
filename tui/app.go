@@ -20,18 +20,20 @@ type App struct {
 	poller    *Poller
 	actions   *Actions
 	loaded    chan struct{} // closed after first successful poll
-	execAfter []string     // if set, syscall.Exec this command after tview exits
+	stopAnim  chan struct{}
+	execAfter []string // if set, syscall.Exec this command after tview exits
 }
 
 // NewApp creates and wires up the full TUI.
 func NewApp() *App {
 	a := &App{
-		tapp:   tview.NewApplication(),
-		pages:  tview.NewPages(),
-		header: NewHeader(),
-		table:  NewAgentTable(),
-		footer: NewFooter(),
-		loaded: make(chan struct{}),
+		tapp:     tview.NewApplication(),
+		pages:    tview.NewPages(),
+		header:   NewHeader(),
+		table:    NewAgentTable(),
+		footer:   NewFooter(),
+		loaded:   make(chan struct{}),
+		stopAnim: make(chan struct{}),
 	}
 
 	a.preview = NewPreviewPane()
@@ -55,6 +57,14 @@ func NewApp() *App {
 	})
 
 	a.actions = NewActions(a)
+	a.table.Table().SetSelectionChangedFunc(func(row, col int) {
+		if !a.preview.Visible() {
+			return
+		}
+		if agent := a.table.SelectedAgent(); agent != nil {
+			a.updatePreview(agent)
+		}
+	})
 
 	// Show loading state until first poll
 	a.header.ShowLoading()
@@ -77,8 +87,10 @@ func NewApp() *App {
 func (a *App) Run() error {
 	a.poller.Start()
 	defer a.poller.Stop()
-	go a.spinLoading()
-	return a.tapp.SetRoot(a.pages, true).EnableMouse(false).Run()
+	go a.spinAnimations()
+	err := a.tapp.SetRoot(a.pages, true).EnableMouse(false).Run()
+	close(a.stopAnim)
+	return err
 }
 
 // SuspendAndRun suspends the TUI, runs fn with the terminal, then resumes.
@@ -102,18 +114,23 @@ func (a *App) ExecAfterArgs() []string {
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-func (a *App) spinLoading() {
+func (a *App) spinAnimations() {
 	i := 0
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-a.loaded:
+		case <-a.stopAnim:
 			return
 		case <-ticker.C:
 			frame := spinnerFrames[i%len(spinnerFrames)]
 			a.tapp.QueueUpdateDraw(func() {
-				a.table.SetLoadingFrame(frame)
+				select {
+				case <-a.loaded:
+				default:
+					a.table.SetLoadingFrame(frame)
+				}
+				a.table.SetDeletingFrame(frame)
 			})
 			i++
 		}
@@ -318,11 +335,14 @@ func (a *App) rebuildLayout() {
 }
 
 func (a *App) updatePreview(agent *Agent) {
-	if !agent.Running {
-		a.preview.SetUnavailable(agent.Name, "Agent not running")
-		return
+	if agent.Running && containerUsesTmux(agent.Name) {
+		content, err := previewCaptureFunc(agent.Name, a.preview.Lines())
+		if err == nil {
+			a.preview.Update(agent.Name, content)
+			return
+		}
 	}
-	content, err := capturePreview(agent.Name, a.preview.Lines())
+	content, err := previewLogsFunc(agent.Name, a.preview.Lines())
 	if err != nil {
 		a.preview.SetUnavailable(agent.Name, err.Error())
 		return
@@ -380,3 +400,14 @@ func capturePreview(name string, lines int) (string, error) {
 	}
 	return string(out), nil
 }
+
+func captureLogsPreview(name string, lines int) (string, error) {
+	out, err := execOrb("docker", "logs", "--tail", fmt.Sprintf("%d", lines), name)
+	if err != nil {
+		return "", fmt.Errorf("Preview unavailable")
+	}
+	return string(out), nil
+}
+
+var previewCaptureFunc = capturePreview
+var previewLogsFunc = captureLogsPreview

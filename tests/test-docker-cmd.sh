@@ -99,6 +99,12 @@ chmod +x "$FAKE_BIN/orb"
 # Fake git config that returns a known identity
 cat >"$FAKE_BIN/git" <<'GITEOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = "config" ] && [ "${2:-}" = "--global" ] && [ "${3:-}" = "user.name" ]; then
+  echo "Test User"; exit 0
+fi
+if [ "${1:-}" = "config" ] && [ "${2:-}" = "--global" ] && [ "${3:-}" = "user.email" ]; then
+  echo "test@example.com"; exit 0
+fi
 if [ "${1:-}" = "config" ] && [ "${2:-}" = "user.name" ]; then
   echo "Test User"; exit 0
 fi
@@ -195,7 +201,7 @@ assert_contains "$run" "--mount type=volume,dst=/workspace"               "ephem
 assert_contains "$run" "--mount type=volume,dst=/home/agent/.npm"         "ephemeral npm cache"
 assert_contains "$run" "--mount type=volume,dst=/home/agent/.cache/pip"   "ephemeral pip cache"
 assert_contains "$run" "--mount type=volume,dst=/home/agent/go"           "ephemeral go cache"
-assert_contains "$run" "--mount type=volume,dst=/home/agent/.claude"      "ephemeral claude auth"
+assert_contains "$run" "src=agent-claude-auth,dst=/home/agent/.claude"    "default shared claude auth"
 assert_not_contains "$run" "volume-nocopy"                                "no volume-nocopy"
 
 # =============================================================================
@@ -205,12 +211,12 @@ assert_contains "$run" "--network agent-claude-sec-net"  "managed network"
 assert_contains "$(cat "$ORB_LOG")" "--opt com.docker.network.bridge.name=" "managed bridge named"
 
 # =============================================================================
-# Test: Git identity is not leaked from host defaults
+# Test: Git identity auto-detected from host gitconfig
 # =============================================================================
-assert_not_contains "$run" "GIT_AUTHOR_NAME=Test User"         "no host author leak"
-assert_not_contains "$run" "GIT_COMMITTER_NAME=Test User"      "no host committer leak"
-assert_not_contains "$run" "GIT_AUTHOR_EMAIL=test@example.com" "no host author email leak"
-assert_not_contains "$run" "GIT_COMMITTER_EMAIL=test@example.com" "no host committer email leak"
+assert_contains "$run" "GIT_AUTHOR_NAME=Test User"         "auto-detect author"
+assert_contains "$run" "GIT_COMMITTER_NAME=Test User"      "auto-detect committer"
+assert_contains "$run" "GIT_AUTHOR_EMAIL=test@example.com" "auto-detect author email"
+assert_contains "$run" "GIT_COMMITTER_EMAIL=test@example.com" "auto-detect committer email"
 assert_contains "$run" "GIT_CONFIG_GLOBAL=/home/agent/.config/git/config" "git config path"
 assert_not_contains "$run" "--tmpfs /home/agent/.gitconfig" "no file tmpfs mount"
 
@@ -376,7 +382,7 @@ assert_contains "$shell_run" "--memory 8g"                           "shell: mem
 run_agent "$REPO_DIR/bin/agent" spawn codex --name cdx --repo https://github.com/a/b.git >/dev/null 2>&1
 codex_run="$(last_docker_run)"
 assert_contains "$codex_run" "AGENT_TYPE=codex"                                "codex agent type"
-assert_contains "$codex_run" "--mount type=volume,dst=/home/agent/.codex"      "codex ephemeral auth"
+assert_contains "$codex_run" "src=agent-codex-auth,dst=/home/agent/.codex"     "codex default shared auth"
 # .claude tmpfs is present (entrypoint writes claude config even for codex agents)
 # but no auth volume mount for .claude
 assert_not_contains "$codex_run" "--mount type=volume,dst=/home/agent/.claude" "codex no claude auth volume"

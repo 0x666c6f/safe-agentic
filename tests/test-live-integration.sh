@@ -213,8 +213,13 @@ if start_spawn_session "$spawn_suffix"; then
   assert_contains "$network_name" "$CURRENT_NETWORK" "spawn dedicated network"
   assert_ok "spawn has no SSH mount by default" test -z "$ssh_mount"
   assert_ok "spawn has no SSH_AUTH_SOCK env by default" bash -lc '[[ "$1" != *SSH_AUTH_SOCK=* ]]' _ "$env_list"
-  assert_ok "spawn has no host git identity env by default" bash -lc '[[ "$1" != *GIT_AUTHOR_NAME=* && "$1" != *GIT_AUTHOR_EMAIL=* && "$1" != *GIT_COMMITTER_NAME=* && "$1" != *GIT_COMMITTER_EMAIL=* ]]' _ "$env_list"
-  assert_ok "spawn auth mount is anonymous by default" bash -lc '[ -n "$1" ] && [ "$1" != "agent-codex-auth" ]' _ "$codex_mount_name"
+  # Git identity is auto-detected from host ~/.gitconfig when available
+  if git config --global user.name >/dev/null 2>&1 && git config --global user.email >/dev/null 2>&1; then
+    assert_ok "spawn auto-detects git identity from host" bash -lc '[[ "$1" == *GIT_AUTHOR_NAME=* && "$1" == *GIT_AUTHOR_EMAIL=* ]]' _ "$env_list"
+  else
+    assert_ok "spawn has no git identity when host gitconfig is absent" bash -lc '[[ "$1" != *GIT_AUTHOR_NAME=* && "$1" != *GIT_AUTHOR_EMAIL=* ]]' _ "$env_list"
+  fi
+  assert_ok "spawn auth mount uses shared volume by default" bash -lc '[ "$1" = "agent-codex-auth" ]' _ "$codex_mount_name"
   assert_ok "spawn workspace mount is anonymous" test -n "$workspace_mount_name"
 
   assert_ok "agent stop succeeds" bash "$LIVE_AGENT_BIN/agent" stop "$CURRENT_CONTAINER"

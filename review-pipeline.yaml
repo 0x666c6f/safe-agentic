@@ -1,0 +1,65 @@
+name: go-rewrite-review
+
+defaults:
+  repo: git@github.com:0x666c6f/safe-agentic.git
+  ssh: true
+  reuse_auth: true
+  auto_trust: true
+  memory: 8g
+  cpus: "4"
+
+vars:
+  branch: "feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation"
+
+stages:
+  - name: review
+    models: [claude, codex]
+    agents:
+      - name: review-code
+        prompt: |
+          git checkout ${branch} && git pull
+          Review ALL Go code in cmd/safe-ag/ and pkg/ for: dead code, unused imports, redundant logic, error handling gaps, race conditions, non-idiomatic Go, naming inconsistencies, performance issues.
+          Write findings to fleet/${model}-review-code.md with sections: Critical, Important, Minor. Include file:line references.
+          git add fleet/ && git commit -m "review(${model}): code quality findings" && git push
+
+      - name: review-tests
+        prompt: |
+          git checkout ${branch} && git pull
+          Review ALL test files (*_test.go) for: missing edge cases, weak assertions, tests that don't verify behavior, missing negative tests, flaky patterns.
+          Run: go test ./... -cover and identify packages below 90%.
+          Write findings to fleet/${model}-review-tests.md.
+          git add fleet/ && git commit -m "review(${model}): test quality findings" && git push
+
+      - name: review-security
+        prompt: |
+          git checkout ${branch} && git pull
+          Security review ALL Go code: command injection via exec.Command, path traversal, unsafe Docker flags, secrets in env/labels, missing input validation.
+          Compare CLAUDE.md security model against Go code enforcement.
+          Write findings to fleet/${model}-review-security.md.
+          git add fleet/ && git commit -m "review(${model}): security findings" && git push
+
+  - name: reconcile
+    depends_on: [review]
+    agents:
+      - name: reconciler
+        type: claude
+        memory: 16g
+        cpus: "8"
+        prompt: |
+          git checkout ${branch} && git pull
+
+          Read ALL review reports in fleet/:
+            Claude: claude-review-code.md, claude-review-tests.md, claude-review-security.md
+            Codex: codex-review-code.md, codex-review-tests.md, codex-review-security.md
+
+          Create fleet/REVIEW-SUMMARY.md that:
+          1. Cross-references findings from both Claude and Codex
+          2. Highlights findings BOTH flagged (high confidence)
+          3. Notes findings only one caught (needs verification)
+          4. Ranks by severity: Critical > High > Medium > Low
+
+          Fix all Critical and Important issues. Run go test ./... after each fix.
+
+          Delete individual reports:
+          git rm fleet/claude-review-*.md fleet/codex-review-*.md
+          git add -A && git commit -m "fix: address review findings from dual Claude+Codex review" && git push

@@ -7,6 +7,7 @@ var (
 	colorHeader       = tcell.ColorWhite
 	colorSelected     = tcell.ColorDarkCyan
 	colorRunning      = tcell.ColorGreen
+	colorDeleting     = tcell.ColorYellow
 	colorExited       = tcell.ColorRed
 	colorStopped      = tcell.ColorYellow
 	colorShortcutKey  = tcell.ColorAqua

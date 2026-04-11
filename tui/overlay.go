@@ -236,20 +236,20 @@ func ShowSpawnForm(app *App) {
 	app.tapp.SetFocus(form)
 }
 
-// newAgentCmd creates an exec.Cmd for the agent CLI.
+// newAgentCmd creates an exec.Cmd for the safe-ag CLI.
 func newAgentCmd(args ...string) *exec.Cmd {
-	return exec.Command("agent", args...)
+	return exec.Command("safe-ag", args...)
 }
 
-// execAgent replaces the current process with `agent <args>`.
+// execAgent replaces the current process with `safe-ag <args>`.
 // Used for spawn which needs a real TTY chain for nested TUI apps (claude/codex).
 func execAgent(args []string) {
-	agentPath, err := exec.LookPath("agent")
+	agentPath, err := exec.LookPath("safe-ag")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent not found: %v\n", err)
+		fmt.Fprintf(os.Stderr, "safe-ag not found: %v\n", err)
 		os.Exit(1)
 	}
-	fullArgs := append([]string{"agent"}, args...)
+	fullArgs := append([]string{"safe-ag"}, args...)
 	// Replace process — never returns on success
 	if err := syscall.Exec(agentPath, fullArgs, os.Environ()); err != nil {
 		fmt.Fprintf(os.Stderr, "exec failed: %v\n", err)
