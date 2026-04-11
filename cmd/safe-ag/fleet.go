@@ -261,7 +261,11 @@ func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.Pipeli
 				if spec.Type == "" {
 					continue
 				}
-				opts := specToSpawnOpts(spec, "pipeline-"+timestamp)
+				fleetLabel := name
+				if fleetLabel == "(inline)" {
+					fleetLabel = "pipeline-" + timestamp
+				}
+				opts := specToSpawnOpts(spec, fleetLabel)
 				opts.Background = true
 				if err := executeSpawn(opts); err != nil {
 					return fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
