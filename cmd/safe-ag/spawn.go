@@ -19,6 +19,7 @@ import (
 	"safe-agentic/pkg/validate"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type SpawnOpts struct {
@@ -452,6 +453,10 @@ func executeSpawn(opts SpawnOpts) error {
 
 	// Auto-attach
 	if !opts.Background && opts.AgentType != "shell" {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Not attaching to %s: stdin is not a terminal. Use --background to silence this message.\n", containerName)
+			return nil
+		}
 		if err := tmux.WaitForSession(ctx, exec, containerName); err != nil {
 			return err
 		}

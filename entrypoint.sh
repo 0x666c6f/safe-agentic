@@ -33,8 +33,8 @@ ensure_codex_config() {
 
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
-  # Always overwrite config from host if injected
   if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
+    [ -f "$codex_config" ] && return 0
     echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
@@ -66,8 +66,8 @@ ensure_claude_config() {
     fi
   fi
 
-  # Always overwrite settings from host if injected (even if volume has stale copy)
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
+    [ -f "$claude_config" ] && return 0
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi

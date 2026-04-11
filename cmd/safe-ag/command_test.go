@@ -348,6 +348,7 @@ func TestDiffCommand(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
 	fake.SetResponse("docker exec "+containerName+" bash -c", "diff output here\n")
 
 	output := captureOutput(func() {
@@ -375,6 +376,7 @@ func TestDiffCommand_Stat(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
 	fake.SetResponse("docker exec "+containerName+" bash -c", " 3 files changed\n")
 
 	diffStat = true
@@ -404,6 +406,7 @@ func TestOutputCommand_Diff(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
 	fake.SetResponse("docker exec "+containerName+" bash", "diff content\n")
 
 	outputDiff = true
@@ -431,6 +434,7 @@ func TestOutputCommand_Files(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
 	fake.SetResponse("docker exec "+containerName+" bash", "main.go\nlib.go\n")
 
 	outputFiles = true
@@ -459,6 +463,7 @@ func TestOutputCommand_Commits(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
 	fake.SetResponse("docker exec "+containerName+" bash", "abc1234 fix: test\n")
 
 	outputCommits = true
@@ -506,6 +511,34 @@ func TestOutputCommand_Default(t *testing.T) {
 	}
 }
 
+func TestOutputCommand_Default_StoppedUsesSessionMessage(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.agent-type"}}`, "claude\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.repo-display"}}`, "org/repo\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "false\n")
+	fake.SetResponse("bash -c rm -rf '/tmp/safe-agentic-logs-"+containerName+"'", "")
+	fake.SetResponse("docker cp "+containerName+":/home/agent/.claude", "")
+	fake.SetResponse("bash -c find /tmp/safe-agentic-logs-"+containerName, "/tmp/safe-agentic-logs-agent-claude-test/.claude/projects/-workspace-org-repo/test.jsonl\n")
+	fake.SetResponse("bash -c tail -n 400", `{"message":{"role":"assistant","content":"final answer"}}`+"\n")
+
+	output := captureOutput(func() {
+		if err := runOutput(outputCmd, []string{containerName}); err != nil {
+			t.Fatalf("runOutput() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "final answer") {
+		t.Fatalf("expected session message in output, got:\n%s", output)
+	}
+	if cmds := fake.CommandsMatching("docker logs"); len(cmds) != 0 {
+		t.Fatalf("stopped output should not fall back to docker logs, got %d docker logs command(s)", len(cmds))
+	}
+}
+
 // ─── summary ──────────────────────────────────────────────────────────────────
 
 func TestSummaryCommand(t *testing.T) {
@@ -539,6 +572,31 @@ func TestSummaryCommand(t *testing.T) {
 	}
 	if !strings.Contains(output, "Status") {
 		t.Errorf("expected 'Status' in output, got: %s", output)
+	}
+}
+
+func TestDiffCommand_StoppedUsesCopiedWorkspace(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "false\n")
+	fake.SetResponse("bash -c rm -rf '/tmp/safe-agentic-workspace-"+containerName+"'", "")
+	fake.SetResponse("docker cp "+containerName+":/workspace", "")
+	fake.SetResponse("bash -c repo_dir=$(find /tmp/safe-agentic-workspace-"+containerName+"/workspace", "diff --git a/file b/file\n")
+
+	output := captureOutput(func() {
+		if err := runDiff(diffCmd, []string{containerName}); err != nil {
+			t.Fatalf("runDiff() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "diff --git") {
+		t.Fatalf("expected diff output, got:\n%s", output)
+	}
+	if cmds := fake.CommandsMatching("docker cp " + containerName + ":/workspace"); len(cmds) == 0 {
+		t.Fatal("expected stopped diff to copy workspace")
 	}
 }
 

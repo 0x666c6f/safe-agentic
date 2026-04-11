@@ -1,0 +1,5137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+VERSION="dev"
+IMAGE_NAME="safe-agentic"
+IMAGE_TAG="latest"
+CONTAINER_PREFIX="agent"
+VM_NAME="safe-agentic"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+info()  { echo -e "${CYAN}[agent]${NC} $*"; }
+ok()    { echo -e "${GREEN}[agent]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[agent]${NC} $*"; }
+err()   { echo -e "${RED}[agent]${NC} $*" >&2; }
+die()   { err "$@"; exit 1; }
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed."
+}
+
+require_vm() {
+  orb list 2>/dev/null | grep -q "$VM_NAME" || die "VM '$VM_NAME' not found. Run 'agent setup' first."
+}
+
+vm_exec() {
+  orb run -m "$VM_NAME" "$@"
+}
+
+vm_copy_from_host() {
+  local source_path="$1"
+  local destination_path="$2"
+
+  [ -f "$source_path" ] || die "Local file not found: $source_path"
+  # shellcheck disable=SC2016
+  orb run -m "$VM_NAME" env DEST="$destination_path" bash -c 'cat > "$DEST"' < "$source_path"
+}
+
+source "$REPO_DIR/bin/agent-lib.sh"
+# shellcheck disable=SC1091
+source "$REPO_DIR/bin/docker-runtime.sh"
+
+load_user_defaults
+apply_default_identity
+
+DEFAULT_CPUS="${SAFE_AGENTIC_DEFAULT_CPUS:-4}"
+DEFAULT_MEMORY="${SAFE_AGENTIC_DEFAULT_MEMORY:-8g}"
+DEFAULT_PIDS_LIMIT="${SAFE_AGENTIC_DEFAULT_PIDS_LIMIT:-512}"
+DEFAULT_NETWORK="${SAFE_AGENTIC_DEFAULT_NETWORK:-}"
+DEFAULT_REUSE_AUTH=true
+DEFAULT_REUSE_GH_AUTH=true
+DEFAULT_SSH=false
+DEFAULT_DOCKER=false
+DEFAULT_DOCKER_SOCKET=false
+
+if [ -n "${SAFE_AGENTIC_DEFAULT_REUSE_AUTH:-}" ]; then
+  bool_is_true "$SAFE_AGENTIC_DEFAULT_REUSE_AUTH" && DEFAULT_REUSE_AUTH=true || DEFAULT_REUSE_AUTH=false
+fi
+if [ -n "${SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH:-}" ]; then
+  bool_is_true "$SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH" && DEFAULT_REUSE_GH_AUTH=true || DEFAULT_REUSE_GH_AUTH=false
+fi
+bool_is_true "${SAFE_AGENTIC_DEFAULT_SSH:-}" && DEFAULT_SSH=true
+bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER:-}" && DEFAULT_DOCKER=true
+bool_is_true "${SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET:-}" && DEFAULT_DOCKER_SOCKET=true
+
+die_with_help() {
+  local topic="$1"
+  shift
+
+  die "$*. Run 'agent help${topic:+ $topic}' for usage."
+}
+
+require_option_value() {
+  local topic="$1"
+  local flag="$2"
+  local value="${3:-}"
+
+  [ -n "$value" ] || die_with_help "$topic" "Missing value for $flag."
+}
+
+print_help_general() {
+  cat <<EOF
+${CYAN}safe-agentic${NC} — isolated AI agent environment
+
+${GREEN}Setup:${NC}
+  agent setup
+  agent diagnose
+
+${GREEN}Quick Start:${NC}
+  agent run [flags] <repo-url> [repo-url...] "prompt"
+
+${GREEN}Run:${NC}
+  agent spawn <claude|codex> [options]
+  agent shell [options]
+  agent-claude [spawn-options] <repo-url> [repo-url...]
+  agent-codex [spawn-options] <repo-url> [repo-url...]
+
+${GREEN}Manage:${NC}
+  agent list [--json]
+  agent summary <name>|--latest
+  agent config <show|set|get|reset>
+  agent tui
+  agent dashboard [--bind host:port]
+  agent attach <name>|--latest
+  agent cp <name>|--latest <container-path> <host-path>
+  agent peek <name>|--latest [--lines N]
+  agent diff <name>|--latest [--stat]
+  agent checkpoint <create|list|revert> <name>|--latest [...]
+  agent todo <add|list|check|uncheck> <name>|--latest [...]
+  agent stop <name>|--latest|--all
+  agent cleanup [--auth]
+  agent retry <name>|--latest [--feedback "text"]
+
+${GREEN}Observe:${NC}
+  agent output <name>|--latest [--diff|--files|--commits|--json]
+  agent review <name>|--latest [--base BRANCH]
+  agent cost <name>|--latest
+  agent replay <name>|--latest [--tools-only] [--cost-timeline]
+
+${GREEN}Analytics:${NC}
+  agent audit [--lines N]
+
+${GREEN}Orchestrate:${NC}
+  agent fleet <manifest.yaml> [--dry-run]
+  agent pipeline <pipeline.yaml> [--dry-run]
+
+${GREEN}Workflow:${NC}
+  agent pr <name>|--latest [--title TITLE] [--base BRANCH]
+
+${GREEN}AWS:${NC}
+  agent aws-refresh <name>|--latest [profile]
+
+${GREEN}Templates:${NC}
+  agent template list
+  agent template show <name>
+  agent template create <name>
+
+${GREEN}Maintain:${NC}
+  agent update [--quick|--full]
+  agent vm <ssh|stop|start>
+
+${GREEN}Help:${NC}
+  agent help [run|spawn|shell|attach|peek|diff|checkpoint|todo|cp|output|review|cost|replay|audit|fleet|pipeline|pr|retry|stop|cleanup|update|vm|diagnose|config|summary|template]
+  agent help <keyword>  (search all help text)
+
+${GREEN}Examples:${NC}
+  agent-claude git@github.com:myorg/myrepo.git
+  agent spawn codex --reuse-auth --identity 'You <you@example.com>' --repo https://github.com/myorg/api.git
+  agent shell --dry-run --repo https://github.com/myorg/myrepo.git
+  agent fleet agents.yaml --dry-run
+  agent pipeline my-workflow.yaml --dry-run
+  agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+  agent run git@github.com:org/repo.git "Fix the failing CI tests"
+EOF
+}
+
+print_help_run() {
+  cat <<EOF
+Usage: agent run [flags] <repo-url> [repo-url...] "prompt"
+
+One-command quick start. The last positional argument is the prompt; the rest
+are repo URLs. SSH, reuse-auth, and git identity are auto-detected.
+
+Flags:
+  --claude              Use Claude agent (default)
+  --codex               Use Codex agent
+  --name NAME           Container name
+  --template NAME       Use a prompt template instead of inline prompt
+  --instructions TEXT   Inject instructions file
+  --network NAME        Custom network
+  --memory SIZE         Memory limit (default 8g)
+  --cpus N              CPU limit (default 4)
+  --max-cost N          Cost budget label
+  --background          Run headless
+  --ephemeral-auth      Disable reuse-auth (per-session auth)
+  --dry-run             Show what would run without starting
+  -h, --help
+
+Smart defaults (compared to 'agent spawn'):
+  - SSH auto-enabled when any repo URL starts with git@ or ssh://
+  - Auth reused across sessions (--reuse-auth)
+  - Git identity auto-detected from 'git config'
+
+Examples:
+  agent run git@github.com:org/repo.git "Fix the failing CI tests"
+  agent run --codex https://github.com/org/api.git "Add rate limiting"
+  agent run git@github.com:org/a.git git@github.com:org/b.git "Align API contracts"
+  agent run --dry-run git@github.com:org/repo.git "Audit security"
+EOF
+}
+
+print_help_spawn() {
+  cat <<EOF
+Usage: agent spawn <claude|codex> [options]
+
+Options:
+  --repo URL
+  --name NAME
+  --ssh
+  --reuse-auth
+  --reuse-gh-auth
+  --docker
+  --docker-socket
+  --network NAME
+  --memory SIZE
+  --cpus N
+  --pids-limit N
+  --prompt 'TASK'
+  --template NAME
+  --instructions 'TEXT'
+  --instructions-file PATH
+  --on-exit 'COMMAND'
+  --on-complete 'COMMAND'
+  --on-fail 'COMMAND'
+  --max-cost N
+  --aws PROFILE
+  --identity 'Name <email@example.com>'
+  --auto-trust
+  --background
+  --dry-run
+  -h, --help
+
+Notes:
+  - --prompt sends an initial task to the agent (claude -p / codex positional arg)
+  - --template loads a pre-built prompt by name (see 'agent template list'); --prompt takes precedence
+  - --instructions injects text as /workspace/AGENT-INSTRUCTIONS.md (Claude picks it up automatically)
+  - --instructions-file reads instructions from a local file
+  - --on-exit runs a shell command after the agent exits (e.g. webhook notification)
+  - --on-complete runs a shell command when the agent exits successfully (exit 0)
+  - --on-fail runs a shell command when the agent exits with an error (exit != 0)
+  - --max-cost sets a cost budget label (shown in TUI cost overlay)
+  - --auto-trust skips the "trust this project?" prompt (useful for fleet/pipeline)
+  - --background runs headless (no tmux, not attachable, output via docker logs)
+  - Codex background runs require existing auth in --reuse-auth; otherwise first-run device login blocks in logs
+  - --aws injects credentials from ~/.aws/credentials for the given profile
+  - Default network: managed bridge with private/local egress blocked; TCP 22/80/443 only
+  - Defaults file: ${DEFAULTS_FILE}
+  - SSH repos require --ssh; aliases auto-enable it
+  - --docker starts an internal Docker daemon sidecar
+  - --docker-socket mounts the VM Docker socket directly (dangerous)
+EOF
+}
+
+print_help_shell() {
+  cat <<EOF
+Usage: agent shell [options]
+
+Options:
+  --repo URL
+  --ssh
+  --reuse-gh-auth
+  --docker
+  --docker-socket
+  --network NAME
+  --memory SIZE
+  --cpus N
+  --pids-limit N
+  --identity 'Name <email@example.com>'
+  --dry-run
+  -h, --help
+EOF
+}
+
+print_help_attach() {
+  cat <<EOF
+Usage: agent attach <name>|--latest
+
+Examples:
+  agent attach api-refactor
+  agent attach agent-claude-api-refactor
+  agent attach --latest
+EOF
+}
+
+print_help_peek() {
+  cat <<EOF
+Usage: agent peek <name>|--latest [--lines N]
+
+Show the last N lines (default 30) of a running agent's tmux pane.
+
+Examples:
+  agent peek api-refactor
+  agent peek --latest
+  agent peek --latest --lines 50
+EOF
+}
+
+print_help_cp() {
+  cat <<EOF
+Usage: agent cp <name>|--latest <container-path> <host-path>
+
+Examples:
+  agent cp api-refactor /workspace/out/test.log ./test.log
+  agent cp --latest /workspace/dist ./dist
+EOF
+}
+
+print_help_stop() {
+  cat <<EOF
+Usage: agent stop <name>|--latest|--all
+EOF
+}
+
+print_help_cleanup() {
+  cat <<EOF
+Usage: agent cleanup [--auth]
+
+By default:
+  - stops containers
+  - removes managed networks
+  - prunes safe-agentic image layers
+  - keeps shared auth volumes
+
+Add --auth to remove shared auth volumes too.
+EOF
+}
+
+print_help_update() {
+  cat <<EOF
+Usage: agent update [--quick|--full]
+
+Flags:
+  --quick   Rebuild AI CLI layer only
+  --full    Rebuild from scratch
+EOF
+}
+
+print_help_vm() {
+  cat <<EOF
+Usage: agent vm <ssh|stop|start>
+EOF
+}
+
+print_help_diff() {
+  cat <<EOF
+Usage: agent diff <name>|--latest [--stat]
+
+Show the git diff from an agent's working tree inside its Docker container.
+
+Options:
+  --stat    Show a diffstat summary instead of the full diff
+
+Examples:
+  agent diff api-refactor
+  agent diff --latest
+  agent diff --latest --stat
+EOF
+}
+
+print_help_checkpoint() {
+  cat <<EOF
+Usage: agent checkpoint <create|list|revert|fork> <name>|--latest [...]
+
+Snapshot and revert an agent's working tree using git stash objects stored
+as named refs under refs/safe-agentic/checkpoints/. Also captures full
+container filesystem state via docker commit.
+
+Subcommands:
+  create <name>|--latest [label]              Snapshot current changes (default label: checkpoint-<epoch>)
+  list   <name>|--latest                      List all checkpoints for the container
+  revert <name>|--latest <ref>                Restore a checkpoint (discards current changes)
+  fork   <name>|--latest <new-name> [label]   Create a new agent from the latest snapshot
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help  Show this help
+
+Examples:
+  agent checkpoint create my-task before-refactor
+  agent checkpoint list my-task
+  agent checkpoint revert my-task before-refactor
+  agent checkpoint fork my-task my-fork
+  agent checkpoint create --latest
+  agent checkpoint list --latest
+EOF
+}
+
+print_help_todo() {
+  cat <<EOF
+Usage: agent todo <add|list|check|uncheck> <name>|--latest [...]
+
+Track merge requirements for an agent's working tree. Todos are stored in
+/workspace/.safe-agentic/todos.json inside the container.
+
+Subcommands:
+  add     <name>|--latest <text>    Add a new todo item
+  list    <name>|--latest           List all todos with status
+  check   <name>|--latest <index>   Mark todo at 1-based index as done
+  uncheck <name>|--latest <index>   Mark todo at 1-based index as not done
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help  Show this help
+
+Examples:
+  agent todo add my-task "Add unit tests for auth module"
+  agent todo list my-task
+  agent todo check my-task 1
+  agent todo uncheck --latest 2
+  agent todo list --latest
+EOF
+}
+
+print_help_review() {
+  cat <<EOF
+Usage: agent review <name>|--latest [--base BRANCH]
+
+Run an AI code review (codex) or git diff of changes in a running agent's
+workspace.  If codex is available in the container it is used; otherwise
+falls back to plain git diff.
+
+Options:
+  --base BRANCH   Compare against BRANCH (codex review --base / git diff)
+                  Without --base, reviews all uncommitted changes.
+  --latest        Use the most recently started container.
+  -h, --help      Show this help.
+
+Examples:
+  agent review my-task
+  agent review --latest --base main
+  agent review my-task --base origin/main
+EOF
+}
+
+print_help_audit() {
+  cat <<EOF
+Usage: agent audit [--lines N]
+
+Show the last N entries (default 50) from the audit log.
+Log location: ${AUDIT_LOG_FILE:-${DEFAULTS_DIR}/audit.jsonl}
+EOF
+}
+
+print_help_cost() {
+  cat <<EOF
+Usage: agent cost <name>|--latest
+       agent cost --history [<period>]
+
+Estimate API spend for a session by reading JSONL session files from
+the container and summing token usage fields.
+
+Outputs:
+  - total input/output tokens
+  - per-model breakdown
+  - estimated cost in USD (approximate rates)
+
+Options:
+  --history [<period>]   Show historical costs from audit log.
+                         Period format: Nd (e.g. 7d, 30d). Default: 7d.
+
+Examples:
+  agent cost api-refactor
+  agent cost --latest
+  agent cost --history
+  agent cost --history 30d
+EOF
+}
+
+print_help_replay() {
+  cat <<EOF
+Usage: agent replay <name>|--latest [--tools-only] [--cost-timeline]
+
+Replay a session from the event log, showing timestamped events, tool
+calls, git commits, and agent messages with a running cost summary.
+
+Reads from /workspace/.safe-agentic/session-events.jsonl inside the
+container.
+
+Options:
+  --tools-only       Show only tool.call events (skip messages, commits)
+  --cost-timeline    Print a running cost after each event
+  --latest           Target the most recently started container
+  -h, --help
+
+Examples:
+  agent replay api-refactor
+  agent replay --latest
+  agent replay --latest --tools-only
+  agent replay --latest --cost-timeline
+EOF
+}
+
+print_help_output() {
+  cat <<EOF
+Usage: agent output <name>|--latest [--diff|--files|--commits|--json]
+
+Extract the work product from a completed (or running) agent.
+
+Default (no flags):
+  Print the last assistant message from the session JSONL.
+
+Options:
+  --diff      Show git diff of agent changes (alias for 'agent diff')
+  --files     List files created or modified by the agent
+  --commits   Show git log of commits the agent made
+  --json      Output all fields as JSON:
+                { name, status, last_message, commits, files_changed, cost_estimate }
+  --latest    Target the most recently started container
+  -h, --help
+
+Examples:
+  agent output api-refactor
+  agent output --latest
+  agent output --latest --files
+  agent output --latest --commits
+  agent output --latest --json
+EOF
+}
+
+print_help_fleet() {
+  cat <<EOF
+Usage: agent fleet <manifest.yaml> [--dry-run]
+
+Spawn multiple agents from a YAML manifest file in parallel.
+
+Manifest format:
+  agents:
+    - name: api-worker
+      type: claude
+      repo: git@github.com:org/api.git
+      ssh: true
+      reuse_auth: true
+    - name: frontend
+      type: codex
+      repo: https://github.com/org/frontend.git
+
+Supported fields per agent entry:
+  name, type, repo, ssh, reuse_auth, reuse_gh_auth, docker,
+  prompt, aws, network, memory, cpus
+
+Options:
+  --dry-run   Print spawn commands without executing them
+  -h, --help
+EOF
+}
+
+print_help_pipeline() {
+  cat <<EOF
+Usage: agent pipeline <pipeline.yaml> [--dry-run]
+
+Execute a multi-step agent workflow defined in a YAML file.
+
+Pipeline YAML format:
+  name: my-pipeline
+  steps:
+    - name: step-name
+      type: claude|codex
+      repo: git@github.com:org/repo.git
+      prompt: "Task description"
+      ssh: true|false
+      reuse_auth: true|false
+      on_failure: other-step-name
+      retry: N
+      depends_on: step-name
+
+Options:
+  --dry-run   Print execution plan without running any agents
+
+Step fields:
+  name        Required. Unique step identifier.
+  type        Agent type: claude (default) or codex.
+  repo        Repository URL to clone.
+  prompt      Initial task prompt for the agent.
+  ssh         Enable SSH agent forwarding (default: false).
+  reuse_auth  Reuse shared auth volume (default: false).
+  on_failure  Step name to run if this step fails.
+  retry       Number of retry attempts on failure (default: 0).
+  depends_on  Step name that must have completed successfully.
+
+Examples:
+  agent pipeline workflow.yaml
+  agent pipeline workflow.yaml --dry-run
+EOF
+}
+
+print_help_pr() {
+  cat <<EOF
+Usage: agent pr <name>|--latest [--title TITLE] [--base BRANCH]
+
+Create a GitHub Pull Request from the agent's current branch.
+
+Requires the container to have been spawned with --ssh (needed for push).
+Checks for incomplete todos before proceeding.
+
+Options:
+  --latest         Target the most recently started container
+  --title TITLE    PR title (default: branch name)
+  --base BRANCH    Base branch for the PR (default: main)
+  -h, --help
+
+Examples:
+  agent pr my-agent
+  agent pr --latest --title "Fix auth bug"
+  agent pr --latest --base dev
+EOF
+}
+
+print_help_diagnose() {
+  cat <<EOF
+Usage: agent diagnose
+
+Checks:
+  - orb installed and reachable
+  - VM exists
+  - Docker works in VM
+  - VM Docker socket visible
+  - hardening still applied
+  - image present
+  - VM SSH agent socket visible
+  - defaults file detected
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# resolve_template <name>
+# Looks up a template by name (without .md extension).
+# Search order:
+#   1. ~/.config/safe-agentic/templates/<name>.md  (user overrides)
+#   2. $REPO_DIR/templates/<name>.md               (built-in)
+# Prints the file contents on stdout; dies if not found.
+# ---------------------------------------------------------------------------
+resolve_template() {
+  local name="$1"
+  local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic/templates"
+  local builtin_dir="$REPO_DIR/templates"
+
+  if [ -f "$user_dir/${name}.md" ]; then
+    cat "$user_dir/${name}.md"
+    return 0
+  fi
+  if [ -f "$builtin_dir/${name}.md" ]; then
+    cat "$builtin_dir/${name}.md"
+    return 0
+  fi
+  die "Template '$name' not found. Run 'agent template list' to see available templates."
+}
+
+print_help_template() {
+  local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic/templates"
+  cat <<EOF
+Usage: agent template <list|show|create> [name]
+
+Manage pre-built task prompts for common agent workflows.
+
+Subcommands:
+  list             List available templates (built-in + user)
+  show <name>      Print the contents of a template
+  create <name>    Create a new template in the user directory
+
+Template search order:
+  1. ${user_dir}/<name>.md
+  2. $REPO_DIR/templates/<name>.md
+
+Built-in templates:
+  security-audit    Security vulnerability audit
+  code-review       Code quality review
+  test-coverage     Test coverage gap analysis
+  dependency-update Dependency update workflow
+  bug-fix           Structured bug fix workflow
+  docs-review       Documentation accuracy review
+
+Examples:
+  agent template list
+  agent template show security-audit
+  agent template create my-custom-task
+  agent spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+EOF
+}
+
+cmd_template() {
+  local topic="template"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    list|"")
+      shift 2>/dev/null || true
+      local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic/templates"
+      local builtin_dir="$REPO_DIR/templates"
+      local found=false
+
+      echo "Built-in templates (${builtin_dir}):"
+      if [ -d "$builtin_dir" ]; then
+        local f name
+        for f in "$builtin_dir"/*.md; do
+          [ -f "$f" ] || continue
+          name="$(basename "$f" .md)"
+          echo "  $name"
+          found=true
+        done
+      fi
+      $found || echo "  (none)"
+
+      echo ""
+      echo "User templates (${user_dir}):"
+      local user_found=false
+      if [ -d "$user_dir" ]; then
+        local f name
+        for f in "$user_dir"/*.md; do
+          [ -f "$f" ] || continue
+          name="$(basename "$f" .md)"
+          echo "  $name"
+          user_found=true
+        done
+      fi
+      $user_found || echo "  (none)"
+      ;;
+    show)
+      shift
+      local name="${1:-}"
+      [ -n "$name" ] || die_with_help "$topic" "Template name required."
+      resolve_template "$name"
+      ;;
+    create)
+      shift
+      local name="${1:-}"
+      [ -n "$name" ] || die_with_help "$topic" "Template name required."
+      local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic/templates"
+      local dest="${user_dir}/${name}.md"
+      if [ -f "$dest" ]; then
+        die "Template '$name' already exists at $dest"
+      fi
+      mkdir -p "$user_dir"
+      printf '# Task prompt for: %s\n# Replace this text with the instructions for the agent.\n\nDescribe the task here.\n' "$name" >"$dest"
+      ok "Created template: $dest"
+      ;;
+    -h|--help)
+      print_help_template
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use list, show, or create."
+      ;;
+  esac
+}
+
+cmd_setup() {
+  require_cmd orb
+
+  info "[1/3] Ensuring VM exists..."
+  if orb list 2>/dev/null | grep -q "$VM_NAME"; then
+    info "VM '$VM_NAME' already exists."
+  else
+    info "Creating OrbStack VM '$VM_NAME' (Ubuntu)..."
+    orb create ubuntu "$VM_NAME"
+    ok "VM created."
+  fi
+
+  orb start "$VM_NAME" 2>/dev/null || true
+
+  info "[2/3] Bootstrapping VM runtime..."
+  reapply_vm_runtime_hardening
+
+  info "[3/3] Building safe-agentic image..."
+  cmd_update
+
+  ok "Setup complete. Try: agent-claude https://github.com/myorg/myrepo.git"
+}
+
+show_dry_run() {
+  local managed_network="$1"
+  local network_name="$2"
+
+  info "Dry run only. No container started."
+  if $managed_network; then
+    local bridge_name
+    bridge_name=$(bridge_name_for_network "$network_name")
+    info "Would create network: $(render_command orb run -m "$VM_NAME" docker network create --driver bridge --opt "com.docker.network.bridge.name=$bridge_name" --opt com.docker.network.bridge.enable_icc=false --label "app=$IMAGE_NAME" --label "safe-agentic.type=container-network" "$network_name")"
+  else
+    info "Would use network: $network_name"
+  fi
+  if [ "${DOCKER_RUNTIME_KIND:-off}" = "dind" ]; then
+    info "Would start Docker sidecar: $(render_command orb run -m "$VM_NAME" docker run -d --name "$DOCKER_RUNTIME_CONTAINER" --hostname "$DOCKER_RUNTIME_CONTAINER" --pull=never --privileged --user root --network "$network_name" --label "app=$IMAGE_NAME" --label "safe-agentic.type=docker-runtime" --label "safe-agentic.parent=$ACTIVE_CONTAINER_NAME" --mount "type=volume,src=$DOCKER_RUNTIME_SOCKET_VOLUME,dst=$DOCKER_INTERNAL_SOCKET_DIR" --mount "type=volume,src=$DOCKER_RUNTIME_DATA_VOLUME,dst=/var/lib/docker" --tmpfs /tmp:rw,nosuid,size=512m -e SAFE_AGENTIC_INTERNAL_DOCKERD=1 -e "SAFE_AGENTIC_DOCKER_SOCKET=$DOCKER_INTERNAL_SOCKET_PATH" -e SAFE_AGENTIC_DOCKER_DATA_ROOT=/var/lib/docker "$IMAGE_NAME:$IMAGE_TAG")"
+  fi
+  info "Would run: $(render_command orb run -m "$VM_NAME" "${docker_cmd[@]}")"
+}
+
+auto_attach_tmux_session() {
+  local name="$1"
+
+  if ! [ -t 0 ] || ! [ -t 1 ]; then
+    info "Container started detached: $name"
+    return 0
+  fi
+
+  info "Waiting for tmux session in $name..."
+  if ! wait_for_tmux_session "$name"; then
+    die "Timed out waiting for tmux session in $name. Check logs with: orb run -m $VM_NAME docker logs $name"
+  fi
+
+  info "Attaching to $name..."
+  attach_tmux_session "$name"
+}
+
+ensure_codex_background_auth_ready() {
+  local reuse_auth="$1"
+
+  if ! $reuse_auth; then
+    die "Codex --background requires saved auth. Re-run once without --background and with --reuse-auth to complete login, then retry."
+  fi
+
+  if ! auth_volume_exists "agent-codex-auth" || ! volume_contains_file "agent-codex-auth" "auth.json"; then
+    die "Codex --background requires saved auth in agent-codex-auth. Re-run once without --background --reuse-auth to complete login, then retry."
+  fi
+}
+
+attach_container_console() {
+  local name="$1"
+  local state="$2"
+  local terminal_mode
+
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
+  if [ "$state" = "running" ] && [ "$terminal_mode" = "tmux" ] && container_has_tmux_session "$name"; then
+    attach_tmux_session "$name"
+    return 0
+  fi
+
+  case "$state" in
+    running)
+      orb run -m "$VM_NAME" docker exec -it "$name" bash -l
+      ;;
+    exited|created)
+      orb run -m "$VM_NAME" docker start -ai "$name"
+      ;;
+    *)
+      die "Container $name is in state '$state' and cannot be attached."
+      ;;
+  esac
+}
+
+cmd_run() {
+  local topic="run"
+  local agent_type="claude"
+  local dry_run=false
+  local ephemeral_auth=false
+  local -a spawn_flags=()
+  local -a positional=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --claude)
+        agent_type="claude"
+        shift
+        ;;
+      --codex)
+        agent_type="codex"
+        shift
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --ephemeral-auth)
+        ephemeral_auth=true
+        shift
+        ;;
+      --name|--network|--memory|--cpus|--max-cost|--template|--instructions)
+        require_option_value "$topic" "$1" "${2:-}"
+        spawn_flags+=("$1" "$2")
+        shift 2
+        ;;
+      --background)
+        spawn_flags+=("$1")
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      --*)
+        die_with_help "$topic" "Unknown flag '$1'"
+        ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # Last positional is the prompt; the rest are repo URLs
+  if [ ${#positional[@]} -lt 2 ]; then
+    die_with_help "$topic" "Usage: agent run [flags] <repo-url> [repo-url...] \"prompt\""
+  fi
+
+  local prompt="${positional[${#positional[@]}-1]}"
+  local -a repos=()
+  local i
+  for (( i = 0; i < ${#positional[@]} - 1; i++ )); do
+    repos+=("${positional[$i]}")
+  done
+
+  [ ${#repos[@]} -gt 0 ] || die_with_help "$topic" "At least one repo URL required"
+  [ -n "$prompt" ] || die_with_help "$topic" "Prompt (last argument) required"
+
+  # Auto-detect SSH from repo URLs
+  local auto_ssh=false
+  local url
+  for url in "${repos[@]}"; do
+    if repo_uses_ssh "$url"; then
+      auto_ssh=true
+      break
+    fi
+  done
+
+  # Build spawn arguments
+  local -a spawn_args=("$agent_type")
+
+  for url in "${repos[@]}"; do
+    spawn_args+=(--repo "$url")
+  done
+
+  spawn_args+=(--prompt "$prompt")
+
+  if $auto_ssh; then
+    spawn_args+=(--ssh)
+  fi
+
+  if ! $ephemeral_auth; then
+    spawn_args+=(--reuse-auth)
+  fi
+
+  # Auto-detect git identity
+  local git_name="" git_email=""
+  git_name=$(git config --global user.name 2>/dev/null) || true
+  git_email=$(git config --global user.email 2>/dev/null) || true
+  if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+    spawn_args+=(--identity "$git_name <$git_email>")
+  fi
+
+  if $dry_run; then
+    spawn_args+=(--dry-run)
+  fi
+
+  [ ${#spawn_flags[@]} -gt 0 ] && spawn_args+=("${spawn_flags[@]}")
+
+  info "-> agent spawn $(render_command "${spawn_args[@]}")"
+
+  cmd_spawn "${spawn_args[@]}"
+}
+
+cmd_spawn() {
+  local topic="spawn"
+  local agent_type=""
+  local -a repos=()
+  local name=""
+  local enable_ssh="$DEFAULT_SSH"
+  local reuse_auth="$DEFAULT_REUSE_AUTH"
+  local reuse_gh_auth="$DEFAULT_REUSE_GH_AUTH"
+  local enable_docker="$DEFAULT_DOCKER"
+  local use_docker_socket="$DEFAULT_DOCKER_SOCKET"
+  local custom_network_name="$DEFAULT_NETWORK"
+  local memory="$DEFAULT_MEMORY"
+  local cpus="$DEFAULT_CPUS"
+  local pids_limit="$DEFAULT_PIDS_LIMIT"
+  local managed_network=true
+  local network_name=""
+  local dry_run=false
+  local auto_trust=false
+  local background=false
+  local agent_prompt=""
+  local aws_profile=""
+  local agent_instructions=""
+  local on_exit_cmd=""
+  local on_complete_cmd=""
+  local on_fail_cmd=""
+  local max_cost=""
+  local notify_targets=""
+  local fleet_volume_name=""
+  local timestamp container_name repos_joined="" repo_display network_mode_label auth_volume_name gh_auth_label docker_label
+
+  [ -n "$custom_network_name" ] && managed_network=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      claude|codex)
+        [ -z "$agent_type" ] || die_with_help "$topic" "Agent type already set to '$agent_type'."
+        agent_type="$1"
+        shift
+        ;;
+      --repo)
+        require_option_value "$topic" "--repo" "${2:-}"
+        repos+=("$2")
+        shift 2
+        ;;
+      --name)
+        require_option_value "$topic" "--name" "${2:-}"
+        name="$2"
+        shift 2
+        ;;
+      --prompt)
+        require_option_value "$topic" "--prompt" "${2:-}"
+        agent_prompt="$2"
+        shift 2
+        ;;
+      --template)
+        require_option_value "$topic" "--template" "${2:-}"
+        agent_prompt=$(resolve_template "$2")
+        shift 2
+        ;;
+      --aws)
+        require_option_value "$topic" "--aws" "${2:-}"
+        aws_profile="$2"
+        shift 2
+        ;;
+      --ssh)
+        enable_ssh=true
+        shift
+        ;;
+      --reuse-auth)
+        reuse_auth=true
+        shift
+        ;;
+      --ephemeral-auth|--no-reuse-auth)
+        reuse_auth=false
+        reuse_gh_auth=false
+        shift
+        ;;
+      --reuse-gh-auth)
+        reuse_gh_auth=true
+        shift
+        ;;
+      --docker)
+        enable_docker=true
+        shift
+        ;;
+      --docker-socket)
+        enable_docker=true
+        use_docker_socket=true
+        shift
+        ;;
+      --network)
+        require_option_value "$topic" "--network" "${2:-}"
+        custom_network_name="$2"
+        managed_network=false
+        shift 2
+        ;;
+      --memory)
+        require_option_value "$topic" "--memory" "${2:-}"
+        memory="$2"
+        shift 2
+        ;;
+      --cpus)
+        require_option_value "$topic" "--cpus" "${2:-}"
+        cpus="$2"
+        shift 2
+        ;;
+      --pids-limit)
+        require_option_value "$topic" "--pids-limit" "${2:-}"
+        pids_limit="$2"
+        shift 2
+        ;;
+      --identity)
+        require_option_value "$topic" "--identity" "${2:-}"
+        apply_identity "$2"
+        shift 2
+        ;;
+      --auto-trust)
+        auto_trust=true
+        shift
+        ;;
+      --background)
+        background=true
+        shift
+        ;;
+      --instructions)
+        require_option_value "$topic" "--instructions" "${2:-}"
+        agent_instructions="$2"
+        shift 2
+        ;;
+      --instructions-file)
+        require_option_value "$topic" "--instructions-file" "${2:-}"
+        [ -f "$2" ] || die "--instructions-file: file not found: $2"
+        agent_instructions=$(cat "$2")
+        shift 2
+        ;;
+      --on-exit)
+        require_option_value "$topic" "--on-exit" "${2:-}"
+        on_exit_cmd="$2"
+        shift 2
+        ;;
+      --on-complete)
+        require_option_value "$topic" "--on-complete" "${2:-}"
+        on_complete_cmd="$2"
+        shift 2
+        ;;
+      --on-fail)
+        require_option_value "$topic" "--on-fail" "${2:-}"
+        on_fail_cmd="$2"
+        shift 2
+        ;;
+      --max-cost)
+        require_option_value "$topic" "--max-cost" "${2:-}"
+        max_cost="$2"
+        shift 2
+        ;;
+      --notify)
+        require_option_value "$topic" "--notify" "${2:-}"
+        notify_targets="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --fleet-volume)
+        require_option_value "$topic" "--fleet-volume" "${2:-}"
+        fleet_volume_name="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  [ -n "$agent_type" ] || die_with_help "$topic" "Agent type required."
+  [ -n "$name" ] && validate_name_component "$name" "Container name"
+  validate_pids_limit "$pids_limit"
+  $use_docker_socket && enable_docker=true
+  if [ ${#repos[@]} -gt 0 ]; then
+    ensure_ssh_for_repos "$enable_ssh" "${repos[@]}"
+  else
+    ensure_ssh_for_repos "$enable_ssh"
+  fi
+
+  # Auto-detect git identity from host ~/.gitconfig if no identity was set
+  if [[ -z "${GIT_AUTHOR_NAME:-}" ]]; then
+    local detected_identity
+    detected_identity=$(detect_git_identity)
+    if [ -n "$detected_identity" ]; then
+      GIT_AUTHOR_NAME="${detected_identity%%<*}"
+      GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME% }"  # trim trailing space
+      GIT_AUTHOR_EMAIL="${detected_identity#*<}"
+      GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL%>}"
+      GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+      GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+      export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+    fi
+  fi
+
+  require_cmd orb
+  require_vm
+  ensure_vm_runtime_hardening
+  if ! $dry_run; then
+    ensure_local_image_present
+    if [ "$agent_type" = "codex" ] && $background; then
+      ensure_codex_background_auth_ready "$reuse_auth"
+    fi
+  fi
+
+  timestamp=$(date +%s)
+  if [ ${#repos[@]} -gt 0 ]; then
+    container_name=$(resolve_container_name "${CONTAINER_PREFIX}-${agent_type}" "$name" "$timestamp" "${repos[@]}")
+    repo_display=$(repo_display_label "${repos[@]}")
+  else
+    container_name=$(resolve_container_name "${CONTAINER_PREFIX}-${agent_type}" "$name" "$timestamp")
+    repo_display="-"
+  fi
+  if [ ${#repos[@]} -gt 0 ]; then
+    repos_joined=$(IFS=','; echo "${repos[*]}")
+  fi
+
+  prepare_network "$managed_network" "$container_name" "$custom_network_name" "$dry_run"
+
+  if $managed_network; then
+    network_mode_label="managed"
+  elif [ "$network_name" = "none" ]; then
+    network_mode_label="none"
+  else
+    network_mode_label="custom"
+  fi
+
+  info "Spawning $agent_type agent: $container_name"
+  [ -n "$repos_joined" ] && info "Repo: $repo_display"
+  if $managed_network; then
+    info "Network: $network_name ($(managed_network_summary))"
+  else
+    info "Network: $network_name ($(custom_network_summary "$network_name"))"
+  fi
+
+  build_container_runtime "$container_name" "$agent_type" "$repos_joined" "$enable_ssh" "$network_name" "$memory" "$cpus" "$pids_limit" "$repo_display" "$network_mode_label"
+
+  # Inject host agent config so MCP servers, model settings, etc. carry over
+  inject_host_config "$agent_type"
+
+  # Inject AWS credentials if requested
+  if [ -n "$aws_profile" ]; then
+    inject_aws_credentials "$aws_profile"
+  fi
+
+  # Inject agent instructions as AGENT-INSTRUCTIONS.md in /workspace
+  if [ -n "$agent_instructions" ]; then
+    local instructions_b64
+    instructions_b64=$(printf '%s' "$agent_instructions" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_INSTRUCTIONS_B64=$instructions_b64")
+    docker_cmd+=(--label "safe-agentic.instructions=1")
+    info "Instructions: injected ($(printf '%s' "$agent_instructions" | wc -c | tr -d ' ') bytes)"
+  fi
+
+  # Store prompt in a label so 'agent retry' can reconstruct it
+  if [ -n "$agent_prompt" ]; then
+    local prompt_b64
+    prompt_b64=$(printf '%s' "$agent_prompt" | base64 | tr -d '\n')
+    docker_cmd+=(--label "safe-agentic.prompt=$prompt_b64")
+  fi
+
+  # On-exit callback: stored as env var, run by entrypoint after agent exits
+  if [ -n "$on_exit_cmd" ]; then
+    local on_exit_b64
+    on_exit_b64=$(printf '%s' "$on_exit_cmd" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_ON_EXIT_B64=$on_exit_b64")
+    docker_cmd+=(--label "safe-agentic.on-exit=1")
+    info "On-exit callback: registered"
+  fi
+
+  # On-complete callback: stored as env var + label, run when agent exits 0
+  if [ -n "$on_complete_cmd" ]; then
+    local on_complete_b64
+    on_complete_b64=$(printf '%s' "$on_complete_cmd" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_ON_COMPLETE_B64=$on_complete_b64")
+    docker_cmd+=(--label "safe-agentic.on-complete-b64=$on_complete_b64")
+    info "On-complete callback: registered"
+  fi
+
+  # On-fail callback: stored as env var + label, run when agent exits non-zero
+  if [ -n "$on_fail_cmd" ]; then
+    local on_fail_b64
+    on_fail_b64=$(printf '%s' "$on_fail_cmd" | base64 | tr -d '\n')
+    docker_cmd+=(-e "SAFE_AGENTIC_ON_FAIL_B64=$on_fail_b64")
+    docker_cmd+=(--label "safe-agentic.on-fail-b64=$on_fail_b64")
+    info "On-fail callback: registered"
+  fi
+
+  # Max-cost budget: stored as a label for TUI / cost comparison
+  if [ -n "$max_cost" ]; then
+    docker_cmd+=(--label "safe-agentic.max-cost=$max_cost")
+    info "Max cost: \$$max_cost budget set"
+  fi
+
+  # Notification targets: base64-encoded to survive label/env transport
+  if [ -n "$notify_targets" ]; then
+    local notify_b64
+    notify_b64=$(printf '%s' "$notify_targets" | base64 | tr -d '\n')
+    docker_cmd+=(--label "safe-agentic.notify-b64=$notify_b64")
+    docker_cmd+=(-e "SAFE_AGENTIC_NOTIFY_B64=$notify_b64")
+    info "Notify: $notify_targets"
+  fi
+
+  if $reuse_auth; then
+    auth_volume_name="agent-${agent_type}-auth"
+    if auth_volume_exists "$auth_volume_name"; then
+      info "Auth: shared volume reused ($auth_volume_name)"
+    else
+      info "Auth: shared volume will be created ($auth_volume_name)"
+    fi
+    append_named_volume "$auth_volume_name" "/home/agent/.${agent_type}"
+    docker_cmd+=(--label "safe-agentic.auth=shared")
+  else
+    info "Auth: per-session (ephemeral)"
+    append_ephemeral_volume "/home/agent/.${agent_type}"
+    docker_cmd+=(--label "safe-agentic.auth=ephemeral")
+  fi
+
+  docker_cmd+=(-e "GH_CONFIG_DIR=/home/agent/.config/gh")
+  if $reuse_gh_auth; then
+    if auth_volume_exists "agent-gh-auth"; then
+      info "GitHub CLI auth: shared volume reused (agent-gh-auth)"
+    else
+      info "GitHub CLI auth: shared volume will be created (agent-gh-auth)"
+    fi
+    append_named_volume "agent-gh-auth" "/home/agent/.config/gh"
+    gh_auth_label="shared"
+  else
+    info "GitHub CLI auth: per-session (ephemeral)"
+    gh_auth_label="ephemeral"
+  fi
+  docker_cmd+=(--label "safe-agentic.gh-auth=$gh_auth_label")
+
+  reset_docker_runtime_state
+  docker_label="off"
+  if $enable_docker; then
+    if $use_docker_socket; then
+      info "Docker: VM daemon socket mounted directly (dangerous)"
+      append_host_docker_socket_access
+      docker_label="host-socket"
+    else
+      info "Docker: internal daemon sidecar (DinD)"
+      append_internal_docker_access "$container_name"
+      docker_label="dind"
+    fi
+  fi
+  docker_cmd+=(--label "safe-agentic.docker=$docker_label")
+
+  # Security preamble metadata: tells entrypoint what flags are active
+  # so it can template the security preamble into CLAUDE.md / AGENTS.md
+  $enable_ssh && docker_cmd+=(-e "SAFE_AGENTIC_SSH_ENABLED=1")
+  docker_cmd+=(-e "SAFE_AGENTIC_NETWORK_MODE=$network_mode_label")
+  docker_cmd+=(-e "SAFE_AGENTIC_DOCKER_MODE=$docker_label")
+  docker_cmd+=(-e "SAFE_AGENTIC_RESOURCES=memory=${memory},cpus=${cpus},pids=${pids_limit}")
+
+  if $auto_trust; then
+    docker_cmd+=(-e "SAFE_AGENTIC_AUTO_TRUST=1")
+  fi
+
+  if $background; then
+    docker_cmd+=(-e "SAFE_AGENTIC_BACKGROUND=1")
+    docker_cmd+=(--label "safe-agentic.terminal=none")
+  else
+    docker_cmd+=(--label "safe-agentic.terminal=tmux")
+  fi
+
+  # Fleet shared task volume: mounted at /fleet for agent-to-agent coordination
+  if [ -n "${fleet_volume_name:-}" ]; then
+    docker_cmd+=(--mount "type=volume,src=${fleet_volume_name},dst=/fleet")
+    docker_cmd+=(--label "safe-agentic.fleet=${fleet_volume_name}")
+    info "Fleet: shared task volume mounted at /fleet ($fleet_volume_name)"
+  fi
+
+  docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
+
+  # Append agent prompt after image name (forwarded as entrypoint $@)
+  if [ -n "$agent_prompt" ]; then
+    case "$agent_type" in
+      claude) docker_cmd+=(-p "$agent_prompt") ;;
+      codex)  docker_cmd+=("$agent_prompt") ;;
+    esac
+    info "Prompt: ${agent_prompt:0:80}$([ ${#agent_prompt} -gt 80 ] && echo '...')"
+  fi
+
+  if $dry_run; then
+    show_dry_run "$managed_network" "$network_name"
+    return 0
+  fi
+
+  if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
+    start_internal_docker_runtime "$container_name" "$network_name"
+  fi
+  local events_dir="${XDG_CONFIG_HOME:-$HOME/.config}/safe-agentic"
+  local events_file="$events_dir/events.jsonl"
+
+  if [ "$agent_type" = "codex" ] || [ "$agent_type" = "claude" ]; then
+    run_container_detached
+    ok "Container: $container_name"
+    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    emit_event "$events_file" "agent.spawned" \
+      "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
+    auto_attach_tmux_session "$container_name"
+  else
+    run_container "$managed_network" "$network_name"
+    ok "Container: $container_name"
+    audit_log "spawn" "$container_name" "type=$agent_type ssh=$enable_ssh auth=$( $reuse_auth && echo shared || echo ephemeral)"
+    emit_event "$events_file" "agent.spawned" \
+      "$(printf '{"name":"%s","type":"%s","repo":"%s"}' "$container_name" "$agent_type" "${repos[0]:-}")"
+    if [ -n "$max_cost" ] && [ "$dry_run" = false ]; then
+      start_budget_monitor "$container_name" "$max_cost" "$events_file"
+    fi
+  fi
+}
+
+cmd_shell() {
+  local topic="shell"
+  local -a repos=()
+  local enable_ssh="$DEFAULT_SSH"
+  local reuse_gh_auth="$DEFAULT_REUSE_GH_AUTH"
+  local enable_docker="$DEFAULT_DOCKER"
+  local use_docker_socket="$DEFAULT_DOCKER_SOCKET"
+  local custom_network_name="$DEFAULT_NETWORK"
+  local memory="$DEFAULT_MEMORY"
+  local cpus="$DEFAULT_CPUS"
+  local pids_limit="$DEFAULT_PIDS_LIMIT"
+  local managed_network=true
+  local network_name=""
+  local dry_run=false
+  local timestamp container_name repos_joined="" repo_display network_mode_label gh_auth_label docker_label
+
+  [ -n "$custom_network_name" ] && managed_network=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)
+        require_option_value "$topic" "--repo" "${2:-}"
+        repos+=("$2")
+        shift 2
+        ;;
+      --ssh)
+        enable_ssh=true
+        shift
+        ;;
+      --reuse-gh-auth)
+        reuse_gh_auth=true
+        shift
+        ;;
+      --docker)
+        enable_docker=true
+        shift
+        ;;
+      --docker-socket)
+        enable_docker=true
+        use_docker_socket=true
+        shift
+        ;;
+      --network)
+        require_option_value "$topic" "--network" "${2:-}"
+        custom_network_name="$2"
+        managed_network=false
+        shift 2
+        ;;
+      --memory)
+        require_option_value "$topic" "--memory" "${2:-}"
+        memory="$2"
+        shift 2
+        ;;
+      --cpus)
+        require_option_value "$topic" "--cpus" "${2:-}"
+        cpus="$2"
+        shift 2
+        ;;
+      --pids-limit)
+        require_option_value "$topic" "--pids-limit" "${2:-}"
+        pids_limit="$2"
+        shift 2
+        ;;
+      --identity)
+        require_option_value "$topic" "--identity" "${2:-}"
+        apply_identity "$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  validate_pids_limit "$pids_limit"
+  $use_docker_socket && enable_docker=true
+  if [ ${#repos[@]} -gt 0 ]; then
+    ensure_ssh_for_repos "$enable_ssh" "${repos[@]}"
+  else
+    ensure_ssh_for_repos "$enable_ssh"
+  fi
+
+  # Auto-detect git identity from host ~/.gitconfig if no identity was set
+  if [[ -z "${GIT_AUTHOR_NAME:-}" ]]; then
+    local detected_identity
+    detected_identity=$(detect_git_identity)
+    if [ -n "$detected_identity" ]; then
+      GIT_AUTHOR_NAME="${detected_identity%%<*}"
+      GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME% }"  # trim trailing space
+      GIT_AUTHOR_EMAIL="${detected_identity#*<}"
+      GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL%>}"
+      GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+      GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+      export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+    fi
+  fi
+
+  require_cmd orb
+  require_vm
+  ensure_vm_runtime_hardening
+  if ! $dry_run; then
+    ensure_local_image_present
+  fi
+
+  timestamp=$(date +%s)
+  if [ ${#repos[@]} -gt 0 ]; then
+    container_name=$(resolve_container_name "${CONTAINER_PREFIX}-shell" "" "$timestamp" "${repos[@]}")
+    repo_display=$(repo_display_label "${repos[@]}")
+  else
+    container_name=$(resolve_container_name "${CONTAINER_PREFIX}-shell" "" "$timestamp")
+    repo_display="-"
+  fi
+  if [ ${#repos[@]} -gt 0 ]; then
+    repos_joined=$(IFS=','; echo "${repos[*]}")
+  fi
+
+  prepare_network "$managed_network" "$container_name" "$custom_network_name" "$dry_run"
+
+  if $managed_network; then
+    network_mode_label="managed"
+  elif [ "$network_name" = "none" ]; then
+    network_mode_label="none"
+  else
+    network_mode_label="custom"
+  fi
+
+  info "Starting interactive shell: $container_name"
+  [ -n "$repos_joined" ] && info "Repo: $repo_display"
+  if $managed_network; then
+    info "Network: $network_name ($(managed_network_summary))"
+  else
+    info "Network: $network_name ($(custom_network_summary "$network_name"))"
+  fi
+
+  build_container_runtime "$container_name" "" "$repos_joined" "$enable_ssh" "$network_name" "$memory" "$cpus" "$pids_limit" "$repo_display" "$network_mode_label"
+  # Shell mode has no agent auth volume — add tmpfs so entrypoint can write configs
+  docker_cmd+=(--tmpfs "/home/agent/.claude:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
+  docker_cmd+=(--tmpfs "/home/agent/.codex:rw,noexec,nosuid,uid=1000,gid=1000,size=32m")
+  docker_cmd+=(-e "GH_CONFIG_DIR=/home/agent/.config/gh")
+  if $reuse_gh_auth; then
+    if auth_volume_exists "agent-gh-auth"; then
+      info "GitHub CLI auth: shared volume reused (agent-gh-auth)"
+    else
+      info "GitHub CLI auth: shared volume will be created (agent-gh-auth)"
+    fi
+    append_named_volume "agent-gh-auth" "/home/agent/.config/gh"
+    gh_auth_label="shared"
+  else
+    info "GitHub CLI auth: per-session (ephemeral)"
+    gh_auth_label="ephemeral"
+  fi
+  docker_cmd+=(--label "safe-agentic.gh-auth=$gh_auth_label")
+
+  reset_docker_runtime_state
+  docker_label="off"
+  if $enable_docker; then
+    if $use_docker_socket; then
+      info "Docker: VM daemon socket mounted directly (dangerous)"
+      append_host_docker_socket_access
+      docker_label="host-socket"
+    else
+      info "Docker: internal daemon sidecar (DinD)"
+      append_internal_docker_access "$container_name"
+      docker_label="dind"
+    fi
+  fi
+  docker_cmd+=(--label "safe-agentic.docker=$docker_label")
+  docker_cmd+=(--label "safe-agentic.auth=none")
+  docker_cmd+=("$IMAGE_NAME:$IMAGE_TAG")
+
+  if $dry_run; then
+    show_dry_run "$managed_network" "$network_name"
+    return 0
+  fi
+
+  if [ "$DOCKER_RUNTIME_KIND" = "dind" ]; then
+    start_internal_docker_runtime "$container_name" "$network_name"
+  fi
+  run_container "$managed_network" "$network_name"
+}
+
+cmd_list() {
+  local json=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json)
+        json=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent list [--json]
+
+List all safe-agentic containers.
+
+Options:
+  --json   Output raw JSON array (docker ps --format '{{json .}}')
+EOF
+        return 0
+        ;;
+      *)
+        die "Unknown argument '$1'. Run 'agent help' for usage."
+        ;;
+    esac
+  done
+
+  require_vm
+  if $json; then
+    vm_exec docker ps -a \
+      --filter "name=^${CONTAINER_PREFIX}-" \
+      --format '{{json .}}'
+  else
+    vm_exec docker ps -a \
+      --filter "name=^${CONTAINER_PREFIX}-" \
+      --format 'table {{.Names}}\t{{.Label "safe-agentic.agent-type"}}\t{{.Label "safe-agentic.repo-display"}}\t{{.Label "safe-agentic.ssh"}}\t{{.Label "safe-agentic.auth"}}\t{{.Label "safe-agentic.gh-auth"}}\t{{.Label "safe-agentic.docker"}}\t{{.Label "safe-agentic.network-mode"}}\t{{.Status}}'
+  fi
+}
+
+resolve_target_container() {
+  local topic="$1"
+  local name="$2"
+  local latest="$3"
+  local resolved=""
+
+  if $latest; then
+    resolved=$(resolve_latest_container)
+    [ -n "$resolved" ] || die "No running agent containers."
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  [ -n "$name" ] || die_with_help "$topic" "Container name required."
+  validate_name_component "$name" "Container name"
+  resolved=$(resolve_container_reference "$name" || true)
+  [ -n "$resolved" ] || die "No running agent container matches '$name'."
+  printf '%s\n' "$resolved"
+}
+
+cleanup_copy_artifacts() {
+  local remote_tmp="${1:-}"
+  local host_tar="${2:-}"
+  local host_stage="${3:-}"
+
+  if [ -n "$remote_tmp" ]; then
+    vm_exec rm -rf "$remote_tmp" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$host_tar" ]; then
+    rm -f "$host_tar"
+  fi
+  if [ -n "$host_stage" ]; then
+    rm -rf "$host_stage"
+  fi
+}
+
+move_staged_copy_to_host() {
+  local stage_dir="$1"
+  local destination="$2"
+  local entry=""
+  local -a entries=()
+
+  while IFS= read -r -d '' entry; do
+    entries+=("$entry")
+  done < <(find "$stage_dir" -mindepth 1 -maxdepth 1 -print0)
+
+  if [ "${#entries[@]}" -eq 0 ]; then
+    echo "No files were staged for copy." >&2
+    return 1
+  fi
+
+  if [ "${#entries[@]}" -eq 1 ]; then
+    entry="${entries[0]}"
+
+    if [ -d "$destination" ]; then
+      mv "$entry" "$destination/"
+      return 0
+    fi
+
+    if [ -e "$destination" ] && [ -d "$entry" ]; then
+      echo "Destination exists and is not a directory: $destination" >&2
+      return 1
+    fi
+
+    mkdir -p "$(dirname "$destination")"
+    mv "$entry" "$destination"
+    return 0
+  fi
+
+  if [ -e "$destination" ] && [ ! -d "$destination" ]; then
+    echo "Destination must be a directory when copying multiple items: $destination" >&2
+    return 1
+  fi
+
+  mkdir -p "$destination"
+  for entry in "${entries[@]}"; do
+    mv "$entry" "$destination/"
+  done
+}
+
+cmd_attach() {
+  local topic="attach"
+  local name=""
+  local latest=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+  audit_log "attach" "$name" ""
+
+  # If the container is stopped, restart it; if running, exec into it.
+  local state
+  local terminal_mode
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
+  case "$state" in
+    running)
+      info "Attaching to running $name..."
+      attach_container_console "$name" "$state"
+      ;;
+    exited|created)
+      info "Restarting stopped $name..."
+      if [ "$terminal_mode" = "tmux" ]; then
+        orb run -m "$VM_NAME" docker start "$name" >/dev/null
+        if wait_for_tmux_session "$name"; then
+          attach_tmux_session "$name"
+        else
+          die "Timed out waiting for tmux session in $name after restart."
+        fi
+      else
+        attach_container_console "$name" "$state"
+      fi
+      ;;
+    *)
+      die "Container $name is in state '$state' and cannot be attached."
+      ;;
+  esac
+}
+
+cmd_cp() {
+  local topic="cp"
+  local name=""
+  local latest=false
+  local container_path=""
+  local host_path=""
+  local remote_tmp=""
+  local host_tar=""
+  local host_stage=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ -z "$container_path" ]; then
+          container_path="$1"
+        elif [ -z "$host_path" ]; then
+          host_path="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+  [ -n "$container_path" ] || die_with_help "$topic" "Container path required."
+  [ -n "$host_path" ] || die_with_help "$topic" "Host path required."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  remote_tmp=$(vm_exec mktemp -d /tmp/safe-agentic-cp.XXXXXX)
+  [ -n "$remote_tmp" ] || die "Failed to allocate a VM temp directory."
+  host_tar=$(mktemp "${TMPDIR:-/tmp}/safe-agentic-cp.XXXXXX")
+  host_stage=$(mktemp -d "${TMPDIR:-/tmp}/safe-agentic-cp.XXXXXX")
+
+  info "Copying $name:$container_path -> $host_path"
+
+  if ! vm_exec docker cp "${name}:${container_path}" "$remote_tmp/" >/dev/null 2>&1; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed: $name:$container_path not found or unreadable."
+  fi
+
+  if ! vm_exec tar -C "$remote_tmp" -cf - . > "$host_tar"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed while streaming data from the VM."
+  fi
+
+  if ! tar -xf "$host_tar" -C "$host_stage"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed while unpacking data on the host."
+  fi
+
+  if ! move_staged_copy_to_host "$host_stage" "$host_path"; then
+    cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+    die "Copy failed. See error above."
+  fi
+
+  cleanup_copy_artifacts "$remote_tmp" "$host_tar" "$host_stage"
+  ok "Copied $name:$container_path -> $host_path"
+}
+
+cmd_stop() {
+  local topic="stop"
+  local name=""
+  local latest=false
+  local stop_all=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all)
+        stop_all=true
+        shift
+        ;;
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  require_vm
+
+  if $stop_all; then
+    $latest && die_with_help "$topic" "Use --all or --latest, not both."
+    [ -z "$name" ] || die_with_help "$topic" "Use a name or --all, not both."
+
+    info "Stopping all agent containers..."
+    local ids names
+    ids=$(vm_exec docker ps -a -q --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+    names=$(vm_exec docker ps -a --format '{{.Names}}' --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+    if [ -n "$ids" ]; then
+      # shellcheck disable=SC2086
+      vm_exec docker stop $ids >/dev/null 2>&1 || true
+      # shellcheck disable=SC2086
+      vm_exec docker rm $ids >/dev/null 2>&1 || true
+      while IFS= read -r container_name; do
+        [ -n "$container_name" ] || continue
+        remove_docker_runtime_for_container "$container_name"
+        remove_managed_network "$(network_name_for_container "$container_name")"
+      done <<< "$names"
+      ok "All agent containers stopped and removed."
+    else
+      info "No agent containers."
+    fi
+    return 0
+  fi
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Record cost to audit log before stopping (best-effort, container still running)
+  _record_cost_to_audit "$name"
+
+  info "Stopping $name..."
+  vm_exec docker stop "$name" >/dev/null 2>&1 || true
+  vm_exec docker rm "$name" >/dev/null 2>&1 || true
+  remove_docker_runtime_for_container "$name"
+  remove_managed_network "$(network_name_for_container "$name")"
+  audit_log "stop" "$name" ""
+  ok "$name stopped and removed."
+}
+
+cmd_cleanup() {
+  local topic="cleanup"
+  local remove_auth=false
+  local running stopped managed_networks auth_vols
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --auth)
+        remove_auth=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  require_vm
+  info "Cleaning up agent containers..."
+
+  running=$(vm_exec docker ps -q --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+  if [ -n "$running" ]; then
+    # shellcheck disable=SC2086
+    vm_exec docker stop $running >/dev/null
+  fi
+
+  stopped=$(vm_exec docker ps -aq --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || echo "")
+  if [ -n "$stopped" ]; then
+    # shellcheck disable=SC2086
+    vm_exec docker rm $stopped >/dev/null
+  fi
+
+  cleanup_all_docker_runtimes
+
+  managed_networks=$(vm_exec docker network ls -q \
+    --filter "label=app=$IMAGE_NAME" \
+    --filter "label=safe-agentic.type=container-network" 2>/dev/null || echo "")
+  if [ -n "$managed_networks" ]; then
+    # shellcheck disable=SC2086
+    vm_exec docker network rm $managed_networks >/dev/null 2>&1 || true
+  fi
+
+  if $remove_auth; then
+    auth_vols=$(vm_exec docker volume ls -q 2>/dev/null | grep -E '^agent-(claude|codex|gh)-auth$' || echo "")
+    if [ -n "$auth_vols" ]; then
+      # shellcheck disable=SC2086
+      vm_exec docker volume rm $auth_vols >/dev/null 2>&1 || true
+    fi
+  fi
+
+  vm_exec docker image prune -f --filter "label=app=$IMAGE_NAME" >/dev/null 2>&1 || true
+  if $remove_auth; then
+    ok "Cleanup complete. Shared auth removed."
+  else
+    ok "Cleanup complete. Shared auth kept. Run 'agent cleanup --auth' to remove it."
+  fi
+}
+
+cmd_update() {
+  local topic="update"
+  local quick=false
+  local full=false
+  local tarball
+  local -a build_args=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --quick)
+        quick=true
+        shift
+        ;;
+      --full)
+        full=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  $quick && $full && die_with_help "$topic" "Use --quick or --full, not both."
+
+  require_cmd orb
+  require_cmd git
+  require_vm
+  ensure_vm_runtime_hardening
+
+  info "[1/3] Preparing tracked build context..."
+  tarball=$(mktemp "${TMPDIR:-/tmp}/safe-agentic-ctx.XXXXXX")
+  # shellcheck disable=SC2016
+  git -C "$REPO_DIR" ls-files -c -z \
+    | ( cd "$REPO_DIR" && xargs -0 -I{} sh -c 'if test -e "$1"; then printf "%s\0" "$1"; fi' _ {} ) \
+    | COPYFILE_DISABLE=1 tar -C "$REPO_DIR" --null -T - -czf "$tarball"
+
+  info "[2/3] Syncing build context into VM..."
+  vm_copy_from_host "$tarball" /tmp/safe-agentic-ctx.tar.gz
+  vm_exec bash -c "rm -rf /tmp/safe-agentic && mkdir -p /tmp/safe-agentic && tar -xzf /tmp/safe-agentic-ctx.tar.gz -C /tmp/safe-agentic"
+  rm -f "$tarball"
+  sync_vm_seccomp_profile
+
+  if $quick; then
+    info "[3/3] Building image (quick CLI refresh; streaming logs)..."
+    build_args+=(--build-arg "CLI_CACHE_BUST=$(date +%s)")
+  elif $full; then
+    info "[3/3] Building image (full rebuild; streaming logs)..."
+    build_args+=(--no-cache)
+  else
+    info "[3/3] Building image (streaming logs)..."
+  fi
+
+  if [ ${#build_args[@]} -gt 0 ]; then
+    vm_exec docker build --progress=plain "${build_args[@]}" -t "$IMAGE_NAME:$IMAGE_TAG" /tmp/safe-agentic/
+  else
+    vm_exec docker build --progress=plain -t "$IMAGE_NAME:$IMAGE_TAG" /tmp/safe-agentic/
+  fi
+  ok "Image $IMAGE_NAME:$IMAGE_TAG built successfully."
+}
+
+cmd_diagnose() {
+  local failures=0
+  local ssh_sock=""
+
+  diag_ok()   { echo -e "${GREEN}[ok]${NC} $1"; }
+  diag_warn() { echo -e "${YELLOW}[warn]${NC} $1"; }
+  diag_fail() { echo -e "${RED}[fail]${NC} $1"; failures=$((failures + 1)); }
+
+  if command -v orb >/dev/null 2>&1; then
+    diag_ok "orb installed"
+  else
+    diag_fail "orb missing. Install OrbStack first."
+    return 1
+  fi
+
+  if orb list >/dev/null 2>&1; then
+    diag_ok "orb reachable"
+  else
+    diag_fail "orb not responding. Start OrbStack."
+    return 1
+  fi
+
+  if orb list 2>/dev/null | grep -q "$VM_NAME"; then
+    diag_ok "VM '$VM_NAME' exists"
+  else
+    diag_fail "VM '$VM_NAME' missing. Run 'agent setup'."
+    return 1
+  fi
+
+  if vm_exec docker info >/dev/null 2>&1; then
+    diag_ok "Docker reachable inside VM"
+  else
+    diag_fail "Docker unavailable inside VM. Re-run 'agent vm start' or 'agent setup'."
+  fi
+
+  if verify_vm_runtime_hardening >/dev/null 2>&1; then
+    diag_ok "VM hardening verified"
+  else
+    diag_fail "VM hardening drift detected. Run 'agent vm start'."
+  fi
+
+  if vm_exec docker image inspect "$IMAGE_NAME:$IMAGE_TAG" >/dev/null 2>&1; then
+    diag_ok "Image '$IMAGE_NAME:$IMAGE_TAG' present"
+  else
+    diag_fail "Image '$IMAGE_NAME:$IMAGE_TAG' missing. Run 'agent update'."
+  fi
+
+  if vm_exec bash -c 'test -S /var/run/docker.sock'; then
+    diag_ok "VM Docker socket visible: /var/run/docker.sock"
+  else
+    diag_fail "VM Docker socket missing at /var/run/docker.sock."
+  fi
+
+  # shellcheck disable=SC2016
+  ssh_sock=$(vm_exec bash -c 'echo "${SSH_AUTH_SOCK:-}"' 2>/dev/null || true)
+  if [ -n "$ssh_sock" ]; then
+    diag_ok "VM SSH agent socket visible: $ssh_sock"
+  else
+    diag_warn "No VM SSH agent socket. Private git@ repos need 1Password SSH agent + --ssh."
+  fi
+
+  if [ -f "$DEFAULTS_FILE" ]; then
+    diag_ok "Defaults file loaded: $DEFAULTS_FILE"
+  else
+    diag_warn "No defaults file at $DEFAULTS_FILE"
+  fi
+
+  [ "$failures" -eq 0 ]
+}
+
+cmd_vm() {
+  local topic="vm"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    ssh)
+      orb ssh "$VM_NAME"
+      ;;
+    stop)
+      info "Stopping VM..."
+      orb stop "$VM_NAME"
+      ok "VM stopped."
+      ;;
+    start)
+      info "Starting VM..."
+      orb start "$VM_NAME"
+      info "Re-applying VM hardening..."
+      reapply_vm_runtime_hardening
+      ok "VM started and hardened."
+      ;;
+    -h|--help)
+      cmd_help "$topic"
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'."
+      ;;
+  esac
+}
+
+print_help_summary() {
+  cat <<EOF
+Usage: agent summary <name>|--latest
+
+Show a one-screen overview of a container, including:
+  - Name, type, status, uptime/exit time
+  - Repo
+  - Flags (SSH, auth, Docker)
+  - Git status: branch, commits since clone, files changed
+  - Cost estimate
+  - Todo status
+
+Options:
+  --latest    Target the most recently started container
+  -h, --help
+
+Examples:
+  agent summary my-task
+  agent summary --latest
+EOF
+}
+
+cmd_summary() {
+  local topic="summary"
+  local name=""
+  local latest=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_summary
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Gather basic container info
+  local state started_at finished_at agent_type repo_display ssh_label auth_label docker_label
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  started_at=$(vm_exec docker inspect --format '{{.State.StartedAt}}' "$name" 2>/dev/null || echo "")
+  finished_at=$(vm_exec docker inspect --format '{{.State.FinishedAt}}' "$name" 2>/dev/null || echo "")
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "-")
+  ssh_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.ssh"}}' "$name" 2>/dev/null || echo "")
+  auth_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.auth"}}' "$name" 2>/dev/null || echo "")
+  docker_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.docker"}}' "$name" 2>/dev/null || echo "")
+
+  echo ""
+  echo -e "${CYAN}=== Agent Summary: $name ===${NC}"
+  echo ""
+  echo -e "  ${GREEN}Type:${NC}     ${agent_type:-unknown}"
+  echo -e "  ${GREEN}Status:${NC}   $state"
+  if [ "$state" = "running" ]; then
+    echo -e "  ${GREEN}Started:${NC}  $started_at"
+  else
+    echo -e "  ${GREEN}Started:${NC}  $started_at"
+    echo -e "  ${GREEN}Exited:${NC}   $finished_at"
+  fi
+  echo -e "  ${GREEN}Repo:${NC}     $repo_display"
+  echo ""
+  echo -e "  ${GREEN}SSH:${NC}      ${ssh_label:-off}"
+  echo -e "  ${GREEN}Auth:${NC}     ${auth_label:-ephemeral}"
+  echo -e "  ${GREEN}Docker:${NC}   ${docker_label:-off}"
+  echo ""
+
+  # Prefer the labeled repo path; fall back to the first nested git checkout.
+  local workspace_cd
+  # shellcheck disable=SC2016
+  workspace_cd='if [ -n "${SA_REPO_DISPLAY:-}" ] && [ "${SA_REPO_DISPLAY}" != "-" ] && [ -d "/workspace/${SA_REPO_DISPLAY}" ]; then cd "/workspace/${SA_REPO_DISPLAY}"; else repo_dir="$(find /workspace -mindepth 2 -maxdepth 4 \( -type d -o -type f \) -name .git -exec dirname {} \; | head -1)"; if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi; fi'
+
+  # Git status (only if running)
+  if [ "$state" = "running" ]; then
+    echo -e "  ${GREEN}Git status:${NC}"
+    local branch commits_since changed_files
+    branch=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git rev-parse --abbrev-ref HEAD 2>/dev/null" 2>/dev/null | tr -d '[:space:]' || echo "")
+    commits_since=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git rev-list --count HEAD 2>/dev/null || echo 0" 2>/dev/null | tr -d '[:space:]' || echo "?")
+    changed_files=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff --name-only 2>/dev/null | wc -l" 2>/dev/null | tr -d '[:space:]' || echo "?")
+    echo -e "    Branch:          ${branch:-unknown}"
+    echo -e "    Commits:         ${commits_since:-?}"
+    echo -e "    Files changed:   ${changed_files:-?}"
+    echo ""
+
+    # Todo status
+    local todos_summary
+    todos_summary=$(vm_exec docker exec "$name" python3 -c '
+import json, os, sys
+path = "/workspace/.safe-agentic/todos.json"
+if not os.path.exists(path):
+    print("No todos")
+    sys.exit(0)
+try:
+    with open(path) as f:
+        todos = json.load(f)
+except Exception:
+    print("No todos")
+    sys.exit(0)
+done = sum(1 for t in todos if t.get("done"))
+total = len(todos)
+print("{}/{} complete".format(done, total))
+' 2>/dev/null || echo "")
+    echo -e "  ${GREEN}Todos:${NC}    ${todos_summary:-No todos}"
+    echo ""
+
+    # Cost estimate
+    local config_dir jsonl_data
+    case "$agent_type" in
+      codex) config_dir="/home/agent/.codex" ;;
+      *) config_dir="/home/agent/.claude" ;;
+    esac
+
+    jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
+
+    if [ -n "$jsonl_data" ]; then
+      echo -e "  ${GREEN}Cost estimate:${NC}"
+      local py_script
+      py_script=$(mktemp "${TMPDIR:-/tmp}/agent-cost.XXXXXX")
+      trap 'rm -f "$py_script"' RETURN
+      cat >"$py_script" <<'PYEOF'
+import sys, json
+for line in sys.stdin:
+    stats = json.loads(line)
+    break
+else:
+    stats = {"totals_by_model": {}, "grand_input": 0, "grand_output": 0, "grand_cost": 0.0}
+if not stats.get("totals_by_model"):
+    print("    No token data yet.")
+    sys.exit(0)
+print(f"    ~${stats['grand_cost']:.4f}  ({int(stats['grand_input']):,} in / {int(stats['grand_output']):,} out tokens)")
+PYEOF
+      printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 "$py_script"
+      echo ""
+    fi
+  fi
+}
+
+print_help_config() {
+  cat <<EOF
+Usage: agent config <show|set|get|reset>
+
+Manage default settings stored in ${DEFAULTS_FILE}.
+
+Subcommands:
+  show                    Print current defaults (or "No defaults set")
+  set <key> <value>       Set a default value (creates file if needed)
+  get <key>               Show a specific default value
+  reset                   Delete the defaults file
+
+Valid keys:
+  memory          SAFE_AGENTIC_DEFAULT_MEMORY
+  cpus            SAFE_AGENTIC_DEFAULT_CPUS
+  pids-limit      SAFE_AGENTIC_DEFAULT_PIDS_LIMIT
+  ssh             SAFE_AGENTIC_DEFAULT_SSH
+  reuse-auth      SAFE_AGENTIC_DEFAULT_REUSE_AUTH
+  reuse-gh-auth   SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH
+  docker          SAFE_AGENTIC_DEFAULT_DOCKER
+  network         SAFE_AGENTIC_DEFAULT_NETWORK
+  identity        SAFE_AGENTIC_DEFAULT_IDENTITY
+
+Examples:
+  agent config show
+  agent config set memory 16g
+  agent config set ssh true
+  agent config get memory
+  agent config reset
+EOF
+}
+
+# Map friendly key names to env var names used in the defaults file.
+_config_key_to_env() {
+  case "$1" in
+    memory)       echo "SAFE_AGENTIC_DEFAULT_MEMORY" ;;
+    cpus)         echo "SAFE_AGENTIC_DEFAULT_CPUS" ;;
+    pids-limit)   echo "SAFE_AGENTIC_DEFAULT_PIDS_LIMIT" ;;
+    ssh)          echo "SAFE_AGENTIC_DEFAULT_SSH" ;;
+    reuse-auth)   echo "SAFE_AGENTIC_DEFAULT_REUSE_AUTH" ;;
+    reuse-gh-auth) echo "SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH" ;;
+    docker)       echo "SAFE_AGENTIC_DEFAULT_DOCKER" ;;
+    network)      echo "SAFE_AGENTIC_DEFAULT_NETWORK" ;;
+    identity)     echo "SAFE_AGENTIC_DEFAULT_IDENTITY" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_config() {
+  local topic="config"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_config
+      return 0
+      ;;
+    show|set|get|reset)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (show|set|get|reset)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use show, set, get, or reset."
+      ;;
+  esac
+
+  case "$subcmd" in
+    show)
+      if [ ! -f "$DEFAULTS_FILE" ]; then
+        echo "No defaults set."
+        return 0
+      fi
+      cat "$DEFAULTS_FILE"
+      ;;
+    set)
+      local key="${1:-}"
+      local value="${2:-}"
+      [ -n "$key" ] || die_with_help "$topic" "Key required."
+      [ -n "$value" ] || die_with_help "$topic" "Value required."
+      local env_key
+      env_key=$(_config_key_to_env "$key") || die "Unknown config key '$key'. Run 'agent config --help' for valid keys."
+      mkdir -p "$(dirname "$DEFAULTS_FILE")"
+      # Remove existing line for this key, then append new value.
+      if [ -f "$DEFAULTS_FILE" ]; then
+        local tmpfile
+        tmpfile=$(mktemp "${TMPDIR:-/tmp}/safe-agentic-config.XXXXXX")
+        grep -v "^${env_key}=" "$DEFAULTS_FILE" > "$tmpfile" || true
+        mv "$tmpfile" "$DEFAULTS_FILE"
+      fi
+      printf '%s=%s\n' "$env_key" "$value" >> "$DEFAULTS_FILE"
+      ok "Set $key=$value in $DEFAULTS_FILE"
+      ;;
+    get)
+      local key="${1:-}"
+      [ -n "$key" ] || die_with_help "$topic" "Key required."
+      local env_key
+      env_key=$(_config_key_to_env "$key") || die "Unknown config key '$key'. Run 'agent config --help' for valid keys."
+      if [ ! -f "$DEFAULTS_FILE" ]; then
+        echo "No defaults set."
+        return 0
+      fi
+      local val
+      val=$(grep "^${env_key}=" "$DEFAULTS_FILE" | tail -1 | cut -d= -f2-) || true
+      if [ -n "$val" ]; then
+        echo "$val"
+      else
+        echo "(not set)"
+      fi
+      ;;
+    reset)
+      if [ -f "$DEFAULTS_FILE" ]; then
+        rm -f "$DEFAULTS_FILE"
+        ok "Defaults file removed: $DEFAULTS_FILE"
+      else
+        echo "No defaults file to remove."
+      fi
+      ;;
+  esac
+}
+
+cmd_help() {
+  local topic="${1:-}"
+
+  case "$topic" in
+    ""|help)
+      print_help_general
+      ;;
+    run)
+      print_help_run
+      ;;
+    spawn)
+      print_help_spawn
+      ;;
+    shell)
+      print_help_shell
+      ;;
+    attach)
+      print_help_attach
+      ;;
+    cp)
+      print_help_cp
+      ;;
+    peek)
+      print_help_peek
+      ;;
+    diff)
+      print_help_diff
+      ;;
+    checkpoint)
+      print_help_checkpoint
+      ;;
+    todo)
+      print_help_todo
+      ;;
+    stop)
+      print_help_stop
+      ;;
+    cleanup)
+      print_help_cleanup
+      ;;
+    update)
+      print_help_update
+      ;;
+    vm)
+      print_help_vm
+      ;;
+    diagnose)
+      print_help_diagnose
+      ;;
+    output)
+      print_help_output
+      ;;
+    review)
+      print_help_review
+      ;;
+    audit)
+      print_help_audit
+      ;;
+    cost)
+      print_help_cost
+      ;;
+    replay)
+      print_help_replay
+      ;;
+    fleet)
+      print_help_fleet
+      ;;
+    pipeline)
+      print_help_pipeline
+      ;;
+    pr)
+      print_help_pr
+      ;;
+    config)
+      print_help_config
+      ;;
+    summary)
+      print_help_summary
+      ;;
+    retry)
+      print_help_retry
+      ;;
+    template)
+      print_help_template
+      ;;
+    *)
+      # Search all help text for the keyword
+      local keyword="$topic"
+      local combined_help
+      combined_help=$(
+        print_help_general
+        print_help_run
+        print_help_spawn
+        print_help_shell
+        print_help_attach
+        print_help_cp
+        print_help_peek
+        print_help_diff
+        print_help_checkpoint
+        print_help_todo
+        print_help_stop
+        print_help_cleanup
+        print_help_update
+        print_help_vm
+        print_help_diagnose
+        print_help_output
+        print_help_review
+        print_help_audit
+        print_help_cost
+        print_help_replay
+        print_help_fleet
+        print_help_pipeline
+        print_help_pr
+        print_help_config
+        print_help_summary
+        print_help_retry
+        print_help_template
+      ) 2>/dev/null
+      local matches
+      matches=$(printf '%s\n' "$combined_help" | grep -i --color=auto -C 2 "$keyword" 2>/dev/null) || true
+      if [ -n "$matches" ]; then
+        printf '%s\n' "$matches"
+      else
+        die "No help found for '$keyword'."
+      fi
+      ;;
+  esac
+}
+
+cmd_mcp_login() {
+  local topic="mcp-login"
+  local name=""
+  local latest=false
+  local mcp_server=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent mcp-login [container] <mcp-server>
+       agent mcp-login --latest <mcp-server>
+
+Authenticate an MCP server via OAuth. Runs in a temporary container
+with the shared auth volume so the token persists for all agents.
+
+Container name is optional — without it, uses the default
+agent-codex-auth volume. One-time setup per MCP server.
+
+Example:
+  agent mcp-login linear
+  agent mcp-login cardinality-restrictions linear
+  agent mcp-login --latest notion
+EOF
+        return 0
+        ;;
+      *)
+        # Collect positional args; we figure out which is which after parsing
+        if [ -z "$name" ]; then
+          name="$1"
+        elif [ -z "$mcp_server" ]; then
+          mcp_server="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  # With one positional arg: it's the MCP server name (no container).
+  # With two: first is container, second is MCP server.
+  if [ -z "$mcp_server" ]; then
+    mcp_server="$name"
+    name=""
+  fi
+  [ -n "$mcp_server" ] || die "MCP server name required. Example: agent mcp-login linear"
+
+  require_vm
+
+  # Determine the auth volume. If a container name is given, read it from
+  # the container. Otherwise use the default shared codex auth volume.
+  local auth_volume=""
+  if [ -n "$name" ] || $latest; then
+    name=$(resolve_target_container "$topic" "$name" "$latest")
+    auth_volume=$(vm_exec docker inspect --format \
+      '{{range .Mounts}}{{if eq .Destination "/home/agent/.codex"}}{{.Name}}{{end}}{{end}}' \
+      "$name" 2>/dev/null || echo "")
+    [ -n "$auth_volume" ] || die "Container $name has no codex auth volume. Use --reuse-auth when spawning."
+  else
+    auth_volume="agent-codex-auth"
+    # Create the volume if it doesn't exist yet
+    vm_exec docker volume inspect "$auth_volume" >/dev/null 2>&1 \
+      || vm_exec docker volume create "$auth_volume" >/dev/null
+  fi
+
+  info "Running MCP OAuth login for '$mcp_server'..."
+  info "A URL will appear — open it in your browser."
+
+  # Run login in a temporary container that bypasses userns-remap so we can
+  # use --network=host (userns-remap blocks host networking).
+  # --userns=host overrides the daemon-level remap for this container only.
+  # The OAuth callback server binds to VM localhost; OrbStack auto-forwards
+  # to macOS. Auth volume is shared so the token persists.
+  # --user root: the auth volume was created under userns-remap (uid 101000),
+  # but --userns=host maps uid 1000 to real 1000 which can't read those files.
+  # Root can access them regardless. This is safe — it's an ephemeral container.
+  orb run -m "$VM_NAME" docker run --rm -it \
+    --userns=host \
+    --network=host \
+    --user root \
+    --entrypoint codex \
+    -e "CODEX_HOME=/home/agent/.codex" \
+    -v "$auth_volume:/home/agent/.codex" \
+    "$IMAGE_NAME:$IMAGE_TAG" \
+    mcp login "$mcp_server"
+  local login_status=$?
+
+  if [ "$login_status" -eq 0 ]; then
+    # Fix ownership: the login container ran with --userns=host (real root),
+    # so files are owned by uid 0. The main agent container uses userns-remap
+    # where uid 1000 maps to VM uid 101000. Chown from the VM so the main
+    # container can read the files.
+    local vol_path
+    vol_path=$(vm_exec docker volume inspect --format '{{.Mountpoint}}' "$auth_volume" 2>/dev/null || echo "")
+    if [ -n "$vol_path" ]; then
+      vm_exec sudo chown -R 101000:101000 "$vol_path" 2>/dev/null || true
+    fi
+    ok "MCP '$mcp_server' authenticated. Token stored in auth volume '$auth_volume'."
+  else
+    warn "MCP login exited with status $login_status."
+  fi
+}
+
+cmd_sessions() {
+  local topic="sessions"
+  local name=""
+  local latest=false
+  local dest=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent sessions <container> [destination]
+       agent sessions --latest [destination]
+
+Export agent session history from a container to the host.
+Copies session files, history, indexes, and agent logs/state where available.
+Default destination: ./agent-sessions/<container-name>/
+
+Example:
+  agent sessions cardinality-restrictions
+  agent sessions --latest ~/codex-sessions/
+EOF
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ -z "$dest" ]; then
+          dest="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+  [ -z "$dest" ] && dest="./agent-sessions/$name"
+
+  # Ensure container is accessible
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..."
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+  fi
+
+  # Detect agent type
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    claude) config_dir="/home/agent/.claude" ;;
+    *) config_dir="/home/agent/.codex" ;;  # default to codex
+  esac
+
+  mkdir -p "$dest"
+
+  info "Exporting sessions from $name ($agent_type)..."
+
+  # Extract session-related files from the container
+  local tmptar
+  tmptar=$(mktemp "${TMPDIR:-/tmp}/agent-sessions.XXXXXX")
+  trap 'rm -f "$tmptar"' RETURN
+
+  # shellcheck disable=SC2016
+  orb run -m "$VM_NAME" docker exec -i "$name" bash -c '
+    set -euo pipefail
+    cd "$1"
+    patterns=(
+      projects
+      sessions
+      history.jsonl
+      session_index.jsonl
+      archived_sessions
+      log
+      logs_*.sqlite
+      logs_*.sqlite-shm
+      logs_*.sqlite-wal
+      state_*.sqlite
+      state_*.sqlite-shm
+      state_*.sqlite-wal
+    )
+    paths=()
+    for pattern in "${patterns[@]}"; do
+      for match in $pattern; do
+        [ -e "$match" ] || continue
+        paths+=("$match")
+      done
+    done
+    [ "${#paths[@]}" -gt 0 ] || exit 0
+    tar -cf - --ignore-failed-read "${paths[@]}"
+  ' bash "$config_dir" 2>/dev/null > "$tmptar"
+
+  if [ ! -s "$tmptar" ]; then
+    warn "No session data found in $name."
+    return 0
+  fi
+
+  tar -xf "$tmptar" -C "$dest" 2>/dev/null
+
+  local count
+  count=$(find "$dest" -type f 2>/dev/null | wc -l | tr -d ' ')
+  ok "Exported $count files to $dest"
+}
+
+cmd_peek() {
+  local topic="peek"
+  local name=""
+  local latest=false
+  local lines=30
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --lines)
+        require_option_value "$topic" "--lines" "${2:-}"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_peek
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  local terminal_mode
+  terminal_mode=$(trim_whitespace "$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.terminal"}}' "$name" 2>/dev/null || echo "")")
+  [ "$terminal_mode" = "tmux" ] || die "No tmux session in $name."
+
+  vm_exec docker exec "$name" tmux capture-pane -t "${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}" -p -S "-${lines}"
+}
+
+cmd_diff() {
+  local topic="diff"
+  local name=""
+  local latest=false
+  local stat=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --stat)
+        stat=true
+        shift
+        ;;
+      -h|--help)
+        print_help_diff
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # shellcheck disable=SC2016
+  if $stat; then
+    vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff --stat'
+  else
+    vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git diff'
+  fi
+}
+
+cmd_checkpoint() {
+  local topic="checkpoint"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_checkpoint
+      return 0
+      ;;
+    create|list|revert|fork)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (create|list|revert|fork)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use create, list, revert, or fork."
+      ;;
+  esac
+
+  local name=""
+  local latest=false
+  local label=""
+  local ref=""
+  local fork_name=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_checkpoint
+        return 0
+        ;;
+      *)
+        if [ "$subcmd" = "revert" ]; then
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$ref" ]; then
+            ref="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        elif [ "$subcmd" = "fork" ]; then
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$fork_name" ]; then
+            fork_name="$1"
+          elif [ -z "$label" ]; then
+            label="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        else
+          if [ -z "$name" ] && ! $latest; then
+            name="$1"
+          elif [ -z "$label" ]; then
+            label="$1"
+          else
+            die_with_help "$topic" "Unexpected argument '$1'."
+          fi
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  if [ "$subcmd" = "revert" ] && [ -z "$ref" ]; then
+    die_with_help "$topic" "Checkpoint ref required for revert."
+  fi
+
+  if [ "$subcmd" = "fork" ] && [ -z "$fork_name" ]; then
+    die_with_help "$topic" "Fork name required. Usage: agent checkpoint fork <container> <new-name> [label]"
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # shellcheck disable=SC2016
+  case "$subcmd" in
+    create)
+      [ -z "$label" ] && label="checkpoint-$(date +%s)"
+      validate_name_component "$label" "Checkpoint label"
+      local stash_sha
+      stash_sha=$(vm_exec docker exec "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git stash create' 2>/dev/null || true)
+      stash_sha=$(echo "$stash_sha" | tr -d '[:space:]')
+      if [ -z "$stash_sha" ]; then
+        info "No changes to checkpoint."
+        return 0
+      fi
+      vm_exec docker exec -e SA_LABEL="$label" -e SA_SHA="$stash_sha" "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git update-ref "refs/safe-agentic/checkpoints/$SA_LABEL" "$SA_SHA"'
+
+      # Docker commit for full container state snapshot
+      local timestamp
+      timestamp=$(date +%Y%m%d-%H%M%S)
+      local snapshot_tag="safe-agentic-checkpoint:${name}-${timestamp}"
+      info "Creating container snapshot: $snapshot_tag"
+
+      # Pause agent process via tmux
+      local agent_pid
+      agent_pid=$(vm_exec docker exec "$name" tmux list-panes -t agent -F '#{pane_pid}' 2>/dev/null || echo "")
+      [ -n "$agent_pid" ] && vm_exec docker exec "$name" kill -STOP "$agent_pid" 2>/dev/null || true
+
+      # Commit container filesystem
+      vm_exec docker commit "$name" "$snapshot_tag" >/dev/null
+
+      # Store snapshot metadata
+      vm_exec docker exec -e SA_TS="$timestamp" -e SA_LABEL="$label" -e SA_TAG="$snapshot_tag" -e SA_SHA="$stash_sha" "$name" bash -c '
+        mkdir -p /workspace/.safe-agentic
+        printf "{\"timestamp\":\"%s\",\"label\":\"%s\",\"image\":\"%s\",\"git_ref\":\"%s\"}\n" "$SA_TS" "$SA_LABEL" "$SA_TAG" "${SA_SHA:-none}" >> /workspace/.safe-agentic/checkpoints.jsonl
+      ' 2>/dev/null || true
+
+      # Resume agent process
+      [ -n "$agent_pid" ] && vm_exec docker exec "$name" kill -CONT "$agent_pid" 2>/dev/null || true
+
+      ok "Checkpoint '$label' created ($stash_sha) in $name (snapshot: $snapshot_tag)."
+      ;;
+    list)
+      vm_exec docker exec "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git for-each-ref --format="%(objectname:short) %(creatordate:unix) %(refname:lstrip=3)" refs/safe-agentic/checkpoints/' \
+        | while IFS= read -r line; do
+            local sha epoch lbl
+            sha=$(echo "$line" | awk '{print $1}')
+            epoch=$(echo "$line" | awk '{print $2}')
+            lbl=$(echo "$line" | awk '{$1=$2=""; print}' | sed 's/^ *//')
+            if [ -n "$epoch" ] && [ "$epoch" -gt 0 ] 2>/dev/null; then
+              ts=$(date -r "$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d "@$epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$epoch")
+            else
+              ts="$epoch"
+            fi
+            printf '%s  %s  %s\n' "$sha" "$ts" "$lbl"
+          done
+      ;;
+    revert)
+      validate_name_component "$ref" "Checkpoint ref"
+      vm_exec docker exec -e SA_REF="$ref" "$name" bash -c \
+        'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git checkout . && git clean -fd && git stash apply "refs/safe-agentic/checkpoints/$SA_REF"'
+      ok "Reverted $name to checkpoint '$ref'."
+      ;;
+    fork)
+      validate_name_component "$fork_name" "Fork name"
+
+      # Get latest snapshot image from container metadata
+      local snapshot_tag
+      snapshot_tag=$(vm_exec docker exec "$name" bash -c '
+        tail -1 /workspace/.safe-agentic/checkpoints.jsonl 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)[\"image\"])" 2>/dev/null
+      ' || echo "")
+      snapshot_tag=$(echo "$snapshot_tag" | tr -d '[:space:]')
+      [ -n "$snapshot_tag" ] || die "No checkpoint found for $name. Run 'agent checkpoint create $name <label>' first."
+
+      [ -z "$label" ] && label="fork-$(date +%s)"
+      info "Forking $name as $fork_name from $snapshot_tag..."
+
+      # Get original container's agent type
+      local agent_type
+      agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "claude")
+      [ -n "$agent_type" ] || agent_type="claude"
+
+      # Create network and run from snapshot
+      local fork_network="${fork_name}-net"
+      create_managed_network "$fork_network"
+
+      vm_exec docker run -d \
+        --name "$fork_name" \
+        --network "$fork_network" \
+        --label "safe-agentic.agent-type=$agent_type" \
+        --label "safe-agentic.forked-from=$name" \
+        --label "safe-agentic.fork-label=$label" \
+        "$snapshot_tag" \
+        sleep infinity >/dev/null
+
+      ok "Fork created: $fork_name (use 'agent attach $fork_name' to connect)"
+      audit_log "fork" "$fork_name" "from=$name snapshot=$snapshot_tag"
+      ;;
+  esac
+}
+
+cmd_todo() {
+  local topic="todo"
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    -h|--help)
+      print_help_todo
+      return 0
+      ;;
+    add|list|check|uncheck)
+      shift
+      ;;
+    "")
+      die_with_help "$topic" "Subcommand required (add|list|check|uncheck)."
+      ;;
+    *)
+      die_with_help "$topic" "Unknown subcommand '$subcmd'. Use add, list, check, or uncheck."
+      ;;
+  esac
+
+  local name=""
+  local latest=false
+  local text=""
+  local index=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_todo
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ] && ! $latest; then
+          name="$1"
+        elif [ "$subcmd" = "add" ]; then
+          if [ -z "$text" ]; then
+            text="$1"
+          else
+            text="$text $1"
+          fi
+        elif [ "$subcmd" = "check" ] || [ "$subcmd" = "uncheck" ]; then
+          [ -z "$index" ] || die_with_help "$topic" "Unexpected argument '$1'."
+          index="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  if [ "$subcmd" = "add" ] && [ -z "$text" ]; then
+    die_with_help "$topic" "Todo text required for add."
+  fi
+
+  if { [ "$subcmd" = "check" ] || [ "$subcmd" = "uncheck" ]; } && [ -z "$index" ]; then
+    die_with_help "$topic" "Index required for $subcmd."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  local todos_file="/workspace/.safe-agentic/todos.json"
+
+  case "$subcmd" in
+    add)
+      # Ensure directory exists
+      vm_exec docker exec "$name" mkdir -p /workspace/.safe-agentic
+      # JSON-encode the text on the host to pass safely into the container
+      local escaped_text
+      escaped_text=$(python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' <<< "$text")
+      # Pipe python script via stdin to avoid quoting issues with multiline -c
+      vm_exec docker exec -i "$name" python3 - \
+        "$todos_file" "$escaped_text" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+text_json = sys.argv[2]
+text = json.loads(text_json)
+todos = []
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            todos = json.load(f)
+    except Exception:
+        todos = []
+todos.append({'text': text, 'done': False})
+with open(path, 'w') as f:
+    json.dump(todos, f, indent=2)
+print('Added todo #{}: {}'.format(len(todos), text))
+PYEOF
+      ;;
+    list)
+      # Pipe python script via stdin to avoid quoting issues
+      vm_exec docker exec -i "$name" python3 - "$todos_file" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+if not os.path.exists(path):
+    print('No todos yet.')
+    sys.exit(0)
+try:
+    with open(path) as f:
+        todos = json.load(f)
+except Exception:
+    print('No todos yet.')
+    sys.exit(0)
+if not todos:
+    print('No todos yet.')
+    sys.exit(0)
+done_count = sum(1 for t in todos if t.get('done'))
+for i, t in enumerate(todos, 1):
+    mark = 'x' if t.get('done') else ' '
+    print('[{}] {}. {}'.format(mark, i, t.get('text', '')))
+print('')
+print('{}/{} complete'.format(done_count, len(todos)))
+PYEOF
+      ;;
+    check|uncheck)
+      local done_flag
+      [ "$subcmd" = "check" ] && done_flag="1" || done_flag="0"
+      # Pipe python script via stdin to avoid quoting issues
+      vm_exec docker exec -i "$name" python3 - \
+        "$todos_file" "$index" "$done_flag" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+idx = int(sys.argv[2]) - 1
+done = sys.argv[3] == '1'
+if not os.path.exists(path):
+    print('No todos found.', file=sys.stderr)
+    sys.exit(1)
+with open(path) as f:
+    todos = json.load(f)
+if idx < 0 or idx >= len(todos):
+    print('Index {} out of range (1-{}).'.format(idx + 1, len(todos)), file=sys.stderr)
+    sys.exit(1)
+todos[idx]['done'] = done
+with open(path, 'w') as f:
+    json.dump(todos, f, indent=2)
+label = 'done' if done else 'not done'
+print('Todo #{} marked as {}.'.format(idx + 1, label))
+PYEOF
+      ;;
+  esac
+}
+
+cmd_review() {
+  local topic="review"
+  local name=""
+  local latest=false
+  local base=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --base)
+        require_option_value "$topic" "--base" "${2:-}"
+        base="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_review
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Detect workspace directory inside container
+  # shellcheck disable=SC2016
+  local workspace_cd='cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace'
+
+  # Check if codex is available in the container
+  if vm_exec docker exec "$name" command -v codex >/dev/null 2>&1; then
+    if [ -n "$base" ]; then
+      info "Running codex review --base $base in $name..."
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && codex review --base \"\$SA_BASE\""
+    else
+      info "Running codex review --uncommitted in $name..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && codex review --uncommitted"
+    fi
+  else
+    if [ -n "$base" ]; then
+      info "Running git diff against $base in $name (codex not available)..."
+      vm_exec docker exec -e SA_BASE="$base" "$name" bash -lc "$workspace_cd && git diff \"\$SA_BASE\""
+    else
+      info "Running git diff in $name (codex not available)..."
+      vm_exec docker exec "$name" bash -lc "$workspace_cd && git diff"
+    fi
+  fi
+}
+
+cmd_audit() {
+  local topic="audit"
+  local lines=50
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lines)
+        require_option_value "$topic" "--lines" "${2:-}"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_audit
+        return 0
+        ;;
+      *)
+        die_with_help "$topic" "Unknown argument '$1'."
+        ;;
+    esac
+  done
+
+  local log_file="${AUDIT_LOG_FILE:-${DEFAULTS_DIR}/audit.jsonl}"
+  if [ ! -f "$log_file" ]; then
+    echo "No audit log yet."
+    return 0
+  fi
+
+  tail -n "$lines" "$log_file" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        e = json.loads(line)
+        details = (' ' + e.get('details','')) if e.get('details') else ''
+        print('{ts}  {action:<10}  {container}{details}'.format(
+            ts=e.get('timestamp',''),
+            action=e.get('action',''),
+            container=e.get('container',''),
+            details=details,
+        ))
+    except Exception:
+        print(line)
+"
+}
+
+cmd_cost() {
+  local topic="cost"
+  local name=""
+  local latest=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --history)
+        local period="${2:-7d}"
+        # Only consume the next arg if it looks like a period (Nd)
+        if [[ "${2:-}" =~ ^[0-9]+d$ ]]; then
+          shift 2
+        else
+          shift
+        fi
+        local audit_file="$AUDIT_LOG_FILE"
+        [ -f "$audit_file" ] || die "No audit log found at $audit_file"
+
+        python3 -c "
+import json, sys
+from datetime import datetime, timedelta
+
+period = '$period'
+days = int(period.rstrip('d')) if period.endswith('d') else 7
+cutoff = datetime.utcnow() - timedelta(days=days)
+
+by_container = {}
+total = 0.0
+for line in open('$audit_file'):
+    try:
+        obj = json.loads(line)
+        if obj.get('action') != 'cost':
+            continue
+        ts = datetime.fromisoformat(obj['timestamp'].rstrip('Z'))
+        if ts < cutoff:
+            continue
+        name = obj.get('container', '?')
+        cost = float(obj.get('cost', 0))
+        by_container[name] = by_container.get(name, 0) + cost
+        total += cost
+    except (json.JSONDecodeError, KeyError, ValueError):
+        continue
+
+print(f'Cost history (last {days} days):')
+print()
+for name, cost in sorted(by_container.items(), key=lambda x: -x[1]):
+    print(f'  {name:40s} \${cost:.2f}')
+print()
+print(f'  {\"Total\":40s} \${total:.2f}')
+"
+        return 0
+        ;;
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        print_help_cost
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..." >&2
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+    state="running"
+  fi
+
+  # Detect agent type to find the right config dir
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    *)     config_dir="/home/agent/.claude" ;;
+  esac
+
+  info "Reading session data from $name ($agent_type)..." >&2
+
+  # Collect ALL JSONL data from session files (cost needs aggregate, not single file).
+  # Claude stores sessions under projects/-workspace-*/; Codex under sessions/.
+  # Search the entire config dir to cover both.
+  local jsonl_data
+  if [ "$state" = "running" ]; then
+    jsonl_data=$(vm_exec docker exec "$name" bash -c "
+      find '${config_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+        | while IFS= read -r f; do cat \"\$f\"; done
+    " 2>/dev/null || true)
+  else
+    local tmp_dir="/tmp/sa-cost-$$-${name}"
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec mkdir -p "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}" "${tmp_dir}/" >/dev/null 2>&1 || true
+    jsonl_data=$(vm_exec bash -c "
+      find '${tmp_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+        | while IFS= read -r f; do cat \"\$f\"; done
+    " 2>/dev/null || true)
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  fi
+
+  if [ -z "$jsonl_data" ]; then
+    warn "No session data found in $name." >&2
+    return 0
+  fi
+
+  # Write python analyser to a temp file so we can pipe JSONL into it
+  local py_script
+  py_script=$(mktemp "${TMPDIR:-/tmp}/agent-cost.XXXXXX")
+  trap 'rm -f "$py_script"' RETURN
+
+  cat >"$py_script" <<'PYEOF'
+import sys, json
+
+for line in sys.stdin:
+    stats = json.loads(line)
+    break
+else:
+    stats = {"totals_by_model": {}, "grand_input": 0, "grand_output": 0, "grand_cost": 0.0}
+
+totals_by_model = stats.get("totals_by_model") or {}
+if not totals_by_model:
+    print("No token usage found in session data.")
+    sys.exit(0)
+
+print("")
+print("  Model                      Input         Output    Est. Cost")
+print("  " + "-" * 65)
+
+for model_key in sorted(totals_by_model):
+    entry = totals_by_model[model_key]
+    inp = int(entry.get("input_tokens", 0))
+    out = int(entry.get("output_tokens", 0))
+    cost = float(entry.get("cost", 0.0))
+    print(f"  {model_key:<26} {inp:>12,}  {out:>12,}    ${cost:>8.4f}")
+
+print("  " + "-" * 65)
+print(f"  {'TOTAL':<26} {int(stats.get('grand_input', 0)):>12,}  {int(stats.get('grand_output', 0)):>12,}    ${float(stats.get('grand_cost', 0.0)):>8.4f}")
+print("")
+print(f"  Note: estimates use list pricing; cache tokens billed differently.")
+print("")
+PYEOF
+
+  printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 "$py_script"
+}
+
+
+# ---------------------------------------------------------------------------
+# Helper: extract session JSONL content from a container (running or stopped).
+# Prints raw JSONL lines to stdout.
+# ---------------------------------------------------------------------------
+_output_get_jsonl() {
+  local name="$1"
+  local state="$2"
+  local config_dir="$3"
+
+  local repo_display proj_slug
+  repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "")
+  repo_display=$(printf '%s' "$repo_display" | tr -d '[:space:]')
+
+  local -a search_paths=()
+  if [ -n "$repo_display" ] && [ "$repo_display" != "-" ]; then
+    proj_slug=$(printf '%s' "$repo_display" | tr '/' '-')
+    search_paths+=("${config_dir}/projects/-workspace-${proj_slug}")
+  fi
+  search_paths+=("${config_dir}/sessions" "$config_dir")
+
+  local created_at
+  created_at=$(vm_exec docker inspect --format '{{.Created}}' "$name" 2>/dev/null || echo "")
+
+  local match_script='
+import os, json, sys, glob
+container_created = sys.argv[1][:19]
+search_paths = [p for p in sys.argv[2:] if p]
+files = []
+seen = set()
+for base in search_paths:
+    for pattern in (os.path.join(base, "*.jsonl"), os.path.join(base, "**", "*.jsonl")):
+        for f in glob.glob(pattern, recursive=True):
+            if f.endswith("history.jsonl") or "/subagents/" in f or f in seen:
+                continue
+            seen.add(f)
+            files.append(f)
+best_file = None
+best_delta = float("inf")
+for f in files:
+    try:
+        with open(f) as fh:
+            for line in fh:
+                d = json.loads(line.strip())
+                ts = d.get("timestamp", "")
+                if not ts and "message" in d and isinstance(d["message"], dict):
+                    ts = d["message"].get("timestamp", "")
+                if ts:
+                    session_start = ts[:19]
+                    if session_start >= container_created:
+                        delta = abs(ord(session_start[18]) - ord(container_created[18]))
+                        if delta < best_delta:
+                            best_delta = delta
+                            best_file = f
+                    break
+    except:
+        pass
+if not best_file and files:
+    best_file = max(files, key=os.path.getmtime)
+if best_file:
+    with open(best_file) as fh:
+        sys.stdout.write(fh.read())
+'
+
+  if [ "$state" = "running" ]; then
+    vm_exec docker exec "$name" python3 -c "$match_script" "$created_at" "${search_paths[@]}" 2>/dev/null
+  else
+    local tmp_dir
+    tmp_dir="/tmp/sa-output-$$-${name}"
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec mkdir -p "$tmp_dir" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}/sessions" "${tmp_dir}/sessions" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}/projects" "${tmp_dir}/projects/" >/dev/null 2>&1 || true
+    vm_exec docker cp "${name}:${config_dir}/history.jsonl" "${tmp_dir}/history.jsonl" >/dev/null 2>&1 || true
+    local -a tmp_search_paths=()
+    if [ -n "$repo_display" ] && [ "$repo_display" != "-" ]; then
+      tmp_search_paths+=("${tmp_dir}/projects/-workspace-${proj_slug}")
+    fi
+    tmp_search_paths+=("${tmp_dir}/sessions" "$tmp_dir")
+    vm_exec python3 -c "$match_script" "$created_at" "${tmp_search_paths[@]}" 2>/dev/null
+    vm_exec rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  fi
+}
+
+_session_jsonl_last_message() {
+  python3 -c '
+import json, sys
+
+def extract_text(content):
+    parts = []
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if text and item.get("type") in {"output_text", "text"}:
+                parts.append(text)
+    elif isinstance(content, str) and content:
+        parts.append(content)
+    return "\n".join(parts)
+
+last_text = ""
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    if obj.get("type") == "assistant":
+        message = obj.get("message") or {}
+        text = extract_text(message.get("content", ""))
+        if text:
+            last_text = text
+        continue
+
+    if obj.get("type") == "response_item":
+        payload = obj.get("payload") or {}
+        if payload.get("type") == "message" and payload.get("role") == "assistant":
+            text = extract_text(payload.get("content", ""))
+            if text:
+                last_text = text
+        continue
+
+    if obj.get("type") == "event_msg":
+        payload = obj.get("payload") or {}
+        if payload.get("type") == "agent_message" and payload.get("message"):
+            last_text = payload["message"]
+
+print(last_text)
+'
+}
+
+_session_jsonl_cost_stats() {
+  python3 -c '
+import json, re, sys
+
+PRICES = {
+    # Anthropic
+    "claude-opus-4-6":   (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0,  15.0),
+    "claude-haiku-4-5":  (0.80,  4.0),
+    # OpenAI
+    "gpt-5.4":           (2.50,  10.0),
+    "gpt-5.2":           (2.50,  10.0),
+    "o3":                (10.0,  40.0),
+    "o4-mini":           (1.10,   4.40),
+}
+DEFAULT_PRICE = (3.0, 15.0)
+
+totals_by_model = {}
+model_hint = "unknown"
+latest_token_totals = None
+
+def normalise_model(model):
+    return re.sub(r"-\d{8}$", "", model or "unknown")
+
+def add_usage(model, input_tokens, output_tokens):
+    model_key = normalise_model(model)
+    inp = int(input_tokens or 0)
+    out = int(output_tokens or 0)
+    entry = totals_by_model.setdefault(model_key, {"input_tokens": 0, "output_tokens": 0, "cost": 0.0})
+    entry["input_tokens"] += inp
+    entry["output_tokens"] += out
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+    if obj.get("type") == "turn_context":
+        model_hint = payload.get("model") or obj.get("model") or model_hint
+    elif obj.get("type") == "session_meta":
+        model_hint = payload.get("model") or obj.get("model") or model_hint
+
+    usage = obj.get("usage") or payload.get("usage")
+    if isinstance(usage, dict):
+        add_usage(obj.get("model") or payload.get("model") or model_hint, usage.get("input_tokens"), usage.get("output_tokens"))
+        continue
+
+    if obj.get("type") == "event_msg" and payload.get("type") == "token_count":
+        info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
+        total_usage = info.get("total_token_usage") if isinstance(info.get("total_token_usage"), dict) else {}
+        if total_usage:
+            latest_token_totals = total_usage
+
+if not totals_by_model and latest_token_totals:
+    add_usage(model_hint, latest_token_totals.get("input_tokens"), latest_token_totals.get("output_tokens"))
+
+grand_input = 0
+grand_output = 0
+grand_cost = 0.0
+for model_key, entry in totals_by_model.items():
+    price_in, price_out = PRICES.get(model_key, DEFAULT_PRICE)
+    cost = (entry["input_tokens"] / 1_000_000) * price_in + (entry["output_tokens"] / 1_000_000) * price_out
+    entry["cost"] = cost
+    grand_input += entry["input_tokens"]
+    grand_output += entry["output_tokens"]
+    grand_cost += cost
+
+print(json.dumps({
+    "totals_by_model": totals_by_model,
+    "grand_input": grand_input,
+    "grand_output": grand_output,
+    "grand_cost": grand_cost,
+}, sort_keys=True))
+'
+}
+
+cmd_replay() {
+  local topic="replay"
+  local name=""
+  local latest=false
+  local tools_only=false
+  local cost_timeline=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --tools-only)
+        tools_only=true
+        shift
+        ;;
+      --cost-timeline)
+        cost_timeline=true
+        shift
+        ;;
+      -h|--help)
+        print_help_replay
+        return 0
+        ;;
+      -*)
+        die "Unknown flag: $1"
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Read session events from container
+  local events=""
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "gone")
+
+  local events_path="/workspace/.safe-agentic/session-events.jsonl"
+
+  if [ "$state" != "running" ]; then
+    info "Starting container $name..." >&2
+    vm_exec docker start "$name" >/dev/null 2>&1
+    sleep 1
+    state="running"
+  fi
+
+  events=$(vm_exec docker exec "$name" cat "$events_path" 2>/dev/null || echo "")
+
+  [ -n "$events" ] || die "No session events found for $name."
+
+  local tools_flag="False"
+  local cost_flag="False"
+  [ "$tools_only" = true ] && tools_flag="True"
+  [ "$cost_timeline" = true ] && cost_flag="True"
+
+  local py_script
+  py_script=$(mktemp "${TMPDIR:-/tmp}/agent-replay.XXXXXX")
+  trap 'rm -f "$py_script"' RETURN
+
+  cat >"$py_script" <<'PYEOF'
+import json, os, sys
+
+tools_only = os.environ.get('REPLAY_TOOLS_ONLY') == 'True'
+cost_timeline = os.environ.get('REPLAY_COST_TIMELINE') == 'True'
+
+PRICES = {
+    'claude-opus-4-6':   (15.0, 75.0),
+    'claude-sonnet-4-6': (3.0, 15.0),
+    'claude-haiku-4-5':  (0.80, 4.0),
+    'gpt-5.4':           (2.50, 10.0),
+    'gpt-5.2':           (2.50, 10.0),
+    'o3':                (10.0, 40.0),
+    'o4-mini':           (1.10, 4.40),
+}
+running_cost = 0.0
+total_in = total_out = 0
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        evt = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    ts = evt.get('ts', '?')
+    etype = evt.get('type', '?')
+    data = evt.get('data', {})
+
+    tin = int(data.get('tokens_in', 0))
+    tout = int(data.get('tokens_out', 0))
+    total_in += tin
+    total_out += tout
+    model = data.get('model', 'claude-sonnet-4-6')
+    price = PRICES.get(model, (3.0, 15.0))
+    running_cost += (tin / 1_000_000) * price[0] + (tout / 1_000_000) * price[1]
+
+    if tools_only and etype != 'tool.call':
+        continue
+
+    time_part = ts.split('T')[1].rstrip('Z') if 'T' in ts else ts
+
+    if etype == 'session.start':
+        agent = data.get('agent', '?')
+        model_name = data.get('model', '?')
+        print(f'[{time_part}] Session started ({agent} {model_name})')
+    elif etype == 'tool.call':
+        tool = data.get('tool', '?')
+        file = data.get('file', '')
+        tokens = f'({tin + tout} tokens)' if tin + tout > 0 else ''
+        print(f'[{time_part}] {tool} {file} {tokens}')
+    elif etype == 'git.commit':
+        sha = str(data.get('sha', '?'))[:7]
+        msg = data.get('message', '')
+        print(f'[{time_part}] Git commit: {sha} "{msg}"')
+    elif etype == 'agent.message':
+        content = str(data.get('content', ''))[:80]
+        ellipsis = '...' if len(str(data.get('content', ''))) > 80 else ''
+        print(f'[{time_part}] Agent: {content}{ellipsis}')
+    elif etype == 'session.end':
+        code = data.get('exit_code', '?')
+        print(f'[{time_part}] Session ended (exit {code})')
+    else:
+        print(f'[{time_part}] {etype}')
+
+    if cost_timeline and running_cost > 0:
+        print(f'           Running cost: ${running_cost:.4f}')
+
+print()
+print(f'Total: {total_in:,} in / {total_out:,} out tokens | Cost: ~${running_cost:.2f}')
+PYEOF
+
+  export REPLAY_TOOLS_ONLY="$tools_flag"
+  export REPLAY_COST_TIMELINE="$cost_flag"
+  printf '%s\n' "$events" | python3 "$py_script"
+}
+
+# Record cost estimate to audit log (best-effort, silent on failure).
+# Called from cmd_stop() before the container is removed.
+_record_cost_to_audit() {
+  local container="$1"
+
+  # Detect agent type to find the right config dir
+  local agent_type config_dir
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$container" 2>/dev/null || echo "")
+  [ -n "$agent_type" ] || return 0
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    *)     config_dir="/home/agent/.claude" ;;
+  esac
+
+  # Try to read session JSONL from the running container
+  local jsonl_data
+  jsonl_data=$(vm_exec docker exec "$container" bash -c "
+    find '${config_dir}' -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null \
+      | while IFS= read -r f; do cat \"\$f\"; done
+  " 2>/dev/null || true)
+  [ -n "$jsonl_data" ] || return 0
+
+  # Compute the grand cost
+  local cost_est
+  cost_est=$(printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 -c "
+import json, sys
+stats = json.load(sys.stdin)
+gc = stats.get('grand_cost', 0.0)
+if gc > 0:
+    print('{:.4f}'.format(gc))
+else:
+    print('')
+" 2>/dev/null || true)
+  [ -n "$cost_est" ] || return 0
+
+  # Write structured cost entry with numeric cost field for --history
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$AUDIT_LOG_FILE")" 2>/dev/null || return 0
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'timestamp': sys.argv[1],
+    'action': 'cost',
+    'container': sys.argv[2],
+    'cost': float(sys.argv[3])
+}, separators=(',', ':')))" "$timestamp" "$container" "$cost_est" \
+    >>"$AUDIT_LOG_FILE" 2>/dev/null || true
+}
+
+_output_get_logs() {
+  local name="$1"
+  local lines="${2:-80}"
+
+  vm_exec docker logs --tail "$lines" "$name" 2>&1 | tr -d '\r'
+}
+
+cmd_output() {
+  local topic="output"
+  local name=""
+  local latest=false
+  local mode="message"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --diff)
+        mode="diff"
+        shift
+        ;;
+      --files)
+        mode="files"
+        shift
+        ;;
+      --commits)
+        mode="commits"
+        shift
+        ;;
+      --json)
+        mode="json"
+        shift
+        ;;
+      -h|--help)
+        print_help_output
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state agent_type config_dir terminal_mode repo_display
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  terminal_mode=$(trim_whitespace "$(container_terminal_mode "$name")")
+  repo_display=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.repo-display"}}' "$name" 2>/dev/null || echo "-")
+  case "$agent_type" in
+    codex) config_dir="/home/agent/.codex" ;;
+    *)     config_dir="/home/agent/.claude" ;;
+  esac
+
+  # Prefer the labeled repo path; fall back to the first nested git checkout.
+  local workspace_cd
+  # shellcheck disable=SC2016
+  workspace_cd='if [ -n "${SA_REPO_DISPLAY:-}" ] && [ "${SA_REPO_DISPLAY}" != "-" ] && [ -d "/workspace/${SA_REPO_DISPLAY}" ]; then cd "/workspace/${SA_REPO_DISPLAY}"; else repo_dir="$(find /workspace -mindepth 2 -maxdepth 4 \( -type d -o -type f \) -name .git -exec dirname {} \; | head -1)"; if [ -n "$repo_dir" ]; then cd "$repo_dir"; else cd /workspace; fi; fi'
+
+  case "$mode" in
+    diff)
+      [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff"
+      ;;
+
+    files)
+      [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git diff --name-only && git ls-files --others --exclude-standard"
+      ;;
+
+    commits)
+      [ "$state" = "running" ] || die "Container $name is not running (state: $state). Start it with 'agent attach' to query git."
+      vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git log --oneline"
+      ;;
+
+    json)
+      local status_val last_message commits_json files_json cost_estimate
+      status_val="$state"
+
+      local jsonl_data
+      jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
+
+      if [ -n "$jsonl_data" ]; then
+        last_message=$(printf '%s\n' "$jsonl_data" | _session_jsonl_last_message 2>/dev/null || true)
+      else
+        if [ "$terminal_mode" = "none" ]; then
+          last_message=$(_output_get_logs "$name")
+        else
+          last_message=""
+        fi
+      fi
+
+      if [ "$state" = "running" ]; then
+        local raw_commits
+        raw_commits=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && git log --oneline 2>/dev/null" 2>/dev/null || true)
+        commits_json=$(printf '%s\n' "$raw_commits" | python3 -c "
+import json, sys
+lines = [l for l in sys.stdin.read().strip().splitlines() if l]
+print(json.dumps(lines))
+" 2>/dev/null || echo "[]")
+
+        local raw_files
+        raw_files=$(vm_exec docker exec -e "SA_REPO_DISPLAY=$repo_display" "$name" bash -c "$workspace_cd && { git diff --name-only; git ls-files --others --exclude-standard; } 2>/dev/null" 2>/dev/null || true)
+        files_json=$(printf '%s\n' "$raw_files" | python3 -c "
+import json, sys
+lines = [l for l in sys.stdin.read().strip().splitlines() if l]
+print(json.dumps(lines))
+" 2>/dev/null || echo "[]")
+      else
+        commits_json="[]"
+        files_json="[]"
+      fi
+
+      if [ -n "$jsonl_data" ]; then
+        cost_estimate=$(printf '%s\n' "$jsonl_data" | _session_jsonl_cost_stats | python3 -c "
+import json, sys
+stats = json.load(sys.stdin)
+if stats.get('totals_by_model'):
+    print('\${:.4f}'.format(stats.get('grand_cost', 0.0)))
+else:
+    print('')
+" 2>/dev/null || true)
+      else
+        cost_estimate=""
+      fi
+
+      python3 -c "
+import json, sys
+obj = {
+    'name': sys.argv[1],
+    'status': sys.argv[2],
+    'last_message': sys.argv[3],
+    'commits': json.loads(sys.argv[4]),
+    'files_changed': json.loads(sys.argv[5]),
+    'cost_estimate': sys.argv[6],
+}
+print(json.dumps(obj, indent=2))
+" "$name" "$status_val" "${last_message:-}" "$commits_json" "$files_json" "${cost_estimate:-}"
+      ;;
+
+    message)
+      local jsonl_data
+      jsonl_data=$(_output_get_jsonl "$name" "$state" "$config_dir" 2>/dev/null || true)
+
+      if [ -z "$jsonl_data" ]; then
+        if [ "$terminal_mode" = "none" ]; then
+          local log_data
+          log_data=$(_output_get_logs "$name")
+          if [ -n "$log_data" ]; then
+            printf '%s\n' "$log_data"
+            return 0
+          fi
+        fi
+        warn "No session data found in $name."
+        return 0
+      fi
+
+      printf '%s\n' "$jsonl_data" | _session_jsonl_last_message 2>/dev/null
+      ;;
+  esac
+}
+
+cmd_fleet() {
+  local topic="fleet"
+
+  # Subcommand: fleet status
+  if [ "${1:-}" = "status" ]; then
+    shift
+    require_vm
+    local containers
+    containers=$(vm_exec docker ps --filter "label=safe-agentic.fleet" --format '{{.Names}}' 2>/dev/null || echo "")
+    if [ -z "$containers" ]; then
+      info "No fleet containers running."
+      return 0
+    fi
+    local first
+    first=$(echo "$containers" | head -1)
+    info "Tasks from $first:"
+    vm_exec docker exec "$first" cat /fleet/tasks.jsonl 2>/dev/null || info "No tasks found in /fleet/tasks.jsonl"
+    return 0
+  fi
+
+  local manifest=""
+  local dry_run=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        cmd_help "$topic"
+        return 0
+        ;;
+      -*)
+        die_with_help "$topic" "Unknown flag '$1'."
+        ;;
+      *)
+        [ -z "$manifest" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        manifest="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$manifest" ] || die_with_help "$topic" "Manifest file required."
+  [ -f "$manifest" ] || die "Manifest file not found: $manifest"
+
+  local agent_bin
+  agent_bin="$(realpath "$0")"
+
+  # Parse YAML manifest using python3 (no PyYAML dependency).
+  # Outputs one spawn command per line, shell-quoted, prefixed with "CMD:".
+  local parse_output
+  parse_output=$(python3 - "$manifest" "$agent_bin" <<'PYEOF'
+import sys
+import shlex
+
+manifest_path = sys.argv[1]
+agent_bin     = sys.argv[2]
+
+agents = []
+current = None
+shared_tasks = 'false'
+
+with open(manifest_path) as f:
+    content = f.read()
+
+# Parse shared_tasks from top-level (before agents list)
+for raw_line in content.split('\n'):
+    stripped = raw_line.strip()
+    if stripped.startswith('shared_tasks:'):
+        val = stripped.split(':', 1)[1].strip().lower()
+        shared_tasks = 'true' if val in ('true', 'yes', '1') else 'false'
+        break
+
+for raw_line in content.split('\n'):
+    line = raw_line.rstrip('\n')
+    stripped = line.lstrip()
+
+    # Start of a new agent entry
+    if stripped.startswith('- name:'):
+        current = {'name': stripped[len('- name:'):].strip()}
+        agents.append(current)
+        continue
+
+    # Key-value field inside an agent entry
+    if current is not None and ':' in stripped and not stripped.startswith('-') and not stripped.startswith('#'):
+        key, _, val = stripped.partition(':')
+        key = key.strip()
+        val = val.strip()
+        if key and val:
+            # Normalise booleans
+            if val.lower() == 'true':
+                val = True
+            elif val.lower() == 'false':
+                val = False
+            current[key] = val
+
+# Output shared_tasks flag before CMD: lines
+print(f'SHARED_TASKS={shared_tasks}')
+
+for agent in agents:
+    agent_type = agent.get('type', '')
+    if not agent_type:
+        sys.stderr.write(f"[fleet] skipping entry without type: {agent}\n")
+        continue
+
+    cmd = [agent_bin, 'spawn', agent_type]
+
+    name = agent.get('name', '')
+    if name:
+        cmd += ['--name', name]
+
+    repo = agent.get('repo', '')
+    if repo:
+        cmd += ['--repo', repo]
+
+    if agent.get('ssh') is True:
+        cmd.append('--ssh')
+
+    if agent.get('reuse_auth') is True:
+        cmd.append('--reuse-auth')
+
+    if agent.get('reuse_gh_auth') is True:
+        cmd.append('--reuse-gh-auth')
+
+    if agent.get('docker') is True:
+        cmd.append('--docker')
+
+    if agent.get('auto_trust') is True:
+        cmd.append('--auto-trust')
+
+    if agent.get('background') is True:
+        cmd.append('--background')
+
+    prompt = agent.get('prompt', '')
+    if prompt:
+        cmd += ['--prompt', str(prompt)]
+
+    aws = agent.get('aws', '')
+    if aws:
+        cmd += ['--aws', str(aws)]
+
+    network = agent.get('network', '')
+    if network:
+        cmd += ['--network', str(network)]
+
+    memory = agent.get('memory', '')
+    if memory:
+        cmd += ['--memory', str(memory)]
+
+    cpus = agent.get('cpus', '')
+    if cpus:
+        cmd += ['--cpus', str(cpus)]
+
+    instructions = agent.get('instructions', '')
+    if instructions:
+        cmd += ['--instructions', str(instructions)]
+
+    instructions_file = agent.get('instructions_file', '')
+    if instructions_file:
+        cmd += ['--instructions-file', str(instructions_file)]
+
+    on_exit = agent.get('on_exit', '')
+    if on_exit:
+        cmd += ['--on-exit', str(on_exit)]
+
+    on_complete = agent.get('on_complete', '')
+    if on_complete:
+        cmd += ['--on-complete', str(on_complete)]
+
+    on_fail = agent.get('on_fail', '')
+    if on_fail:
+        cmd += ['--on-fail', str(on_fail)]
+
+    max_cost = agent.get('max_cost', '')
+    if max_cost:
+        cmd += ['--max-cost', str(max_cost)]
+
+    print('CMD:' + shlex.join(cmd))
+PYEOF
+  ) || die "Failed to parse manifest: $manifest"
+
+  # Check for shared tasks
+  local shared_tasks=false
+  local fleet_volume=""
+  if echo "$parse_output" | grep -qF "SHARED_TASKS=true"; then
+    shared_tasks=true
+    local fleet_id
+    fleet_id=$(basename "$manifest" .yaml | tr -cd 'a-zA-Z0-9-')
+    fleet_volume="fleet-${fleet_id}-$(date +%s)"
+    if [ "$dry_run" = false ]; then
+      vm_exec docker volume create "$fleet_volume" >/dev/null 2>&1
+      info "Created shared task volume: $fleet_volume"
+    else
+      info "[dry-run] Would create shared volume: $fleet_volume"
+    fi
+  fi
+
+  local -a spawn_cmds=()
+  while IFS= read -r line; do
+    [[ "$line" == CMD:* ]] || continue
+    local cmd_line="${line#CMD:}"
+    # Inject --fleet-volume if shared_tasks is enabled
+    if $shared_tasks && [ -n "$fleet_volume" ]; then
+      cmd_line="$cmd_line --fleet-volume $fleet_volume"
+    fi
+    spawn_cmds+=("$cmd_line")
+  done <<< "$parse_output"
+
+  [ ${#spawn_cmds[@]} -gt 0 ] || die "No valid agent entries found in manifest: $manifest"
+
+  if $dry_run; then
+    info "Dry run — would spawn ${#spawn_cmds[@]} agent(s):"
+    local cmd_str
+    for cmd_str in "${spawn_cmds[@]}"; do
+      info "  $cmd_str"
+    done
+    return 0
+  fi
+
+  info "Spawning ${#spawn_cmds[@]} agent(s) from $manifest..."
+
+  local -a pids=()
+  local cmd_str
+  for cmd_str in "${spawn_cmds[@]}"; do
+    # Parse the shlex-quoted command back into an array safely (no eval)
+    local -a cmd_array=()
+    while IFS= read -r -d '' arg; do
+      cmd_array+=("$arg")
+    done < <(python3 -c "import shlex,sys; [sys.stdout.buffer.write(a.encode()+b'\x00') for a in shlex.split(sys.stdin.read())]" <<< "$cmd_str")
+    "${cmd_array[@]}" &
+    pids+=($!)
+  done
+
+  local all_ok=true
+  local pid
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      all_ok=false
+    fi
+  done
+
+  $all_ok || die "One or more agents failed to spawn."
+  ok "All agents from fleet manifest spawned."
+}
+
+# ---------------------------------------------------------------------------
+# Parse a pipeline YAML file with python3 (no PyYAML required).
+# Outputs one line per step in the format:
+#   name=<val> type=<val> repo=<val> prompt=<val> ssh=<val> reuse_auth=<val>
+#   on_failure=<val> retry=<val> depends_on=<val>
+# Values are base64-encoded to survive shell word splitting.
+# ---------------------------------------------------------------------------
+parse_pipeline_yaml() {
+  local yaml_file="$1"
+
+  python3 - "$yaml_file" <<'PYEOF'
+import sys, base64, re
+
+path = sys.argv[1]
+with open(path) as f:
+    lines = f.readlines()
+
+pipeline_name = ""
+steps = []
+current_step = None
+in_steps = False
+
+for raw in lines:
+    line = raw.rstrip('\n')
+    stripped = line.lstrip()
+    if not stripped or stripped.startswith('#'):
+        continue
+
+    indent = len(line) - len(stripped)
+
+    # Top-level key: value
+    if indent == 0:
+        m = re.match(r'^(\w[\w-]*):\s*(.*)', stripped)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if key == 'name' and not in_steps:
+                pipeline_name = val
+            elif key == 'steps':
+                in_steps = True
+                if current_step is not None:
+                    steps.append(current_step)
+                    current_step = None
+        continue
+
+    if not in_steps:
+        continue
+
+    # New step entry: "  - name: value"
+    m = re.match(r'^-\s+(\w[\w_-]*):\s*(.*)', stripped)
+    if m:
+        if current_step is not None:
+            steps.append(current_step)
+        key, val = m.group(1), m.group(2).strip()
+        current_step = {key: val}
+        continue
+
+    # Continuation field inside a step: "    key: value"
+    m = re.match(r'^(\w[\w_-]*):\s*(.*)', stripped)
+    if m and current_step is not None:
+        key, val = m.group(1), m.group(2).strip()
+        current_step[key] = val
+        continue
+
+if current_step is not None:
+    steps.append(current_step)
+
+def enc(v):
+    return base64.b64encode(v.encode()).decode()
+
+print("pipeline_name=" + enc(pipeline_name))
+for step in steps:
+    parts = []
+    for field in ('name', 'type', 'repo', 'prompt', 'ssh', 'reuse_auth',
+                  'on_failure', 'retry', 'depends_on', 'instructions', 'on_exit', 'on_complete', 'on_fail', 'max_cost',
+                  'when', 'outputs'):
+        val = step.get(field, '')
+        parts.append(field + '=' + enc(val))
+    print(' '.join(parts))
+PYEOF
+}
+
+cmd_pipeline() {
+  local topic="pipeline"
+  local yaml_file=""
+  local dry_run=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        print_help_pipeline
+        return 0
+        ;;
+      -*)
+        die_with_help "$topic" "Unknown flag '$1'."
+        ;;
+      *)
+        if [ -z "$yaml_file" ]; then
+          yaml_file="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$yaml_file" ] || die_with_help "$topic" "Pipeline YAML file required."
+  [ -f "$yaml_file" ] || die "Pipeline file not found: $yaml_file"
+
+  # Parse YAML
+  local parsed_output
+  parsed_output=$(parse_pipeline_yaml "$yaml_file") || die "Failed to parse pipeline YAML: $yaml_file"
+
+  # Extract pipeline name (first line)
+  local pipeline_name_b64 pipeline_name
+  pipeline_name_b64=$(echo "$parsed_output" | head -n1 | sed 's/^pipeline_name=//')
+  pipeline_name=$(echo "$pipeline_name_b64" | base64 -d 2>/dev/null || echo "")
+
+  # Extract step lines (remaining lines)
+  local step_lines
+  step_lines=$(echo "$parsed_output" | tail -n +2)
+
+  if [ -z "$step_lines" ]; then
+    die "Pipeline '$yaml_file' contains no steps."
+  fi
+
+  # Count steps
+  local step_count
+  step_count=$(echo "$step_lines" | grep -c .)
+
+  info "Pipeline: ${pipeline_name:-$(basename "$yaml_file")}"
+  info "Steps: $step_count"
+
+  if $dry_run; then
+    info "Dry run — execution plan:"
+    local i=0
+    while IFS= read -r step_line; do
+      [ -z "$step_line" ] && continue
+      i=$((i + 1))
+
+      local name type repo prompt template ssh reuse_auth on_failure retry depends_on when_cond outputs_expr
+      name=$(       echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      type=$(       echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "claude")
+      repo=$(       echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      prompt=$(     echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      template=$(   echo "$step_line" | grep -o 'template=[^ ]*'    | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      ssh=$(        echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      reuse_auth=$( echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      retry=$(      echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
+      depends_on=$( echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      when_cond=$(  echo "$step_line" | grep -o 'when=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+      outputs_expr=$(echo "$step_line" | grep -o 'outputs=[^ ]*'    | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+      [ -z "$type" ] && type="claude"
+      [ -z "$retry" ] && retry="0"
+
+      local flags=""
+      [ -n "$repo" ]       && flags="$flags --repo $repo"
+      [ -n "$prompt" ]     && flags="$flags --prompt '$prompt'"
+      [ -z "$prompt" ] && [ -n "$template" ] && flags="$flags --template '$template'"
+      [[ "$ssh" == "true" ]] && flags="$flags --ssh"
+      [[ "$reuse_auth" == "true" ]] && flags="$flags --reuse-auth"
+
+      echo "  Step $i: $name"
+      echo "    type:       $type"
+      [ -n "$repo" ]        && echo "    repo:       $repo"
+      [ -n "$prompt" ]      && echo "    prompt:     $prompt"
+      [ -z "$prompt" ] && [ -n "$template" ] && echo "    template:   $template"
+      [ -n "$depends_on" ]   && echo "    depends_on: $depends_on"
+      [ -n "$on_failure" ]   && echo "    on_failure: $on_failure"
+      [ "$retry" != "0" ]    && echo "    retry:      $retry"
+      [ -n "$when_cond" ]    && echo "    when:       $when_cond"
+      [ -n "$outputs_expr" ] && echo "    outputs:    $outputs_expr"
+      echo "    would run:  agent spawn $type$flags"
+    done <<< "$step_lines"
+    return 0
+  fi
+
+  # Execute pipeline
+  local -a completed_steps=()
+  local -a failed_steps=()
+  # Track which on_failure steps were triggered so we don't double-run them
+  local -a triggered_steps=()
+  # Track step outputs for conditional branching (when/outputs)
+  declare -A step_outputs
+
+  # Lookup a step line by name from step_lines (bash 3.2 compatible, no assoc arrays)
+  lookup_step_by_name() {
+    local target_name="$1"
+    local target_b64
+    target_b64=$(printf '%s' "$target_name" | base64 2>/dev/null)
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      if [[ "$line" == *"name=$target_b64"* ]]; then
+        echo "$line"
+        return 0
+      fi
+    done <<< "$step_lines"
+    return 1
+  }
+
+  pipeline_run_step() {
+    local step_line="$1"
+    [ -z "$step_line" ] && return 1
+
+    local name type repo prompt template ssh reuse_auth auto_trust background on_failure retry depends_on instructions on_exit on_complete on_fail max_cost when_condition outputs_expr
+    name=$(        echo "$step_line" | grep -o 'name=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    type=$(        echo "$step_line" | grep -o 'type=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    repo=$(        echo "$step_line" | grep -o 'repo=[^ ]*'        | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    prompt=$(      echo "$step_line" | grep -o 'prompt=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    template=$(    echo "$step_line" | grep -o 'template=[^ ]*'    | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    ssh=$(         echo "$step_line" | grep -o 'ssh=[^ ]*'         | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    reuse_auth=$(  echo "$step_line" | grep -o 'reuse_auth=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    auto_trust=$(  echo "$step_line" | grep -o 'auto_trust=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    background=$(  echo "$step_line" | grep -o 'background=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_failure=$(  echo "$step_line" | grep -o 'on_failure=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    retry=$(       echo "$step_line" | grep -o 'retry=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "0")
+    depends_on=$(  echo "$step_line" | grep -o 'depends_on=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    instructions=$(echo "$step_line" | grep -o 'instructions=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_exit=$(     echo "$step_line" | grep -o 'on_exit=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_complete=$( echo "$step_line" | grep -o 'on_complete=[^ ]*'  | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    on_fail=$(     echo "$step_line" | grep -o 'on_fail=[^ ]*'      | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    max_cost=$(    echo "$step_line" | grep -o 'max_cost=[^ ]*'     | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    when_condition=$(echo "$step_line" | grep -o 'when=[^ ]*'       | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+    outputs_expr=$(echo "$step_line" | grep -o 'outputs=[^ ]*'     | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+    [ -z "$type" ]  && type="claude"
+    [ -z "$retry" ] && retry="0"
+
+    # Check depends_on
+    if [ -n "$depends_on" ]; then
+      local dep_satisfied=false
+      local c
+      for c in "${completed_steps[@]:-}"; do
+        [ "$c" = "$depends_on" ] && dep_satisfied=true && break
+      done
+      if ! $dep_satisfied; then
+        warn "Step '$name': skipping — dependency '$depends_on' not completed."
+        return 1
+      fi
+    fi
+
+    # Check 'when' condition — step only runs if dependency output matches
+    if [ -n "$when_condition" ]; then
+      local dep_step_name
+      dep_step_name=$(echo "$depends_on" | head -1)  # use first dependency
+      local dep_output="${step_outputs[$dep_step_name]:-}"
+      if [ "$dep_output" != "$when_condition" ]; then
+        info "Skipping step '$name': condition '$when_condition' not met (got '$dep_output')"
+        return 0  # Skip this step (not a failure)
+      fi
+    fi
+
+    info "Step '$name': running (type=$type)"
+
+    local -a spawn_args=("$type")
+    [ -n "$repo" ]   && spawn_args+=(--repo "$repo")
+    if [ -n "$prompt" ]; then
+      spawn_args+=(--prompt "$prompt")
+    elif [ -n "$template" ]; then
+      spawn_args+=(--template "$template")
+    fi
+    [ -n "$instructions" ] && spawn_args+=(--instructions "$instructions")
+    [ -n "$on_exit" ] && spawn_args+=(--on-exit "$on_exit")
+    [ -n "$on_complete" ] && spawn_args+=(--on-complete "$on_complete")
+    [ -n "$on_fail" ] && spawn_args+=(--on-fail "$on_fail")
+    [ -n "$max_cost" ] && spawn_args+=(--max-cost "$max_cost")
+    [[ "$ssh" == "true" ]] && spawn_args+=(--ssh)
+    [[ "$reuse_auth" == "true" ]] && spawn_args+=(--reuse-auth)
+    [[ "$auto_trust" == "true" ]] && spawn_args+=(--auto-trust)
+    [[ "$background" == "true" ]] && spawn_args+=(--background)
+    spawn_args+=(--name "pipeline-${name}")
+
+    local attempt=0
+    local max_attempts=$(( retry + 1 ))
+    local step_ok=false
+
+    while [ "$attempt" -lt "$max_attempts" ]; do
+      attempt=$(( attempt + 1 ))
+      [ "$attempt" -gt 1 ] && info "Step '$name': retry $((attempt - 1))/$retry..."
+
+      if cmd_spawn "${spawn_args[@]}"; then
+        step_ok=true
+        break
+      else
+        if [ "$attempt" -lt "$max_attempts" ]; then
+          info "Step '$name': failed, waiting 5s before retry..."
+          sleep 5
+        fi
+      fi
+    done
+
+    if $step_ok; then
+      completed_steps+=("$name")
+
+      # Evaluate outputs expression to capture step output for conditional branching
+      if [ -n "$outputs_expr" ]; then
+        local container_name="pipeline-${name}"
+        local output_val
+        output_val=$(vm_exec docker exec "$container_name" bash -c "$outputs_expr" 2>/dev/null || echo "")
+        step_outputs["$name"]="$output_val"
+        info "Step '$name' output: $output_val"
+      fi
+
+      ok "Step '$name': completed."
+      return 0
+    else
+      failed_steps+=("$name")
+      err "Step '$name': failed after $max_attempts attempt(s)."
+
+      if [ -n "$on_failure" ]; then
+        local already_triggered=false
+        local t
+        for t in "${triggered_steps[@]:-}"; do
+          [ "$t" = "$on_failure" ] && already_triggered=true && break
+        done
+        local failure_line
+        failure_line=$(lookup_step_by_name "$on_failure" || echo "")
+        if ! $already_triggered && [ -n "$failure_line" ]; then
+          triggered_steps+=("$on_failure")
+          info "Step '$name': triggering on_failure step '$on_failure'..."
+          pipeline_run_step "$failure_line" || true
+        fi
+      fi
+      return 1
+    fi
+  }
+
+  # Run steps in order
+  local pipeline_ok=true
+  while IFS= read -r step_line; do
+    [ -z "$step_line" ] && continue
+
+    local sname
+    sname=$(echo "$step_line" | grep -o 'name=[^ ]*' | cut -d= -f2- | base64 -d 2>/dev/null || echo "")
+
+    # Skip steps that were already triggered as on_failure handlers
+    local was_triggered=false
+    local t
+    for t in "${triggered_steps[@]:-}"; do
+      [ "$t" = "$sname" ] && was_triggered=true && break
+    done
+    $was_triggered && continue
+
+    pipeline_run_step "$step_line" || pipeline_ok=false
+  done <<< "$step_lines"
+
+  local completed_count=${#completed_steps[@]}
+  local failed_count=${#failed_steps[@]}
+
+  echo ""
+  info "Pipeline complete: $completed_count step(s) succeeded, $failed_count step(s) failed."
+  $pipeline_ok && ok "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished successfully."
+  $pipeline_ok || die "Pipeline '${pipeline_name:-$(basename "$yaml_file")}' finished with failures."
+}
+
+print_help_orchestrate() {
+  cat <<EOF
+Usage: agent orchestrate <fleet.yaml> <pipeline.yaml> [--poll N]
+
+Run a fleet of agents in parallel, wait for all to finish, then
+automatically run a follow-up pipeline.
+
+Options:
+  --poll N    Poll interval in seconds (default: 30)
+
+The orchestrator:
+  1. Spawns all agents from the fleet manifest
+  2. Polls 'agent list' every N seconds until all fleet agents exit
+  3. Runs the pipeline manifest (consolidate, fix, create PR, etc.)
+
+Examples:
+  agent orchestrate examples/fleet-review-and-fix.yaml examples/pipeline-consolidate-and-fix.yaml
+  agent orchestrate fleet.yaml pipeline.yaml --poll 15
+EOF
+}
+
+cmd_orchestrate() {
+  local topic="orchestrate"
+  local fleet_file=""
+  local pipeline_file=""
+  local poll_interval=30
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --poll)
+        require_option_value "$topic" "--poll" "${2:-}"
+        poll_interval="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_orchestrate
+        return 0
+        ;;
+      *)
+        if [ -z "$fleet_file" ]; then
+          fleet_file="$1"
+        elif [ -z "$pipeline_file" ]; then
+          pipeline_file="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [ -n "$fleet_file" ] || die_with_help "$topic" "Fleet manifest required."
+  [ -n "$pipeline_file" ] || die_with_help "$topic" "Pipeline manifest required."
+  [ -f "$fleet_file" ] || die "Fleet manifest not found: $fleet_file"
+  [ -f "$pipeline_file" ] || die "Pipeline manifest not found: $pipeline_file"
+
+  # Phase 1: spawn fleet
+  info "Phase 1: spawning fleet from $fleet_file..."
+  cmd_fleet "$fleet_file" || die "Fleet spawn failed."
+
+  # Collect fleet agent container names
+  local -a fleet_containers=()
+  local fleet_names
+  fleet_names=$(python3 -c "
+import sys
+current = None
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.rstrip()
+        if line.strip().startswith('- name:'):
+            current = line.split(':', 1)[1].strip()
+        elif current and line.strip().startswith('type:'):
+            agent_type = line.split(':', 1)[1].strip()
+            print('agent-' + agent_type + '-' + current)
+            current = None
+" "$fleet_file" 2>/dev/null)
+
+  while IFS= read -r cname; do
+    [ -n "$cname" ] && fleet_containers+=("$cname")
+  done <<< "$fleet_names"
+
+  local fleet_count=${#fleet_containers[@]}
+  info "Waiting for $fleet_count fleet agent(s) to finish (polling every ${poll_interval}s)..."
+
+  # Phase 2: wait for all fleet agents to exit
+  while true; do
+    local still_running=0
+    local c
+    for c in "${fleet_containers[@]}"; do
+      local state
+      state=$(vm_exec docker inspect --format '{{.State.Status}}' "$c" 2>/dev/null || echo "gone")
+      if [ "$state" = "running" ]; then
+        still_running=$((still_running + 1))
+      fi
+    done
+
+    if [ "$still_running" -eq 0 ]; then
+      ok "All $fleet_count fleet agents finished."
+      break
+    fi
+
+    info "$still_running/$fleet_count agent(s) still running..."
+    sleep "$poll_interval"
+  done
+
+  # Phase 3: run pipeline
+  info "Phase 3: running pipeline from $pipeline_file..."
+  cmd_pipeline "$pipeline_file"
+}
+
+cmd_pr() {
+  local topic="pr"
+  local name=""
+  local latest=false
+  local title=""
+  local base="main"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --title)
+        require_option_value "$topic" "$1" "${2:-}"
+        title="$2"
+        shift 2
+        ;;
+      --base)
+        require_option_value "$topic" "$1" "${2:-}"
+        base="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_pr
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Require SSH label for push access
+  local ssh_label
+  ssh_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.ssh"}}' "$name" 2>/dev/null || echo "")
+  [ "$(echo "$ssh_label" | tr -d '[:space:]')" = "yes" ] || die "Container $name was not spawned with --ssh. Push requires SSH access."
+
+  # Check for incomplete todos
+  local todos_check
+  # shellcheck disable=SC2016
+  todos_check=$(vm_exec docker exec "$name" bash -c '
+    f=/workspace/.safe-agentic/todos.json
+    if [ -f "$f" ]; then
+      python3 -c "
+import json, sys
+with open(\"$f\") as fh:
+    todos = json.load(fh)
+incomplete = [t for t in todos if not t.get(\"done\")]
+if incomplete:
+    print(\"incomplete\")
+    sys.exit(1)
+" 2>/dev/null
+    fi
+  ' 2>/dev/null || echo "incomplete")
+  if [ "$(echo "$todos_check" | tr -d '[:space:]')" = "incomplete" ]; then
+    die "Container $name has incomplete todos. Complete them with 'agent todo check' before creating a PR."
+  fi
+
+  # Get current branch
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(vm_exec docker exec "$name" bash -c 'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
+  branch=$(echo "$branch" | tr -d '[:space:]')
+  [ -n "$branch" ] || die "Could not determine current branch in $name."
+  if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+    die "Container $name is on branch '$branch'. Cannot create a PR from main/master."
+  fi
+
+  # Default title = branch name
+  [ -n "$title" ] || title="$branch"
+
+  info "Creating PR from $branch → $base in $name..."
+
+  # shellcheck disable=SC2016
+  # Stage and commit any uncommitted changes
+  vm_exec docker exec -e SA_TITLE="$title" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git add -A && git diff --cached --quiet || git commit -m "agent work: $SA_TITLE"'
+
+  # shellcheck disable=SC2016
+  # Push branch
+  vm_exec docker exec -e SA_BRANCH="$branch" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; git push -u origin "$SA_BRANCH"' || die "Failed to push branch '$branch' in $name."
+
+  # Create PR
+  local pr_url
+  # shellcheck disable=SC2016
+  pr_url=$(vm_exec docker exec -e SA_TITLE="$title" -e SA_BASE="$base" -e SA_NAME="$name" "$name" bash -c \
+    'cd "$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -1)" 2>/dev/null || cd /workspace; gh pr create --title "$SA_TITLE" --body "Created by safe-agentic agent: $SA_NAME" --base "$SA_BASE"' 2>/dev/null || echo "")
+  [ -n "$pr_url" ] || die "Failed to create PR from $name. Ensure gh is authenticated and the repo has a remote."
+
+  ok "PR created: $pr_url"
+}
+
+cmd_aws_refresh() {
+  local topic="aws-refresh"
+  local name=""
+  local latest=false
+  local profile=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
+Usage: agent aws-refresh <name>|--latest [profile]
+
+Refresh AWS credentials in a running container by re-reading
+~/.aws/credentials from the host and writing into the container.
+
+If profile is omitted, uses the profile from the container's AWS_PROFILE env var.
+
+Examples:
+  agent aws-refresh my-task
+  agent aws-refresh my-task my-profile
+  agent aws-refresh --latest other-profile
+EOF
+        return 0
+        ;;
+      *)
+        if [ -z "$name" ]; then
+          name="$1"
+        elif [ -z "$profile" ]; then
+          profile="$1"
+        else
+          die_with_help "$topic" "Unexpected argument '$1'."
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die "Use a name or --latest, not both."
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  local state
+  state=$(vm_exec docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "unknown")
+  [ "$state" = "running" ] || die "Container $name is not running (state: $state)."
+
+  # Determine profile: explicit arg > container label > container env var
+  if [ -z "$profile" ]; then
+    profile=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.aws"}}' "$name" 2>/dev/null || echo "")
+  fi
+  [ -n "$profile" ] || die "No AWS profile specified and none found on container $name. Pass a profile name."
+
+  local aws_creds_file="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.aws/credentials}"
+  [ -f "$aws_creds_file" ] || die "AWS credentials file not found: $aws_creds_file"
+  if ! grep -q "^\[$profile\]" "$aws_creds_file"; then
+    die "AWS profile '$profile' not found in $aws_creds_file"
+  fi
+
+  local creds_b64
+  creds_b64=$(base64 < "$aws_creds_file")
+
+  echo "$creds_b64" | vm_exec docker exec -i "$name" bash -c 'base64 -d > /home/agent/.aws/credentials && chmod 600 /home/agent/.aws/credentials'
+
+  ok "AWS credentials refreshed in $name (profile: $profile)"
+}
+
+print_help_retry() {
+  cat <<EOF
+Usage: agent retry <name>|--latest [--feedback "text"]
+
+Stop the current container and spawn a fresh one with the same configuration.
+If --feedback is provided, appends it to the original prompt so the agent
+can try a different approach.
+
+Options:
+  --latest           Target the most recently started container
+  --feedback TEXT    Append feedback to the original prompt
+  -h, --help
+
+Examples:
+  agent retry my-task
+  agent retry --latest
+  agent retry --latest --feedback "The tests still fail -- look at the auth module"
+EOF
+}
+
+cmd_retry() {
+  local topic="retry"
+  local name=""
+  local latest=false
+  local feedback=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest)
+        latest=true
+        shift
+        ;;
+      --feedback)
+        require_option_value "$topic" "--feedback" "${2:-}"
+        feedback="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_help_retry
+        return 0
+        ;;
+      *)
+        [ -z "$name" ] || die_with_help "$topic" "Unexpected argument '$1'."
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  $latest && [ -n "$name" ] && die_with_help "$topic" "Use a name or --latest, not both."
+
+  if ! $latest && [ -z "$name" ]; then
+    die_with_help "$topic" "Container name or --latest required."
+  fi
+
+  require_vm
+  name=$(resolve_target_container "$topic" "$name" "$latest")
+
+  # Read spawn configuration from Docker labels
+  local agent_type ssh_label reuse_auth_label prompt_b64 max_cost_label aws_label
+  agent_type=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.agent-type"}}' "$name" 2>/dev/null || echo "")
+  ssh_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.ssh"}}' "$name" 2>/dev/null || echo "")
+  reuse_auth_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.auth"}}' "$name" 2>/dev/null || echo "")
+  prompt_b64=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.prompt"}}' "$name" 2>/dev/null || echo "")
+  max_cost_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.max-cost"}}' "$name" 2>/dev/null || echo "")
+  aws_label=$(vm_exec docker inspect --format '{{index .Config.Labels "safe-agentic.aws"}}' "$name" 2>/dev/null || echo "")
+
+  [ -n "$agent_type" ] || die "Could not determine agent type from container $name. Was it spawned with 'agent spawn'?"
+
+  # Reconstruct original prompt from label
+  local original_prompt=""
+  if [ -n "$prompt_b64" ]; then
+    original_prompt=$(printf '%s' "$prompt_b64" | base64 -d 2>/dev/null || echo "")
+  fi
+
+  # Build new prompt: original + feedback
+  local new_prompt="$original_prompt"
+  if [ -n "$feedback" ]; then
+    if [ -n "$original_prompt" ]; then
+      new_prompt="${original_prompt}
+
+Previous attempt failed. Feedback: ${feedback}. Try a different approach."
+    else
+      new_prompt="Feedback: ${feedback}. Try a different approach."
+    fi
+  fi
+
+  # Read env vars we need to reconstruct (instructions, on-exit, on-complete, on-fail)
+  local all_envs instructions_b64_val on_exit_b64_val on_complete_b64_val on_fail_b64_val repos_env
+  all_envs=$(vm_exec docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || echo "")
+  instructions_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_INSTRUCTIONS_B64=' | cut -d= -f2- || echo "")
+  on_exit_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_EXIT_B64=' | cut -d= -f2- || echo "")
+  on_complete_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_COMPLETE_B64=' | cut -d= -f2- || echo "")
+  on_fail_b64_val=$(printf '%s\n' "$all_envs" | grep '^SAFE_AGENTIC_ON_FAIL_B64=' | cut -d= -f2- || echo "")
+  repos_env=$(printf '%s\n' "$all_envs" | grep '^REPOS=' | cut -d= -f2- || echo "")
+
+  info "Stopping $name..."
+  vm_exec docker stop "$name" >/dev/null 2>&1 || true
+  vm_exec docker rm "$name" >/dev/null 2>&1 || true
+  remove_docker_runtime_for_container "$name"
+  remove_managed_network "$(network_name_for_container "$name")"
+  audit_log "stop" "$name" "reason=retry"
+
+  # Build new spawn args
+  local -a spawn_args=("$agent_type")
+
+  # Reconstruct repos
+  if [ -n "$repos_env" ]; then
+    local IFS_ORIG="$IFS"
+    IFS=',' read -ra retry_repos <<< "$repos_env"
+    IFS="$IFS_ORIG"
+    local retry_repo
+    for retry_repo in "${retry_repos[@]}"; do
+      retry_repo=$(printf '%s' "$retry_repo" | xargs)
+      [ -n "$retry_repo" ] && spawn_args+=(--repo "$retry_repo")
+    done
+  fi
+
+  [ "$ssh_label" = "on" ] && spawn_args+=(--ssh)
+  [ "$reuse_auth_label" = "shared" ] && spawn_args+=(--reuse-auth)
+  [ -n "$aws_label" ] && spawn_args+=(--aws "$aws_label")
+
+  if [ -n "$new_prompt" ]; then
+    spawn_args+=(--prompt "$new_prompt")
+  fi
+
+  if [ -n "$instructions_b64_val" ]; then
+    local decoded_instructions
+    decoded_instructions=$(printf '%s' "$instructions_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_instructions" ] && spawn_args+=(--instructions "$decoded_instructions")
+  fi
+
+  if [ -n "$on_exit_b64_val" ]; then
+    local decoded_on_exit
+    decoded_on_exit=$(printf '%s' "$on_exit_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_on_exit" ] && spawn_args+=(--on-exit "$decoded_on_exit")
+  fi
+
+  if [ -n "$on_complete_b64_val" ]; then
+    local decoded_on_complete
+    decoded_on_complete=$(printf '%s' "$on_complete_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_on_complete" ] && spawn_args+=(--on-complete "$decoded_on_complete")
+  fi
+
+  if [ -n "$on_fail_b64_val" ]; then
+    local decoded_on_fail
+    decoded_on_fail=$(printf '%s' "$on_fail_b64_val" | base64 -d 2>/dev/null || echo "")
+    [ -n "$decoded_on_fail" ] && spawn_args+=(--on-fail "$decoded_on_fail")
+  fi
+
+  [ -n "$max_cost_label" ] && spawn_args+=(--max-cost "$max_cost_label")
+
+  info "Retrying as new container (type=$agent_type)..."
+  [ -n "$new_prompt" ] && info "Prompt: ${new_prompt:0:80}$([ ${#new_prompt} -gt 80 ] && echo '...')"
+
+  cmd_spawn "${spawn_args[@]}"
+  audit_log "retry" "$name" "type=$agent_type"
+}
+
+cmd="${1:-help}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+  setup)      cmd_setup "$@" ;;
+  run)        cmd_run "$@" ;;
+  spawn)      cmd_spawn "$@" ;;
+  shell)      cmd_shell "$@" ;;
+  list)       cmd_list "$@" ;;
+  attach)     cmd_attach "$@" ;;
+  cp)         cmd_cp "$@" ;;
+  stop)       cmd_stop "$@" ;;
+  cleanup)    cmd_cleanup "$@" ;;
+  update)     cmd_update "$@" ;;
+  diagnose)   cmd_diagnose "$@" ;;
+  vm)         cmd_vm "$@" ;;
+  mcp-login)  cmd_mcp_login "$@" ;;
+  sessions)   cmd_sessions "$@" ;;
+  peek)       cmd_peek "$@" ;;
+  diff)       cmd_diff "$@" ;;
+  checkpoint) cmd_checkpoint "$@" ;;
+  todo)        cmd_todo "$@" ;;
+  review)     cmd_review "$@" ;;
+  audit)       cmd_audit "$@" ;;
+  output)     cmd_output "$@" ;;
+  cost)       cmd_cost "$@" ;;
+  replay)     cmd_replay "$@" ;;
+  fleet)      cmd_fleet "$@" ;;
+  pipeline)   cmd_pipeline "$@" ;;
+  orchestrate) cmd_orchestrate "$@" ;;
+  pr)         cmd_pr "$@" ;;
+  aws-refresh) cmd_aws_refresh "$@" ;;
+  config)      cmd_config "$@" ;;
+  summary)     cmd_summary "$@" ;;
+  retry)       cmd_retry "$@" ;;
+  template)    cmd_template "$@" ;;
+  dashboard)
+    tui_bin="$REPO_DIR/tui/agent-tui"
+    [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
+    exec "$tui_bin" --dashboard "$@"
+    ;;
+  tui)
+    tui_bin="$REPO_DIR/tui/agent-tui"
+    [ -x "$tui_bin" ] || die "TUI not built. Run 'make -C $REPO_DIR/tui build' first."
+    exec "$tui_bin" "$@"
+    ;;
+  --version)  echo "safe-agentic $VERSION"; exit 0 ;;
+  help|-h|--help) cmd_help "$@" ;;
+  *)          die "Unknown command: $cmd. Run 'agent help' for usage." ;;
+esac

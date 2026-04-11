@@ -119,7 +119,7 @@ func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDi
 	if running {
 		out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
 		if err != nil {
-			return nil, fmt.Errorf("find session log: %w", err)
+			return readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, tailCount, false)
 		}
 		jsonlPath := strings.TrimSpace(string(out))
 		if jsonlPath == "" {
@@ -128,7 +128,7 @@ func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDi
 		tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, jsonlPath)
 		out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
 		if err != nil {
-			return nil, fmt.Errorf("read session log: %w", err)
+			return readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, tailCount, false)
 		}
 		return out, nil
 	}
@@ -379,27 +379,43 @@ func runOutput(cmd *cobra.Command, args []string) error {
 	}
 
 	wsCmd := workspaceFindCmd()
+	running, _ := docker.IsRunning(ctx, exec, name)
 
 	switch {
 	case outputDiff:
-		out, err := exec.Run(ctx, "docker", "exec", name,
-			"bash", "-c", wsCmd+" && git diff")
+		var out []byte
+		if running {
+			out, err = exec.Run(ctx, "docker", "exec", name,
+				"bash", "-c", wsCmd+" && git diff")
+		} else {
+			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git diff")
+		}
 		if err != nil {
 			return fmt.Errorf("git diff: %w", err)
 		}
 		fmt.Print(string(out))
 
 	case outputFiles:
-		out, err := exec.Run(ctx, "docker", "exec", name,
-			"bash", "-c", wsCmd+" && git diff --name-only && git ls-files --others --exclude-standard")
+		var out []byte
+		if running {
+			out, err = exec.Run(ctx, "docker", "exec", name,
+				"bash", "-c", wsCmd+" && git diff --name-only && git ls-files --others --exclude-standard")
+		} else {
+			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git diff --name-only && git ls-files --others --exclude-standard")
+		}
 		if err != nil {
 			return fmt.Errorf("list changed files: %w", err)
 		}
 		fmt.Print(string(out))
 
 	case outputCommits:
-		out, err := exec.Run(ctx, "docker", "exec", name,
-			"bash", "-c", wsCmd+" && git log --oneline")
+		var out []byte
+		if running {
+			out, err = exec.Run(ctx, "docker", "exec", name,
+				"bash", "-c", wsCmd+" && git log --oneline")
+		} else {
+			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git log --oneline")
+		}
 		if err != nil {
 			return fmt.Errorf("git log: %w", err)
 		}
@@ -410,25 +426,32 @@ func runOutput(cmd *cobra.Command, args []string) error {
 			"--format", "{{.State.Status}}", name)
 		status := strings.TrimSpace(string(statusOut))
 
-		logsOut, _ := exec.Run(ctx, "docker", "logs", "--tail", "20", name)
-		lastOutput := strings.TrimSpace(string(logsOut))
-		if len(lastOutput) > 500 {
-			lastOutput = lastOutput[len(lastOutput)-500:]
+		lastMessage, _ := readLastSessionMessage(ctx, exec, name)
+		if lastMessage == "" {
+			logsOut, _ := exec.Run(ctx, "docker", "logs", "--tail", "20", name)
+			lastMessage = strings.TrimSpace(string(logsOut))
+			if len(lastMessage) > 500 {
+				lastMessage = lastMessage[len(lastMessage)-500:]
+			}
 		}
 
 		result := map[string]string{
 			"name":        name,
 			"status":      status,
-			"last_output": lastOutput,
+			"last_output": lastMessage,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(result)
 
 	default:
+		if lastMessage, _ := readLastSessionMessage(ctx, exec, name); strings.TrimSpace(lastMessage) != "" {
+			fmt.Println(lastMessage)
+			return nil
+		}
 		// For tmux containers, capture the pane (docker logs only shows entrypoint)
 		termLabel, _ := docker.InspectLabel(ctx, exec, name, "safe-agentic.terminal")
-		if termLabel == "tmux" {
+		if running && termLabel == "tmux" {
 			paneOut, err := exec.Run(ctx, tmux.BuildCapturePaneArgs(name, 80)...)
 			if err == nil && len(strings.TrimSpace(string(paneOut))) > 0 {
 				fmt.Print(string(paneOut))
@@ -444,6 +467,70 @@ func runOutput(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func readLastSessionMessage(ctx context.Context, exec orb.Executor, name string) (string, error) {
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	configDir := agentConfigDir(agentType)
+	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
+	searchDirs := sessionSearchDirs(configDir, repoLabel)
+	running, _ := docker.IsRunning(ctx, exec, name)
+	findCmd := fmt.Sprintf(
+		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		searchDirs[0])
+	data, err := readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, 400, running)
+	if err != nil {
+		return "", err
+	}
+	return extractLastAssistantMessage(data), nil
+}
+
+func extractLastAssistantMessage(data []byte) string {
+	var last string
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(line, &obj); err != nil {
+			continue
+		}
+		if msgRaw, ok := obj["message"]; ok {
+			var msg map[string]interface{}
+			if err := json.Unmarshal(msgRaw, &msg); err == nil {
+				if role, _ := msg["role"].(string); role == "assistant" {
+					if content := extractAssistantText(msg); strings.TrimSpace(content) != "" {
+						last = strings.TrimSpace(content)
+					}
+				}
+			}
+		}
+		if typ := jsonString(obj, "type"); typ == "assistant" {
+			var msg map[string]interface{}
+			if msgRaw, ok := obj["message"]; ok && json.Unmarshal(msgRaw, &msg) == nil {
+				if content := extractAssistantText(msg); strings.TrimSpace(content) != "" {
+					last = strings.TrimSpace(content)
+				}
+			}
+		}
+	}
+	return last
+}
+
+func runGitOnStoppedWorkspace(ctx context.Context, exec orb.Executor, name, gitCmd string) ([]byte, error) {
+	tmpDir := "/tmp/safe-agentic-workspace-" + strings.ReplaceAll(name, "/", "-")
+	if _, err := exec.Run(ctx, "bash", "-c", "rm -rf "+shellQuote(tmpDir)+" && mkdir -p "+shellQuote(tmpDir)); err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer exec.Run(context.Background(), "bash", "-c", "rm -rf "+shellQuote(tmpDir))
+	if _, err := exec.Run(ctx, "docker", "cp", name+":/workspace", tmpDir+"/"); err != nil {
+		return nil, fmt.Errorf("copy workspace: %w", err)
+	}
+	localFind := strings.ReplaceAll(workspaceFindCmd(), "/workspace", tmpDir+"/workspace")
+	out, err := exec.Run(ctx, "bash", "-c", localFind+" && "+gitCmd)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ─── summary ───────────────────────────────────────────────────────────────

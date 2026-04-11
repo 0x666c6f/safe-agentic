@@ -64,7 +64,13 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		gitArg = "git diff --stat"
 	}
 
-	out, err := exec.Run(ctx, workspaceExec(name, gitArg)...)
+	running, _ := docker.IsRunning(ctx, exec, name)
+	var out []byte
+	if running {
+		out, err = exec.Run(ctx, workspaceExec(name, gitArg)...)
+	} else {
+		out, err = runGitOnStoppedWorkspace(ctx, exec, name, gitArg)
+	}
 	if err != nil {
 		return fmt.Errorf("git diff: %w", err)
 	}

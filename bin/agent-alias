@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT="$AGENT_DIR/agent"
+AGENT_TYPE="${1:-}"
+ALIAS_NAME=""
+
+case "$AGENT_TYPE" in
+  claude|codex) ALIAS_NAME="agent-$AGENT_TYPE" ;;
+  *) echo "Usage: $(basename "$0") <claude|codex> [spawn-options] <repo-url> [repo-url...]" >&2; exit 1 ;;
+esac
+
+# shellcheck disable=SC1091
+source "$AGENT_DIR/agent-lib.sh"
+
+show_usage() {
+  cat <<EOF
+Usage: $ALIAS_NAME [spawn-options] <repo-url> [repo-url...]
+
+Pass-through spawn options:
+  --name NAME
+  --ssh
+  --reuse-auth
+  --reuse-gh-auth
+  --docker
+  --docker-socket
+  --network NAME
+  --memory SIZE
+  --cpus N
+  --pids-limit N
+  --prompt 'TASK'
+  --identity 'Name <email@example.com>'
+  --dry-run
+  --repo URL
+EOF
+}
+
+require_value() {
+  [ -n "${2:-}" ] || {
+    echo "Missing value for $1. Run 'agent help spawn' for usage." >&2
+    exit 1
+  }
+}
+
+shift
+
+args=()
+repo_count=0
+explicit_ssh=false
+auto_ssh=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      show_usage
+      exit 0
+      ;;
+    --repo|--name|--network|--memory|--cpus|--pids-limit|--identity|--prompt)
+      require_value "$1" "${2:-}"
+      [ "$1" = "--repo" ] && repo_count=$((repo_count + 1))
+      if [ "$1" = "--repo" ] && repo_uses_ssh "$2"; then
+        auto_ssh=true
+      fi
+      args+=("$1" "$2")
+      shift 2
+      ;;
+    --ssh)
+      explicit_ssh=true
+      args+=("$1")
+      shift
+      ;;
+    --reuse-auth|--reuse-gh-auth|--docker|--docker-socket|--dry-run)
+      args+=("$1")
+      shift
+      ;;
+    --*)
+      echo "Unknown argument '$1'. Run 'agent help spawn' for usage." >&2
+      exit 1
+      ;;
+    *)
+      repo_count=$((repo_count + 1))
+      repo_uses_ssh "$1" && auto_ssh=true
+      args+=(--repo "$1")
+      shift
+      ;;
+  esac
+done
+
+[ "$repo_count" -gt 0 ] || {
+  show_usage >&2
+  exit 1
+}
+
+if ! $explicit_ssh && $auto_ssh; then
+  args=(--ssh "${args[@]}")
+fi
+
+resolved=(spawn "$AGENT_TYPE" "${args[@]}")
+echo "[agent] -> $(render_command agent "${resolved[@]}")"
+exec "$AGENT" "${resolved[@]}"
