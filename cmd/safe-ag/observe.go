@@ -76,55 +76,39 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		configDir = "/home/agent/.codex"
 	}
 
-	// Find the session JSONL that matches this container.
-	// Uses the same Python-based matching as the TUI: compare container
-	// creation time to the first timestamp entry in each JSONL file.
-	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
+	// Ensure container is running for docker exec (start if stopped)
+	running, _ := docker.IsRunning(ctx, exec, name)
+	needsStop := false
+	if !running {
+		exec.Run(ctx, "docker", "start", name)
+		needsStop = true
+		// Wait briefly for start
+		time.Sleep(2 * time.Second)
+	}
+	defer func() {
+		if needsStop {
+			exec.Run(ctx, "docker", "stop", "-t", "5", name)
+		}
+	}()
 
+	// Find the session JSONL that matches this container.
+	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
 	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
 	searchDirs := sessionSearchDirs(configDir, repoLabel)
 
-	matchScript := `
-import os, json, sys, glob
-container_created = sys.argv[1][:19]
-search_dirs = [p for p in sys.argv[2:] if p]
-files = []
-seen = set()
-for d in search_dirs:
-    for pattern in (os.path.join(d, '*.jsonl'), os.path.join(d, '**', '*.jsonl')):
-        for f in glob.glob(pattern, recursive=True):
-            if f.endswith('history.jsonl') or '/subagents/' in f or f in seen:
-                continue
-            seen.add(f)
-            files.append(f)
-best_file = None
-best_delta = float('inf')
-for f in files:
-    try:
-        with open(f) as fh:
-            for line in fh:
-                d = json.loads(line.strip())
-                ts = d.get('timestamp', '')
-                if not ts and 'message' in d and isinstance(d['message'], dict):
-                    ts = d['message'].get('timestamp', '')
-                if ts:
-                    s = ts[:19]
-                    if s >= container_created:
-                        delta = ord(s[18]) - ord(container_created[18])
-                        if delta < best_delta:
-                            best_delta = delta
-                            best_file = f
-                    break
-    except:
-        pass
-if not best_file and files:
-    best_file = max(files, key=os.path.getmtime)
-if best_file:
-    print(best_file)
-`
-	findArgs := []string{"docker", "exec", name, "python3", "-c", matchScript, createdAt}
-	findArgs = append(findArgs, searchDirs...)
-	out, err := exec.Run(ctx, findArgs...)
+	// Find the most recent JSONL (simpler than Python matching for reliability)
+	findCmd := fmt.Sprintf(
+		"find %s/projects -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		configDir)
+	// If we have search dirs, prefer the project-specific one
+	if len(searchDirs) > 0 && searchDirs[0] != configDir+"/sessions" {
+		findCmd = fmt.Sprintf(
+			"find %s -name '*.jsonl' -not -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+			searchDirs[0])
+	}
+	_ = createdAt // used for future per-container matching refinement
+
+	out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
 	if err != nil {
 		return fmt.Errorf("find session log: %w", err)
 	}
@@ -134,7 +118,7 @@ if best_file:
 	}
 
 	// Read and render the JSONL
-	tailCmd := fmt.Sprintf("tail -n %d %s", logsLines*3, jsonlPath) // read more lines, filter later
+	tailCmd := fmt.Sprintf("tail -n %d %s", logsLines*3, jsonlPath)
 	out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
 	if err != nil {
 		return fmt.Errorf("read session log: %w", err)
