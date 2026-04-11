@@ -76,20 +76,12 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		configDir = "/home/agent/.codex"
 	}
 
-	// Ensure container is running for docker exec (start if stopped)
-	running, _ := docker.IsRunning(ctx, exec, name)
-	needsStop := false
-	if !running {
-		exec.Run(ctx, "docker", "start", name)
-		needsStop = true
-		// Wait briefly for start
-		time.Sleep(2 * time.Second)
+	// Ensure container is running for docker exec (auto-start if stopped)
+	stop, err := ensureRunning(ctx, exec, name)
+	if err != nil {
+		return err
 	}
-	defer func() {
-		if needsStop {
-			exec.Run(ctx, "docker", "stop", "-t", "5", name)
-		}
-	}()
+	defer stop()
 
 	// Find the session JSONL that matches this container.
 	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
@@ -138,6 +130,22 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// ensureRunning starts a stopped container and returns a cleanup function
+// that stops it when done. If already running, cleanup is a no-op.
+func ensureRunning(ctx context.Context, exec orb.Executor, name string) (func(), error) {
+	running, _ := docker.IsRunning(ctx, exec, name)
+	if running {
+		return func() {}, nil
+	}
+	if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
+		return func() {}, fmt.Errorf("start container %s: %w", name, err)
+	}
+	time.Sleep(2 * time.Second)
+	return func() {
+		exec.Run(ctx, "docker", "stop", "-t", "5", name)
+	}, nil
 }
 
 func sessionSearchDirs(configDir, repo string) []string {
@@ -503,6 +511,13 @@ func runCost(cmd *cobra.Command, args []string) error {
 }
 
 func runCostForContainer(ctx context.Context, exec orb.Executor, name string) error {
+	// Ensure container is running for docker exec
+	stop, err := ensureRunning(ctx, exec, name)
+	if err != nil {
+		return err
+	}
+	defer stop()
+
 	// Detect agent type to find config dir
 	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
 	configDir := agentConfigDir(agentType)
@@ -772,6 +787,12 @@ func runSessions(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	stopFn, err := ensureRunning(ctx, exec, name)
+	if err != nil {
+		return err
+	}
+	defer stopFn()
+
 	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
 	configDir := agentConfigDir(agentType)
 
@@ -876,6 +897,12 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	stop, err := ensureRunning(ctx, exec, name)
+	if err != nil {
+		return err
+	}
+	defer stop()
 
 	out, err := exec.Run(ctx, "docker", "exec", name,
 		"bash", "-c", "cat /workspace/.safe-agentic/session-events.jsonl 2>/dev/null || true")
