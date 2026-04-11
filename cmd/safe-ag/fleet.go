@@ -203,52 +203,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	if pipelineDryRun {
 		fmt.Printf("Pipeline: %s\n", name)
 		fmt.Printf("Stages:   %d\n\n", len(m.Stages))
-		for i, stage := range m.Stages {
-			fmt.Printf("Stage %d: %s\n", i+1, stage.Name)
-			if len(stage.DependsOn) > 0 {
-				fmt.Printf("  depends_on: %s\n", strings.Join(stage.DependsOn, ", "))
-			}
-			for _, spec := range stage.Agents {
-				if spec.Type == "" {
-					continue
-				}
-				fmt.Printf("  agent spawn %s", spec.Type)
-				if spec.Name != "" {
-					fmt.Printf(" --name %s", spec.Name)
-				}
-				if spec.Repo != "" {
-					fmt.Printf(" --repo %s", spec.Repo)
-				}
-				if spec.SSH {
-					fmt.Print(" --ssh")
-				}
-				if spec.ReuseAuth {
-					fmt.Print(" --reuse-auth")
-				}
-				if spec.AutoTrust {
-					fmt.Print(" --auto-trust")
-				}
-				if spec.Prompt != "" {
-					fmt.Printf(" --prompt %q", spec.Prompt)
-				}
-				fmt.Println()
-				if spec.DependsOn != "" {
-					fmt.Printf("    depends_on: %s\n", spec.DependsOn)
-				}
-				if spec.OnFailure != "" {
-					fmt.Printf("    on_failure: %s\n", spec.OnFailure)
-				}
-				if spec.Retry > 0 {
-					fmt.Printf("    retry: %d\n", spec.Retry)
-				}
-				if spec.When != "" {
-					fmt.Printf("    when: %s\n", spec.When)
-				}
-				if spec.Outputs != "" {
-					fmt.Printf("    outputs: %s\n", spec.Outputs)
-				}
-			}
-		}
+		printPipelineTree(m.Stages)
 		return nil
 	}
 
@@ -399,5 +354,62 @@ func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
 		CPUs:        spec.CPUs,
 		AWSProfile:  spec.AWS,
 		FleetVolume: fleetVolume,
+	}
+}
+
+// printPipelineTree renders pipeline stages as a tree diagram.
+func printPipelineTree(stages []fleet.PipelineStage) {
+	// Build dependency graph for visual grouping
+	for i, stage := range stages {
+		isLast := i == len(stages)-1
+		prefix := "├──"
+		childPrefix := "│   "
+		if isLast {
+			prefix = "└──"
+			childPrefix = "    "
+		}
+
+		// Stage header
+		deps := ""
+		if len(stage.DependsOn) > 0 {
+			deps = fmt.Sprintf(" (after: %s)", strings.Join(stage.DependsOn, ", "))
+		}
+		if stage.Pipeline != "" {
+			fmt.Printf("%s 📋 %s%s → %s\n", prefix, stage.Name, deps, stage.Pipeline)
+			continue
+		}
+
+		fmt.Printf("%s 📦 %s%s\n", prefix, stage.Name, deps)
+
+		// Agents under this stage
+		for j, spec := range stage.Agents {
+			agentIsLast := j == len(stage.Agents)-1
+			agentPrefix := childPrefix + "├── "
+			if agentIsLast {
+				agentPrefix = childPrefix + "└── "
+			}
+
+			icon := "🤖"
+			switch spec.Type {
+			case "claude":
+				icon = "🟠"
+			case "codex":
+				icon = "🔵"
+			}
+
+			name := spec.Name
+			if name == "" {
+				name = spec.Type
+			}
+			fmt.Printf("%s%s %s", agentPrefix, icon, name)
+			if spec.Memory != "" {
+				fmt.Printf(" [%s", spec.Memory)
+				if spec.CPUs != "" {
+					fmt.Printf(", %s cpu", spec.CPUs)
+				}
+				fmt.Print("]")
+			}
+			fmt.Println()
+		}
 	}
 }
