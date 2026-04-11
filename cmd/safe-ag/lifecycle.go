@@ -70,6 +70,7 @@ var attachCmd = &cobra.Command{
 }
 
 func init() {
+	addLatestFlag(attachCmd)
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -77,10 +78,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
@@ -147,6 +145,7 @@ var stopCmd = &cobra.Command{
 
 func init() {
 	stopCmd.Flags().BoolVar(&stopAll, "all", false, "Stop and remove all agent containers")
+	addLatestFlag(stopCmd)
 	rootCmd.AddCommand(stopCmd)
 }
 
@@ -158,10 +157,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return stopAllContainers(ctx, exec)
 	}
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
+	target := targetFromArgs(cmd, args)
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err

@@ -186,7 +186,7 @@ safe-ag audit [--lines N]                    # show operation log
 |---------|----------|
 | SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
 | Shared auth volume (default) | `--ephemeral-auth` for one-off sessions |
-| AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
+| AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `safe-ag aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
 | Security preamble injected into CLAUDE.md / AGENTS.md | — |
 | Read-only rootfs | — |

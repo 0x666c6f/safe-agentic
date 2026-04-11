@@ -442,6 +442,8 @@ func init() {
 	rootCmd.AddCommand(prCmd)
 }
 
+var validBranchName = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+
 func runPR(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
@@ -453,6 +455,11 @@ func runPR(cmd *cobra.Command, args []string) error {
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
+	}
+
+	// Validate prBase to prevent shell injection — only allow branch name characters.
+	if !validBranchName.MatchString(prBase) {
+		return fmt.Errorf("invalid base branch: %s", prBase)
 	}
 
 	// Push current branch
@@ -505,6 +512,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
+	}
+
+	// Validate reviewBase to prevent shell injection — only allow branch name characters.
+	if !validBranchName.MatchString(reviewBase) {
+		return fmt.Errorf("invalid base branch: %s", reviewBase)
 	}
 
 	// Try codex review first

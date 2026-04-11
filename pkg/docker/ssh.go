@@ -31,6 +31,9 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 	// Only start if not already running — multiple spawns share the same relay.
 	_, relayExists := exec.Run(ctx, "test", "-S", sshRelaySocket)
 	if relayExists != nil {
+		// sshRelaySocket is a package-level constant (/tmp/safe-agentic-ssh-agent.sock).
+		// vmSocket comes from the VM's $SSH_AUTH_SOCK (e.g. /run/orbstack/ssh-agent.sock).
+		// Both are VM-internal paths, not user-controlled input, so Sprintf is safe here.
 		relayScript := fmt.Sprintf(
 			"#!/bin/bash\nexec socat UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s\n",
 			sshRelaySocket, vmSocket)
