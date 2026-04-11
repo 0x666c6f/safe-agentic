@@ -1,130 +1,103 @@
-# Security Review: Go Rewrite
+# Security Review: Go Phase 1 Foundation
 
 **Branch:** `feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation`  
 **Reviewer:** Codex  
 **Date:** 2026-04-11  
-**Scope:** All Go code under `cmd/safe-ag/`, `pkg/`, and `tui/`
+**Scope:** All Go code present on this branch (`tui/*.go`, `tui/actions_test.go`)
+
+## Scope Notes
+
+`CLAUDE.md` describes a larger Go rewrite with `cmd/safe-ag/` and multiple `pkg/` packages, but those Go paths do not exist on this branch. The actual Go implementation here is the TUI/dashboard under `tui/`, so this review is limited to that code.
 
 ## Executive Summary
 
-The Go rewrite improves safety in a few places: most host-side process launches use argument vectors instead of shell parsing, `pkg/validate` blocks unsafe network modes, and `cmd/safe-ag/observe.go:828-856` defends against tar path traversal during session export.
+I did **not** find a straightforward shell-injection bug from the reviewed `exec.Command` calls. Most process launches use argument vectors, and the one user-influenced shell hop in `tui/actions.go:148-157` shell-quotes `cwd` before building `bash -lc`.
 
-I still found **5 actionable security issues**. The largest gaps are:
+I did find **3 actionable issues**:
 
-1. The documented security model says unsafe Docker modes are blocked, but the Go code still enables both `--privileged` DinD and raw Docker socket passthrough.
-2. AWS credential handling overexposes secrets by passing the full host credentials file through container env and refresh flows.
-3. The docs claim repo clone paths are validated, but `spawn`/`fleet` do not enforce that, and later log paths are interpolated into `bash -c`.
+1. `agent-tui --dashboard` exposes unauthenticated stop/log endpoints that trust raw URL path data as a Docker target.
+2. The branch does not enforce the `CLAUDE.md` Go security model: the documented validation/orchestration packages are absent, and the TUI issues raw `orb ... docker ...` commands directly.
+3. The file-copy UI accepts arbitrary container and VM paths with no confinement to managed workspaces.
 
 ## Findings
 
-### 1. High: documented Docker hardening is not actually enforced for `--docker` / `--docker-socket`
+### 1. High: dashboard HTTP handlers allow unauthenticated container control and log access
 
 **Evidence**
 
-- `CLAUDE.md:183-201` says unsafe Docker flags such as `--privileged` are blocked.
-- `cmd/safe-ag/spawn.go:396-406` exposes both `--docker` and `--docker-socket`.
-- `pkg/docker/dind.go:47-73` starts the DinD sidecar with `--privileged`.
-- `pkg/docker/dind.go:34-44` mounts `/var/run/docker.sock` directly into the agent container.
+- `tui/main.go:21-34` starts the dashboard on a caller-supplied bind address.
+- `tui/dashboard.go:53-60` routes `/agents/<name>/logs` directly into `handleAgentLogs`.
+- `tui/dashboard.go:75-103` executes `docker exec <name> tmux capture-pane ...` using the path-derived `name`.
+- `tui/dashboard.go:140-152` executes `docker stop <name>` using the path-derived `name`.
+- Neither handler validates that `name` belongs to the current `safe-agentic` agent list, matches the managed `agent-` prefix, or carries any anti-CSRF/auth check.
 
 **Impact**
 
-The advertised hardening in `pkg/docker/runtime.go:128-156` only applies to the main agent container. An agent started with `--docker` can talk to a privileged daemon, and an agent started with `--docker-socket` gets raw control of the VM Docker daemon. Both options bypass the "safe by default" model documented in `CLAUDE.md`.
+Anyone who can reach the dashboard can target arbitrary VM containers by name, not just the containers surfaced by `fetchAgents()`. On a non-loopback bind this is remote by default; on the default loopback bind it is still reachable from the local browser with no CSRF protection on the stop endpoint. That is enough to stop agents and read live tmux output from any container whose name is known and which has tmux installed.
 
-**Why this matters**
+**Why this matters against `CLAUDE.md`**
 
-This is not just a documentation drift issue. Anyone relying on the current `CLAUDE.md` guarantees could assume privileged Docker modes are impossible, while the Go CLI still exposes them behind normal flags.
+`CLAUDE.md:45-47` says Go code should centralize Docker/VM execution and validate container names. These handlers bypass that entirely.
 
 **Recommendation**
 
-- Either remove these flags from Phase 1, or document them as explicit trust-boundary breaks.
-- If they remain, require an additional danger acknowledgment flag and emit a prominent warning.
+- Validate `name` against the current poller snapshot or a shared container-name validator before calling Docker.
+- Reject non-`safe-agentic` containers explicitly.
+- Add dashboard authentication or a per-process random token.
+- Enforce `Origin`/CSRF checks for browser-initiated mutating routes.
 
-### 2. High: `--aws <profile>` injects the entire host credentials file into container env and refresh paths
+### 2. Medium: the documented Go security model is not enforced by the code on this branch
 
 **Evidence**
 
-- `CLAUDE.md:189` documents `--aws <profile>` as profile-scoped and tmpfs-backed.
-- `cmd/safe-ag/spawn.go:329-341` calls `inject.ReadAWSCredentials(...)` and adds every returned value as container env.
-- `pkg/inject/inject.go:168-187` base64-encodes the full `~/.aws/credentials` file into `SAFE_AGENTIC_AWS_CREDS_B64`; it does not extract just the requested profile.
-- `cmd/safe-ag/config_cmd.go:549-576` reads the same full file again during `aws-refresh` and writes it wholesale into the container.
+- `CLAUDE.md:44-48` claims Go-side enforcement through `pkg/orb/`, `pkg/docker/`, `pkg/validate/`, and `pkg/repourl/`.
+- `CLAUDE.md:183-201` further claims unsafe Docker options are blocked and names/network modes are validated.
+- The only Go code on this branch is `tui/`; there is no Go `cmd/safe-ag/` or `pkg/` tree to provide those controls.
+- Instead, the TUI issues raw host-side commands in multiple places:
+  - `tui/poller.go:190-199`
+  - `tui/actions.go:48-67`
+  - `tui/actions.go:86-128`
+  - `tui/dashboard.go:93-150`
+  - `tui/overlay.go:69`
 
 **Impact**
 
-Selecting one AWS profile exposes all profiles from the host credentials file to the container. Because the file is passed through Docker env at container creation time, the secret also becomes visible in container metadata via `docker inspect`, not just inside the tmpfs-backed `~/.aws` directory.
-
-**Why this matters**
-
-This is broader than the documented security model. The docs describe an opt-in profile injection. The implementation currently copies the full credential set and stores it in a much more observable channel.
+This is an assurance gap with security consequences. Reviewers and users reading `CLAUDE.md` would expect centralized validation and policy enforcement in Go, but the current code has none of that. As a result, container names, Docker targets, and copy paths are trusted ad hoc at each call site. Finding 1 exists specifically because these shared validation layers are not present.
 
 **Recommendation**
 
-- Parse the INI file and inject only the selected profile.
-- Stop using Docker env for credential transport; use a temp file, `docker cp`, or a short-lived exec stream instead.
-- Treat `aws-refresh` the same way so the refresh path does not reintroduce the same leak.
+- Either narrow `CLAUDE.md` to describe the actual branch state, or port the documented validation/orchestration layers before claiming parity.
+- Introduce a single helper for managed-container targeting and route all TUI/dashboard Docker calls through it.
+- Add tests that prove non-managed names and unsafe targets are rejected.
 
-### 3. High: repo validation promised in `CLAUDE.md` is missing, and repo-derived paths are later interpolated into `bash -c`
+### 3. Low: copy UI allows arbitrary path selection inside the container and the VM
 
 **Evidence**
 
-- `CLAUDE.md:244` says repo clone paths are validated by `pkg/repourl.ClonePath()`.
-- `pkg/repourl/parse.go:11-51` contains the validator, but `cmd/safe-ag/spawn.go:155-173` never calls it for `opts.Repos`.
-- `cmd/safe-ag/spawn.go:221-223` stores raw repo strings in `REPOS`, and `cmd/safe-ag/spawn.go:257-259` stores `repourl.DisplayLabel(opts.Repos)` in a label.
-- When `ClonePath()` fails, `pkg/repourl/parse.go:63-66` falls back to the raw repo string for display.
-- `cmd/safe-ag/observe.go:88-114` builds `find ...` and `tail ...` shell snippets from `repoLabel`-derived paths and `jsonlPath` without shell quoting.
-- The TUI repeats the same pattern in `tui/actions.go:359-383` and `tui/actions.go:516-527`.
+- `tui/overlay.go:48-77` takes free-form `containerPath` and `hostPath` input from the UI.
+- The handler then runs `docker cp <container>:<containerPath> <hostPath>` with no validation, no path-cleaning, and no confinement to `/workspace` or a managed export directory.
 
 **Impact**
 
-A crafted repo value accepted by `spawn`, `fleet`, or `pipeline` can survive into labels and later be interpolated into `bash -c` during `safe-ag logs` or TUI log loading. That creates a container-side command-injection path and, at minimum, breaks the documented guarantee that repo paths are validated before use.
+A TUI operator can copy any file that Docker can read from the container filesystem, including session/auth material under `/home/agent`, to any writable path in the VM. This is not a shell injection bug, but it does bypass the "work only within managed workspaces" spirit of the project and makes it easy to exfiltrate or overwrite data outside the repo checkout.
+
+**Why this matters against `CLAUDE.md`**
+
+`CLAUDE.md` presents the system as safe-by-default and tightly scoped around isolated workspaces. This UI path is much broader than that model.
 
 **Recommendation**
 
-- Validate every repo argument at the `spawn` / manifest boundary and reject anything `ClonePath()` would reject.
-- Do not build these log lookups with `bash -c`; prefer direct `docker exec find ...` / `docker exec tail ...` argument vectors.
-- If shell use is unavoidable, quote derived paths defensively.
-
-### 4. Medium: template commands allow host-side path traversal
-
-**Evidence**
-
-- `cmd/safe-ag/config_cmd.go:377-415` resolves template names with `filepath.Join(userDir, name...)` and `filepath.Join(repoDir, name...)` with no basename validation.
-- `cmd/safe-ag/config_cmd.go:427-441` writes new templates to `filepath.Join(dir, name+".md")` with the same lack of validation.
-
-**Impact**
-
-`safe-ag template show ../../some/file` can read outside the templates directories, and `safe-ag template create ../../some/file` can write outside `~/.config/safe-agentic/templates`. This is a direct host-side path traversal issue in the CLI.
-
-**Recommendation**
-
-- Restrict template names to a safe basename pattern such as `[A-Za-z0-9._-]+`.
-- After joining, verify the cleaned path still stays under the intended template directory.
-
-### 5. Medium: sensitive callback and notification values are stored in Docker labels
-
-**Evidence**
-
-- `pkg/labels/labels.go:12-18` defines labels for prompt, callback, and notification metadata.
-- `cmd/safe-ag/spawn.go:348-388` stores:
-  - the first 100 characters of the prompt in `safe-agentic.prompt`
-  - `--on-complete` and `--on-fail` values in reversible base64 labels
-  - `--notify` values in a reversible base64 label
-
-**Impact**
-
-Base64 is not protection. Any process or user with Docker inspect access in the VM can recover callback commands, notification targets, and prompt fragments. That is especially risky for webhook URLs, tokens embedded in shell commands, or prompts that contain proprietary data.
-
-**Recommendation**
-
-- Keep labels non-sensitive and state-like only.
-- Store callbacks / notify targets in a file inside a private per-container volume or tmpfs instead of container metadata.
+- Restrict source paths to approved prefixes such as `/workspace/` and explicit exportable session directories.
+- Restrict destination paths to a dedicated export directory in the VM.
+- Show the resolved source/destination paths before executing the copy.
 
 ## Areas Reviewed With No Findings
 
-- `pkg/validate/validate.go`: correctly rejects `host`, `bridge`, and `container:*` network modes.
-- `pkg/orb/orb.go`: uses argument vectors for `orb` execution rather than shell concatenation.
-- `cmd/safe-ag/workflow.go`: validates stash refs and branch names before interpolating them into shell commands.
-- `cmd/safe-ag/observe.go:828-856`: blocks tar extraction path traversal during session export.
+- `exec.Command` / `exec.CommandContext`: I did not find user-controlled shell interpolation through these calls. The reviewed code generally passes arguments as argv, not as shell strings.
+- `tui/actions.go:148-157`: resume uses `shellQuoteArgs` for `cwd`, so the `bash -lc` hop is not a trivial injection sink.
+- Path traversal via repo labels in log lookup: `tui/actions.go:359-366` replaces `/` with `-`, so the repo label does not directly become a traversable filesystem path.
+- Secrets in env or labels: I did not find Go code on this branch writing secrets into environment variables or Docker labels. The TUI reads status labels only (`safe-agentic.agent-type`, `repo-display`, `ssh`, `auth`, `gh-auth`, `docker`, `network-mode`, `fleet`, `terminal`).
 
 ## Overall Assessment
 
-The Go rewrite is moving in the right direction, but the current implementation does not yet match the security claims in `CLAUDE.md`. The biggest gaps are not cosmetic. They materially weaken the documented isolation story and expose more secret material than the old model implies.
+The main security issue in the current Go foundation is not classic `exec.Command` injection. It is missing enforcement. The dashboard and TUI trust raw names and paths in places where `CLAUDE.md` says centralized validation should already exist. Until that gap is closed, the branch should not be described as enforcing the documented Go security model.
