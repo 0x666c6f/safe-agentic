@@ -374,12 +374,29 @@ func (ac *Actions) loadLogsContent(name string, state *logsState) string {
 		state.rawMode = false
 		return rendered
 	}
+	agentRendered := fetchAgentLogsFunc(name, state.tailLines)
+	if strings.TrimSpace(agentRendered) != "" {
+		state.rawMode = false
+		return agentRendered
+	}
 	raw := fetchPlainLogsFunc(name, state.tailLines)
 	if len(raw) == 0 {
 		return ""
 	}
 	state.rawMode = true
 	return strings.TrimSpace(string(raw))
+}
+
+func fetchAgentLogsCLI(name, tailLines string) string {
+	lines := tailLines
+	if lines == "0" {
+		lines = "100000"
+	}
+	out, err := exec.Command(cliBinary, "logs", "--lines", lines, name).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func sessionSearchDirs(configDir, repo string) []string {
@@ -552,6 +569,7 @@ var fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
 	return ac.fetchDockerLogs(name, tailLines)
 }
 
+var fetchAgentLogsFunc = fetchAgentLogsCLI
 var fetchPlainLogsFunc = fetchPlainDockerLogs
 
 func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsState) {

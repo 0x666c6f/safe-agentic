@@ -87,14 +87,19 @@ func assertErr(msg string) error { return errString(msg) }
 
 func TestLogsOverlayFallsBackToDockerLogs(t *testing.T) {
 	oldSession := fetchSessionLogsFunc
+	oldAgent := fetchAgentLogsFunc
 	oldPlain := fetchPlainLogsFunc
 	defer func() {
 		fetchSessionLogsFunc = oldSession
+		fetchAgentLogsFunc = oldAgent
 		fetchPlainLogsFunc = oldPlain
 	}()
 
 	fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
 		return nil
+	}
+	fetchAgentLogsFunc = func(name, tailLines string) string {
+		return ""
 	}
 	fetchPlainLogsFunc = func(name, tailLines string) []byte {
 		return []byte("docker-log-line")
@@ -118,5 +123,43 @@ func TestLogsOverlayFallsBackToDockerLogs(t *testing.T) {
 	}
 	if got := tv2.GetText(false); got != "docker-log-line" {
 		t.Fatalf("logs overlay text = %q, want docker fallback", got)
+	}
+}
+
+func TestLogsOverlayPrefersAgentLogsOverDockerLogs(t *testing.T) {
+	oldSession := fetchSessionLogsFunc
+	oldAgent := fetchAgentLogsFunc
+	oldPlain := fetchPlainLogsFunc
+	defer func() {
+		fetchSessionLogsFunc = oldSession
+		fetchAgentLogsFunc = oldAgent
+		fetchPlainLogsFunc = oldPlain
+	}()
+
+	fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
+		return nil
+	}
+	fetchAgentLogsFunc = func(name, tailLines string) string {
+		return "agent-log-line"
+	}
+	fetchPlainLogsFunc = func(name, tailLines string) []byte {
+		return []byte("docker-log-line")
+	}
+
+	app := NewApp()
+	app.table.Update([]Agent{
+		{Name: "agent-claude-done", Type: "claude", Running: false},
+	})
+	app.actions = NewActions(app)
+
+	app.actions.Logs()
+
+	_, prim := app.pages.GetFrontPage()
+	tv, ok := prim.(interface{ GetText(bool) string })
+	if !ok {
+		t.Fatal("logs overlay not created")
+	}
+	if got := tv.GetText(false); got != "agent-log-line" {
+		t.Fatalf("logs overlay text = %q, want agent-log fallback", got)
 	}
 }
