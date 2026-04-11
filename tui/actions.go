@@ -327,8 +327,15 @@ func (ac *Actions) Logs() {
 					newRendered := renderSessionLog(newData)
 					ac.app.tapp.QueueUpdateDraw(func() {
 						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
+							// Preserve scroll position: only auto-scroll if already at bottom
+							row, _ := tv.GetScrollOffset()
+							_, _, _, height := tv.GetInnerRect()
+							totalLines := len(strings.Split(tv.GetText(true), "\n"))
+							atBottom := row+height >= totalLines-2
 							tv.SetText(newRendered)
-							tv.ScrollToEnd()
+							if atBottom {
+								tv.ScrollToEnd()
+							}
 						}
 					})
 				}
