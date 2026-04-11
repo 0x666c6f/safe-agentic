@@ -35,28 +35,76 @@ func runList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	var format string
 	if listJSON {
-		format = "{{json .}}"
-	} else {
-		format = "table {{.Names}}\t" +
-			"{{.Label \"" + labels.AgentType + "\"}}\t" +
-			"{{.Label \"" + labels.RepoDisplay + "\"}}\t" +
-			"{{.Label \"" + labels.SSH + "\"}}\t" +
-			"{{.Label \"" + labels.AuthType + "\"}}\t" +
-			"{{.Label \"" + labels.GHAuth + "\"}}\t" +
-			"{{.Label \"" + labels.DockerMode + "\"}}\t" +
-			"{{.Label \"" + labels.NetworkMode + "\"}}\t" +
-			"{{.Status}}"
+		out, err := exec.Run(ctx, "docker", "ps", "-a",
+			"--filter", "name=^agent-",
+			"--format", "{{json .}}")
+		if err != nil {
+			return fmt.Errorf("list containers: %w", err)
+		}
+		fmt.Print(string(out))
+		return nil
 	}
 
+	// Fetch containers with fleet label for grouping
+	format := "{{.Names}}\t{{.Label \"" + labels.AgentType + "\"}}\t" +
+		"{{.Label \"" + labels.RepoDisplay + "\"}}\t" +
+		"{{.Label \"" + labels.Fleet + "\"}}\t" +
+		"{{.Status}}"
 	out, err := exec.Run(ctx, "docker", "ps", "-a",
 		"--filter", "name=^agent-",
 		"--format", format)
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
-	fmt.Print(string(out))
+
+	lines := splitLines(string(out))
+	if len(lines) == 0 {
+		fmt.Println("No agent containers found.")
+		return nil
+	}
+
+	type entry struct {
+		name, agentType, repo, fleet, status string
+	}
+	var entries []entry
+	for _, line := range lines {
+		parts := strings.Split(string(line), "\t")
+		if len(parts) < 5 {
+			continue
+		}
+		entries = append(entries, entry{parts[0], parts[1], parts[2], parts[3], parts[4]})
+	}
+
+	// Group by fleet
+	lastFleet := ""
+	for _, e := range entries {
+		if e.fleet != "" && e.fleet != lastFleet {
+			icon := "🔄"
+			fmt.Printf("\n%s %s\n", icon, e.fleet)
+			lastFleet = e.fleet
+		}
+
+		statusIcon := "⏹"
+		if strings.HasPrefix(e.status, "Up") {
+			statusIcon = "▶"
+		}
+
+		typeIcon := "🤖"
+		switch e.agentType {
+		case "claude":
+			typeIcon = "🟠"
+		case "codex":
+			typeIcon = "🔵"
+		}
+
+		indent := ""
+		if e.fleet != "" {
+			indent = "  "
+		}
+		fmt.Printf("%s%s %s %s  %s  %s\n", indent, statusIcon, typeIcon, e.name, e.repo, e.status)
+	}
+	fmt.Println()
 	return nil
 }
 
