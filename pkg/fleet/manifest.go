@@ -58,6 +58,7 @@ type PipelineStage struct {
 	Agents    []AgentSpec `yaml:"agents"`
 	Models    []string    `yaml:"models"`   // expand agents across multiple models
 	Pipeline  string      `yaml:"pipeline"` // path to sub-pipeline YAML (mutually exclusive with agents)
+	Parent    string      `yaml:"-"`        // set during model expansion (original stage name)
 }
 
 // PipelineManifest is the top-level structure for `agent pipeline <manifest.yaml>`.
@@ -133,6 +134,7 @@ func ParsePipeline(path string) (*PipelineManifest, error) {
 				newStage := PipelineStage{
 					Name:      stage.Name + "-" + model,
 					DependsOn: stage.DependsOn,
+					Parent:    stage.Name,
 				}
 				for _, agent := range stage.Agents {
 					a := agent

@@ -367,58 +367,97 @@ func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
 }
 
 // printPipelineTree renders pipeline stages as a tree diagram under a root node.
+// Stages with the same Parent are grouped under a sub-pipeline node.
 func printPipelineTree(name string, stages []fleet.PipelineStage) {
 	fmt.Printf("🔄 %s\n", name)
 
-	for i, stage := range stages {
-		isLast := i == len(stages)-1
-		branch := "├──"
-		childPrefix := "│   "
-		if isLast {
-			branch = "└──"
-			childPrefix = "    "
+	// Group consecutive stages by parent
+	type group struct {
+		parent string
+		stages []fleet.PipelineStage
+	}
+	var groups []group
+	for _, stage := range stages {
+		p := stage.Parent
+		if p == "" {
+			p = stage.Name // standalone
+		}
+		if len(groups) > 0 && groups[len(groups)-1].parent == p {
+			groups[len(groups)-1].stages = append(groups[len(groups)-1].stages, stage)
+		} else {
+			groups = append(groups, group{parent: p, stages: []fleet.PipelineStage{stage}})
+		}
+	}
+
+	for gi, g := range groups {
+		gLast := gi == len(groups)-1
+		gBranch := "├──"
+		gPrefix := "│   "
+		if gLast {
+			gBranch = "└──"
+			gPrefix = "    "
 		}
 
-		// Stage header
-		deps := ""
-		if len(stage.DependsOn) > 0 {
-			deps = fmt.Sprintf(" (after: %s)", strings.Join(stage.DependsOn, ", "))
-		}
-		if stage.Pipeline != "" {
-			fmt.Printf("%s 📋 %s%s → %s\n", branch, stage.Name, deps, stage.Pipeline)
-			continue
-		}
-
-		fmt.Printf("%s 📦 %s%s\n", branch, stage.Name, deps)
-
-		for j, spec := range stage.Agents {
-			agentIsLast := j == len(stage.Agents)-1
-			agentBranch := childPrefix + "├── "
-			if agentIsLast {
-				agentBranch = childPrefix + "└── "
+		// If group has multiple stages (model expansion), show parent
+		if len(g.stages) > 1 {
+			deps := ""
+			if len(g.stages[0].DependsOn) > 0 {
+				deps = fmt.Sprintf(" (after: %s)", strings.Join(g.stages[0].DependsOn, ", "))
 			}
-
-			icon := "🤖"
-			switch spec.Type {
-			case "claude":
-				icon = "🟠"
-			case "codex":
-				icon = "🔵"
-			}
-
-			label := spec.Name
-			if label == "" {
-				label = spec.Type
-			}
-			fmt.Printf("%s%s %s", agentBranch, icon, label)
-			if spec.Memory != "" {
-				fmt.Printf(" [%s", spec.Memory)
-				if spec.CPUs != "" {
-					fmt.Printf(", %s cpu", spec.CPUs)
+			fmt.Printf("%s 📦 %s%s\n", gBranch, g.parent, deps)
+			for si, stage := range g.stages {
+				sLast := si == len(g.stages)-1
+				sBranch := gPrefix + "├──"
+				sPrefix := gPrefix + "│   "
+				if sLast {
+					sBranch = gPrefix + "└──"
+					sPrefix = gPrefix + "    "
 				}
-				fmt.Print("]")
+				fmt.Printf("%s 📦 %s\n", sBranch, stage.Name)
+				printStageAgents(stage, sPrefix)
 			}
-			fmt.Println()
+		} else {
+			stage := g.stages[0]
+			deps := ""
+			if len(stage.DependsOn) > 0 {
+				deps = fmt.Sprintf(" (after: %s)", strings.Join(stage.DependsOn, ", "))
+			}
+			if stage.Pipeline != "" {
+				fmt.Printf("%s 📋 %s%s → %s\n", gBranch, stage.Name, deps, stage.Pipeline)
+			} else {
+				fmt.Printf("%s 📦 %s%s\n", gBranch, stage.Name, deps)
+				printStageAgents(stage, gPrefix)
+			}
 		}
+	}
+}
+
+func printStageAgents(stage fleet.PipelineStage, prefix string) {
+	for j, spec := range stage.Agents {
+		agentLast := j == len(stage.Agents)-1
+		agentBranch := prefix + "├── "
+		if agentLast {
+			agentBranch = prefix + "└── "
+		}
+		icon := "🤖"
+		switch spec.Type {
+		case "claude":
+			icon = "🟠"
+		case "codex":
+			icon = "🔵"
+		}
+		label := spec.Name
+		if label == "" {
+			label = spec.Type
+		}
+		fmt.Printf("%s%s %s", agentBranch, icon, label)
+		if spec.Memory != "" {
+			fmt.Printf(" [%s", spec.Memory)
+			if spec.CPUs != "" {
+				fmt.Printf(", %s cpu", spec.CPUs)
+			}
+			fmt.Print("]")
+		}
+		fmt.Println()
 	}
 }
