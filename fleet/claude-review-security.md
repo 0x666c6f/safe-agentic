@@ -1,34 +1,29 @@
-# Security Review: Go CLI Rewrite — Claude Opus 4.6 (Second Pass)
+# Security Review: Go CLI Rewrite — Claude Opus 4.6 (Third Pass)
 
 **Branch:** `feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation`
 **Reviewer:** Claude Opus 4.6 (automated, independent review)
 **Date:** 2026-04-11
-**Scope:** All Go source under `cmd/safe-ag/` and `pkg/` (67 files)
-**Baseline:** Compared against `fleet/review-security.md` (prior review, 2026-04-10)
+**Scope:** All Go source under `cmd/safe-ag/` and `pkg/` (67 files), plus `entrypoint.sh`
+**Baseline:** Compared against `fleet/claude-review-security.md` (second pass, same date)
 
 ---
 
 ## Executive Summary
 
-The Go rewrite correctly enforces the vast majority of the CLAUDE.md security model. The typed `DockerRunCmd` builder and `orb.Executor` abstraction eliminate shell-injection classes that existed in the bash version. Since the prior review, **H3/H4 (branch-name injection)** and **H5 (stash ref injection)** have been fixed via `validBranchName` and `validStashRef` regexes. However, **3 critical**, **3 high**, and **7 medium** issues remain or are newly identified.
+The Go rewrite enforces the vast majority of the CLAUDE.md security model. The typed `DockerRunCmd` builder and `orb.Executor` abstraction eliminate shell-injection classes that existed in the bash version. Since the second pass, no new fixes have landed. This review provides deeper analysis of existing findings, re-validates severity assignments, and identifies **1 additional medium finding** (dry-run credential leakage). Totals: **3 critical**, **3 high**, **8 medium** issues.
 
-### Delta from Prior Review (2026-04-10)
+### Delta from Second Pass
 
 | Prior ID | Status | Notes |
 |----------|--------|-------|
-| C1 (callback injection) | **Still open** | Unchanged |
+| C1 (callback injection) | **Still open** | Container-side only; severity confirmed |
 | C2 (DinD --privileged) | **Still open** | Inherent to DinD design |
-| C3 (host Docker socket) | **Still open** | Unchanged |
-| C4 (AWS heredoc injection) | **Still open** | Unchanged |
-| H1 (notify command: target) | **Still open** | Unchanged |
-| H2 (SSH relay shell interp) | **Still open** | Unchanged |
-| H3 (prBase injection) | **Fixed** | `validBranchName` regex added at `workflow.go:445` |
-| H4 (reviewBase injection) | **Fixed** | `validBranchName` check at `workflow.go:517` |
-| H5 (stash label injection) | **Partially fixed** | `validStashRef` covers revert; create `label` still unvalidated |
-| M1-M8 | **Still open** | Unchanged |
-| **New: N1** | Template path traversal | `findTemplate` does not sanitize name |
-| **New: N2** | AWS profile injection in bashrc | Profile name unescaped in shell string |
-| **New: N3** | Cron command splitting | `strings.Fields` mishandles quoted args |
+| C3 (host Docker socket) | **Still open** | Most dangerous flag |
+| H1 (AWS heredoc injection) | **Still open** | `config_cmd.go:563-566` |
+| H2 (AWS profile shell injection) | **Still open** | `config_cmd.go:573-575` |
+| H3 (template path traversal) | **Still open** | `config_cmd.go:392-416` — host-side file read |
+| M1-M7 | **Still open** | Unchanged |
+| **New: M8** | Dry-run leaks credentials | `spawn.go:414` prints full `cmd.Render()` including env vars |
 
 ---
 
@@ -36,18 +31,13 @@ The Go rewrite correctly enforces the vast majority of the CLAUDE.md security mo
 
 ### C1. Shell Injection via `--on-exit` / `--on-complete` / `--on-fail` Callbacks
 
-**Files:** `cmd/safe-ag/spawn.go:372-382`
+**File:** `cmd/safe-ag/spawn.go:372-382`
 
-Callback values are base64-encoded and stored as Docker labels / env vars without any content validation. The security impact depends on _where_ these callbacks execute:
+Callback values are base64-encoded and stored as Docker labels/env vars without content validation. Callbacks execute **container-side** (via `entrypoint.sh`/`agent-session.sh`), not on the host. A malicious fleet manifest author could craft callbacks that exfiltrate container data.
 
-- If **host-side** (Go CLI invokes them after `waitForContainers`): arbitrary host command execution.
-- If **container-side only** (entrypoint runs them): blast radius is contained to the sandbox.
+**Mitigating factors:** Container network isolation (especially `--network none`), read-only rootfs, cap-drop ALL. The attack requires authoring a fleet manifest.
 
-**Current code path:** The Go CLI does _not_ execute callbacks itself — they are passed to the container via env vars (`SAFE_AGENTIC_ON_EXIT_B64`, etc.) and consumed by `entrypoint.sh` / `agent-session.sh`. This makes the attack container-side only.
-
-**Remaining risk:** A malicious fleet manifest author can craft callbacks that exfiltrate data from inside the container (e.g., base64 AWS creds → curl). Mitigated by network isolation if `--network none` is used.
-
-**Recommendation:** Add a comment in `spawn.go` documenting that callbacks execute container-side. Consider logging the callback hash to the audit log for forensics.
+**Recommendation:** Document container-side execution in code comments. Log callback hash to audit log. Consider a callback allowlist for fleet manifests.
 
 ### C2. DinD Sidecar Runs `--privileged`
 
@@ -59,9 +49,9 @@ args := []string{"docker", "run", "-d",
     "--privileged",  // full host capabilities in VM
 ```
 
-The DinD sidecar gets `--privileged` while the agent container gets `--cap-drop=ALL`. But the agent container communicates with the DinD daemon via a shared Docker socket volume. An agent can issue `docker run --privileged -v /:/host ...` to the sidecar's daemon, escaping all hardening.
+The agent container communicates with the DinD daemon via a shared Docker socket volume. An agent can issue `docker run --privileged -v /:/host ...` to the sidecar's daemon, escaping all hardening.
 
-**Impact:** Any agent spawned with `--docker` can achieve root-equivalent access in the VM. This is a _designed_ trade-off (the CLAUDE.md documents `--docker` as an opt-in), but the escalation path should be explicit.
+**Impact:** Any agent spawned with `--docker` can achieve root-equivalent access in the VM.
 
 **Recommendation:**
 - Document in CLAUDE.md security table: `--docker` grants VM-root-equivalent
@@ -72,17 +62,17 @@ The DinD sidecar gets `--privileged` while the agent container gets `--cap-drop=
 
 **File:** `pkg/docker/dind.go:34-45`
 
-`AppendHostDockerSocket` grants the container full Docker daemon access via `/var/run/docker.sock`. This bypasses _every_ hardening measure (read-only rootfs, cap-drop, seccomp, userns-remap).
+`AppendHostDockerSocket` grants full Docker daemon access via `/var/run/docker.sock`. This bypasses every hardening measure (read-only rootfs, cap-drop, seccomp, userns-remap).
 
-**Impact:** VM compromise. The `--docker-socket` flag is the most dangerous option in the entire CLI.
+**Impact:** VM compromise. `--docker-socket` is the most dangerous option in the CLI.
 
-**Recommendation:** Print a warning to stderr when `--docker-socket` is used. Consider requiring `--docker-socket --i-understand-the-risks` double-opt-in.
+**Recommendation:** Print a warning to stderr. Consider requiring `--docker-socket --i-understand-the-risks` double-opt-in.
 
 ---
 
 ## 2. HIGH Findings
 
-### H1. AWS Credentials Heredoc Injection (was C4)
+### H1. AWS Credentials Heredoc Injection
 
 **File:** `cmd/safe-ag/config_cmd.go:563-566`
 
@@ -90,29 +80,28 @@ The DinD sidecar gets `--privileged` while the agent container gets `--cap-drop=
 "mkdir -p ~/.aws && cat > ~/.aws/credentials <<'__CREDS__'\n"+credsContent+"\n__CREDS__"
 ```
 
-If `~/.aws/credentials` contains the literal line `__CREDS__`, the heredoc terminates early and subsequent lines become shell commands. Downgraded from CRITICAL to HIGH because:
-- The attacker must control the host's `~/.aws/credentials` content
-- The injection runs inside the container, not on the host
+If `~/.aws/credentials` contains the literal line `__CREDS__`, the heredoc terminates early and subsequent lines become shell commands inside the container. Downgraded from CRITICAL because:
+- Attacker must control host's `~/.aws/credentials` content
+- Injection runs inside the container, not on the host
 
 **Recommendation:** Replace with base64 pipe: `echo '<b64>' | base64 -d > ~/.aws/credentials`
 
 ### H2. AWS Profile Name Shell Injection in `aws-refresh`
 
-**File:** `cmd/safe-ag/config_cmd.go:573-574`
+**File:** `cmd/safe-ag/config_cmd.go:573-575`
 
 ```go
 orbRunner.Run(ctx, "docker", "exec", name,
     "bash", "-c", "echo 'export AWS_PROFILE="+p+"' >> ~/.bashrc")
 ```
 
-The profile name `p` is interpolated into a single-quoted shell string. If a profile name contains `'`, the quoting breaks:
-- Profile `foo'; rm -rf /; echo '` would execute arbitrary commands.
+**Verified:** The profile name `p` comes from `envs["AWS_PROFILE"]` which originates from either CLI argument (`args[1]`) or container label (`docker.InspectLabel`). Neither path validates the profile name against shell metacharacters.
 
-AWS profile names are _typically_ `[A-Za-z0-9_-]`, but the code does not enforce this.
+A profile name like `foo'; rm -rf /; echo '` breaks the single quoting and executes arbitrary commands.
 
-**Recommendation:** Validate `p` against `^[A-Za-z0-9_.-]+$`, or use `%q` and adjust the shell quoting.
+**Recommendation:** Validate `p` against `^[A-Za-z0-9_.-]+$` before interpolation, or use env var passing instead of shell string construction.
 
-### H3. Template Name Path Traversal
+### H3. Template Name Path Traversal (Host-Side)
 
 **File:** `cmd/safe-ag/config_cmd.go:392-416`
 
@@ -124,16 +113,16 @@ func findTemplate(name string) (string, error) {
     )
 ```
 
-The `name` argument comes directly from `args[0]` (user CLI input). If `name` is `../../etc/passwd`, `filepath.Join` resolves the `..` components, and `os.Stat` + `os.ReadFile` happily reads any file on the host filesystem.
+**Verified:** `name` comes directly from `args[0]` with zero validation. `filepath.Join` resolves `..` components, so `../../etc/passwd` reads `/etc/passwd` on the **host macOS machine** (not inside a container).
 
 ```
-$ safe-ag template show ../../etc/passwd
-# reads /etc/passwd
+$ safe-ag template show ../../etc/passwd  → reads /etc/passwd
+$ safe-ag template create ../../tmp/pwned → writes to /tmp/pwned.md
 ```
 
-**Impact:** Arbitrary file read on the host (the CLI runs on macOS, not inside the container).
+**Impact:** Arbitrary file read on host via `template show`; arbitrary file write on host via `template create`.
 
-**Recommendation:** Validate template names against `validate.NameComponent` or reject names containing `/` or `..`.
+**Recommendation:** Validate template names with `validate.NameComponent` (rejects `/`, `..`, special chars). Additionally, after `filepath.Join`, verify the result is still under the expected template directory with `strings.HasPrefix(resolved, expectedDir)`.
 
 ---
 
@@ -143,9 +132,12 @@ $ safe-ag template show ../../etc/passwd
 
 **File:** `cmd/safe-ag/spawn.go:180-182`
 
-Values are passed directly to Docker. Docker will reject malformed values, but malicious values like `--memory 0` (disables limit) or `--cpus 9999` could be used to abuse VM resources.
+Values are passed directly to Docker's `--memory` and `--cpus` flags. Docker rejects malformed values, but:
+- `--memory 0` disables the memory limit entirely
+- `--cpus 9999` could starve the VM
+- No lower bounds enforced
 
-**Recommendation:** Validate `memory` matches `^\d+[gmkGMK]?$` and `cpus` matches `^\d+(\.\d+)?$`.
+**Recommendation:** Validate `memory` matches `^\d+[gmkGMK]?$` with minimum 512m; validate `cpus` matches `^\d+(\.\d+)?$` with maximum equal to host CPUs.
 
 ### M2. Prompt Leaked in Docker Label (First 100 Chars)
 
@@ -155,26 +147,17 @@ Values are passed directly to Docker. Docker will reject malformed values, but m
 cmd.AddLabel(labels.Prompt, truncate(opts.Prompt, 100))
 ```
 
-The prompt label is visible via `docker inspect` to any VM user. Prompts may contain API keys, internal URLs, or proprietary instructions.
+Visible via `docker inspect` to any VM user. Prompts may contain API keys, internal URLs, or proprietary instructions.
 
-**Recommendation:** Base64-encode the label value (like `on-complete-b64`) or remove it.
+**Recommendation:** Base64-encode the label value or remove it.
 
 ### M3. Checkpoint Create Label Not Validated
 
 **File:** `cmd/safe-ag/workflow.go:104-105, 116-117`
 
-```go
-label := "snapshot"
-if len(args) >= 2 {
-    label = args[1]  // user input, no validation
-}
-stashMsg := fmt.Sprintf("checkpoint: %s", label)
-stashCmd := fmt.Sprintf("git stash push -m %q", stashMsg)
-```
+The `label` argument from `args[1]` is passed to `fmt.Sprintf("git stash push -m %q", stashMsg)` without validation. Go's `%q` provides Go-style quoting (backslash escapes), not shell quoting. Edge cases with backticks or `$()` could behave unexpectedly inside `bash -c`.
 
-While revert validates via `validStashRef`, the create `label` is not validated. Go's `%q` provides _Go-style_ quoting (backslash escapes), which is not identical to shell quoting. For most inputs this is safe, but edge cases with backticks, `$()`, or nested quotes could behave unexpectedly inside `bash -c`.
-
-**Recommendation:** Validate `label` against `^[A-Za-z0-9_.-]+$` (same pattern as `validate.NameComponent`).
+**Recommendation:** Validate `label` against `^[A-Za-z0-9_. -]+$`.
 
 ### M4. `runQuickStart` URL Detection Too Broad
 
@@ -184,7 +167,7 @@ While revert validates via `validStashRef`, the create `label` is not validated.
 if strings.HasPrefix(arg, "http") || ...
 ```
 
-The prefix `"http"` matches `httpfoo`, `httpd-config`, etc. These would be incorrectly treated as repo URLs.
+The prefix `"http"` matches `httpfoo`, `httpd-config`, etc.
 
 **Recommendation:** Use `strings.HasPrefix(arg, "https://") || strings.HasPrefix(arg, "http://")`.
 
@@ -192,7 +175,7 @@ The prefix `"http"` matches `httpfoo`, `httpd-config`, etc. These would be incor
 
 **Files:** `pkg/audit/audit.go:46`, `pkg/events/events.go:30`
 
-Both files are created with `0644`. On shared systems, other users can read the audit trail (spawn times, repo URLs, container names).
+Both files created with `0644`. On shared systems, other users can read the audit trail.
 
 **Recommendation:** Use `0600`.
 
@@ -200,9 +183,9 @@ Both files are created with `0644`. On shared systems, other users can read the 
 
 **File:** `cmd/safe-ag/lifecycle.go:490-501`
 
-All container env vars (including base64-encoded AWS creds, Claude config) are loaded into memory to find a single key. If this output is ever logged (e.g., debug mode, error wrapping), secrets leak.
+All container env vars (including base64-encoded AWS creds) are loaded into memory. If this output is ever logged, secrets leak.
 
-**Recommendation:** Use a targeted Docker inspect template: `{{range .Config.Env}}{{println .}}{{end}}` is already minimal; alternatively filter server-side with a Go template condition.
+**Recommendation:** Document risk. Consider filtering to requested key server-side.
 
 ### M7. Cron Job Command Splitting Mishandles Quoted Arguments
 
@@ -213,110 +196,166 @@ parts := strings.Fields(job.Command)
 c := exec.Command(safeAgBin, parts...)
 ```
 
-`strings.Fields` splits on whitespace without respecting quotes. A cron command like:
-```
-spawn claude --prompt "Fix the CI tests" --repo git@...
-```
-becomes `["spawn", "claude", "--prompt", "\"Fix", "the", "CI", "tests\"", "--repo", ...]`.
+`strings.Fields` splits on whitespace without respecting quotes. A command like `spawn claude --prompt "Fix the CI tests"` becomes `["spawn", "claude", "--prompt", "\"Fix", "the", "CI", "tests\"", ...]`.
 
-**Impact:** Cron jobs with quoted arguments silently malfunction.
+**Recommendation:** Use `github.com/kballard/go-shellquote` or `github.com/google/shlex`.
 
-**Recommendation:** Use a proper shell-style tokenizer (e.g., `github.com/kballard/go-shellquote`) or document that cron commands must not contain spaces in argument values.
+### M8. Dry-Run Leaks Credentials to Stdout (NEW)
+
+**File:** `cmd/safe-ag/spawn.go:412-414`
+
+```go
+if opts.DryRun {
+    fmt.Println("Would execute:")
+    fmt.Printf("  orb run -m safe-agentic %s\n", cmd.Render())
+```
+
+`cmd.Render()` includes all `--env` flags, which contain `SAFE_AGENTIC_AWS_CREDS_B64` (base64-encoded AWS credentials) and other secrets. These are printed to stdout, visible in terminal history, CI logs, and screen recordings.
+
+**Recommendation:** Redact env var values in dry-run output. Show `--env SAFE_AGENTIC_AWS_CREDS_B64=<redacted>` instead of the actual value.
 
 ---
 
 ## 4. CLAUDE.md Security Model vs. Go Code Enforcement
 
-| CLAUDE.md Claim | Go Enforcement | Status |
+| CLAUDE.md Claim | Go Code | Status |
 |---|---|---|
-| SSH agent OFF by default | `spawnOpts.SSH` defaults `false` | **Enforced** |
-| SSH requires `--ssh` flag | `EnsureSSHForRepos()` checks SSH URLs | **Enforced** |
-| Per-session auth (ephemeral) | `AuthVolumeName(_, true, _)` | **Enforced** |
+| SSH agent OFF by default | `spawnOpts.SSH` defaults `false` (spawn.go:79) | **Enforced** |
+| SSH requires `--ssh` flag | `EnsureSSHForRepos()` validates (ssh.go:80-90) | **Enforced** |
+| Per-session auth (ephemeral volume) | Default uses shared volume (`ReuseAuth: "true"` in defaults.go:41) | **Mismatch** (see note 1) |
 | `--reuse-auth` for shared auth | `AuthVolumeName(_, false, _)` | **Enforced** |
-| AWS credentials OFF by default | Only when `AWSProfile != ""` | **Enforced** |
-| AWS on tmpfs | `AddTmpfs("/home/agent/.aws", ...)` | **Enforced** |
-| Read-only rootfs | `--read-only` in `AppendRuntimeHardening` | **Enforced** |
-| cap-drop ALL | `--cap-drop=ALL` | **Enforced** |
-| no-new-privileges | `--security-opt=no-new-privileges:true` | **Enforced** |
-| Seccomp profile | `--security-opt=seccomp=<path>` | **Enforced** |
-| Dedicated bridge network | `CreateManagedNetwork` per container | **Enforced** |
-| Block host/bridge/container: networks | `validate.NetworkName` | **Enforced** |
-| Memory 8g, CPU 4, PIDs 512 | `config.Defaults()` | **Enforced** |
-| No sudo, no supplemental groups | Dockerfile-enforced | **Deferred** |
-| Docker userns-remap | `vm/setup.sh`-enforced | **Deferred** |
-| Git identity from host env | `DetectGitIdentity()` + env injection | **Enforced** |
-| Block `--privileged` flag | No explicit blocklist on `DockerRunCmd` | **GAP** |
-| Block `--` passthrough | Cobra arg parsing prevents | **Enforced** |
-| Container name validation | `validate.NameComponent` | **Enforced** |
-| Repo URL traversal rejection | `repourl.ClonePath` | **Enforced** |
-| Build context from tracked files | `orb run docker build` (not Go) | **Deferred** |
+| AWS credentials OFF by default | Only injected when `AWSProfile != ""` (spawn.go:330) | **Enforced** |
+| AWS credentials on tmpfs | `AddTmpfs("/home/agent/.aws", "1m", true, false)` (spawn.go:340) | **Enforced** |
+| Read-only rootfs | `--read-only` in `AppendRuntimeHardening` (runtime.go:136) | **Enforced** |
+| cap-drop ALL | `--cap-drop=ALL` (runtime.go:133) | **Enforced** |
+| no-new-privileges | `--security-opt=no-new-privileges:true` (runtime.go:134) | **Enforced** |
+| Seccomp profile | `--security-opt=seccomp=<path>` (runtime.go:135) | **Enforced** |
+| Dedicated bridge network per container | `CreateManagedNetwork` in network.go:35-41 | **Enforced** |
+| Block host/bridge/container: networks | `validate.NetworkName` (validate.go:26-29) | **Enforced** |
+| Memory 8g default | `config.Defaults().Memory = "8g"` (defaults.go:39) | **Enforced** |
+| CPU 4 default | `config.Defaults().CPUs = "4"` (defaults.go:38) | **Enforced** |
+| PIDs 512 default | `config.Defaults().PIDsLimit = "512"` (defaults.go:40) | **Enforced** |
+| No sudo, no supplemental groups | Dockerfile-enforced (not in Go code) | **Deferred** |
+| Docker userns-remap | `vm/setup.sh`-enforced (not in Go code) | **Deferred** |
+| Git identity from host env | `DetectGitIdentity()` + env injection (identity.go) | **Enforced** |
+| Unsafe Docker flags blocked | No runtime blocklist on `DockerRunCmd` | **GAP** (see note 2) |
+| Container name validation | `validate.NameComponent` (validate.go:9-19) | **Enforced** |
+| Repo URL traversal rejection | `repourl.ClonePath` (parse.go:11-52) | **Enforced** |
 
-### Key Gap: No `DockerRunCmd.Validate()` Blocklist
+### Note 1: Auth Persistence Default Mismatch
 
-The `DockerRunCmd` builder correctly adds hardening flags by construction — no code path adds `--privileged` to agent containers. However, there is no defense-in-depth mechanism that _prevents_ a future code change from accidentally adding forbidden flags.
+CLAUDE.md states: "Per-session OAuth + ephemeral cache volumes" as the default. However, `pkg/config/defaults.go:41-42` sets:
 
-**Recommendation:** Add a `Validate() error` method to `DockerRunCmd` that scans `d.flags` for:
-- `--privileged`
-- `--cap-add` (any)
-- `--security-opt=apparmor:unconfined`
-- `--network=host`
-- `--pid=host`
-- `--userns=host`
+```go
+ReuseAuth:   "true",
+ReuseGHAuth: "true",
+```
 
-Call `Validate()` in `Build()` before returning the args.
+This means auth volumes **persist across sessions by default**. The CLAUDE.md security table shows "Per-session auth (ephemeral volume)" as the default and `--reuse-auth` as the override — but the Go code inverts this.
+
+**Recommendation:** Either change defaults to `"false"` (matching docs) or update CLAUDE.md to reflect the actual default.
+
+### Note 2: No `DockerRunCmd.Validate()` Blocklist
+
+The `DockerRunCmd` builder adds hardening flags by construction — no code path adds `--privileged` to agent containers. However, there is no defense-in-depth mechanism preventing a future code change from accidentally adding forbidden flags.
+
+**Recommendation:** Add a `Validate() error` method to `DockerRunCmd` that scans `d.flags` for: `--privileged`, `--cap-add`, `--security-opt=apparmor:unconfined`, `--network=host`, `--pid=host`, `--userns=host`. Call it in `Build()`.
 
 ---
 
-## 5. Positive Security Observations
+## 5. Additional Observations
 
-1. **Type-safe command builder** — `DockerRunCmd` passes args as `[]string` to `exec.Command`, not shell strings. This eliminates the #1 injection class from bash.
+### 5a. Todo JSON Shell Escaping (Low Risk)
+
+**File:** `cmd/safe-ag/workflow.go:255-260`
+
+```go
+jsonStr := strings.ReplaceAll(string(data), "'", "'\\''")
+writeCmd := fmt.Sprintf(
+    "mkdir -p /workspace/.safe-agentic && printf '%%s' '%s' > /workspace/.safe-agentic/todos.json",
+    jsonStr,
+)
+```
+
+The single-quote escaping (`'` → `'\''`) is the standard POSIX technique and is correct for single-quoted shell contexts. The `printf '%s'` prevents interpretation of escape sequences. **This is safe** for well-formed JSON, but if an attacker can control todo text to inject `'\''`, the quoting remains intact because Go's `strings.ReplaceAll` handles all occurrences.
+
+**Risk:** Low. The attacker would need to control todo text AND the JSON marshaling would need to produce shell-dangerous output, which `json.MarshalIndent` does not (it escapes special characters).
+
+### 5b. `--instructions-file` Reads Arbitrary Host Files (Low Risk)
+
+**File:** `cmd/safe-ag/spawn.go:360-367`
+
+```go
+if opts.InstructionsFile != "" {
+    data, err := os.ReadFile(opts.InstructionsFile)
+```
+
+The file path is not validated. However, this is a CLI flag provided by the user themselves, and the content is base64-encoded and injected into the container. The user already has full host access. **This is expected behavior** for a CLI tool — users can read their own files.
+
+### 5c. Fleet Manifest Field Validation Deferred
+
+**File:** `pkg/fleet/manifest.go`
+
+Fleet manifests are parsed via YAML unmarshaling without field-level validation. Invalid values (bad names, negative memory, etc.) are caught later during `executeSpawn`. This is acceptable but means error messages point to spawn failures rather than manifest parse errors.
+
+**Recommendation:** Add a `Validate()` method to `FleetManifest` for early feedback.
+
+---
+
+## 6. Positive Security Observations
+
+1. **Type-safe command builder** — `DockerRunCmd` passes args as `[]string` to `exec.Command`, not shell strings. This eliminates the primary injection class from bash.
 
 2. **Executor abstraction** — `orb.Executor` channels all VM commands through `exec.CommandContext`. No shell concatenation for Docker commands.
 
-3. **Comprehensive input validation** — Container names, network names, PIDs, repo URLs, stash refs, branch names, config keys all validated. The regex patterns are tight (`^[A-Za-z0-9][A-Za-z0-9_.\-]*$`).
+3. **Comprehensive input validation** — Container names, network names, PIDs, repo URLs, stash refs, branch names, config keys all validated with tight regexes (`^[A-Za-z0-9][A-Za-z0-9_.\-]*$`).
 
-4. **Tar extraction zip-slip protection** — `extractTar` (`observe.go:829-856`) uses `filepath.Clean` + `strings.HasPrefix` to prevent path traversal. Correctly handles both files and directories.
+4. **Tar extraction zip-slip protection** — `extractTar` (`observe.go:829-856`) uses `filepath.Clean` + `strings.HasPrefix` to prevent path traversal.
 
-5. **Config key allowlist** — `config.KeyAllowed` prevents arbitrary env var injection from the defaults file.
+5. **Config key allowlist** — `config.KeyAllowed` prevents arbitrary env var injection.
 
-6. **Branch name validation** — `validBranchName` (`workflow.go:445`) now validates both `prBase` and `reviewBase` before shell interpolation. This was missing in the prior review and has been fixed.
+6. **Branch name + stash ref validation** — `validBranchName` and `validStashRef` added since the first review, closing prior H3/H4/H5.
 
-7. **Stash ref validation** — `validStashRef` (`workflow.go:189`) prevents injection via the revert ref argument.
+7. **SSH relay uses constants** — Socket paths are package-level constants, not user input.
 
-8. **SSH relay uses constants** — `sshRelaySocket` and `sshSocketPath` are package-level constants, not user input. The relay setup comment correctly documents this.
+8. **Auth volume isolation for fleet** — Fleet agents get per-container auth volumes seeded from shared, preventing cross-agent credential interference.
 
-9. **Auth volume isolation for fleet** — Fleet agents get per-container auth volumes seeded from shared (spawn.go:266-279), preventing cross-agent credential interference.
+9. **FakeExecutor enables security testing** — Tests verify no forbidden flags are present in Docker commands.
 
-10. **FakeExecutor enables security testing** — The `orb.FakeExecutor` captures all commands for assertion, enabling tests to verify no forbidden flags are passed.
-
----
-
-## 6. Recommendations Summary (Prioritized)
-
-| # | Severity | Finding | Recommended Fix |
-|---|----------|---------|-----------------|
-| 1 | **CRITICAL** | C2: DinD `--privileged` | Document as VM-root-equivalent; apply seccomp/memory to sidecar |
-| 2 | **CRITICAL** | C3: Host Docker socket | Add stderr warning; consider double-opt-in |
-| 3 | **CRITICAL** | C1: Callback commands | Document container-side execution; log callback hash |
-| 4 | **HIGH** | H1: AWS heredoc injection | Replace with base64 pipe |
-| 5 | **HIGH** | H2: AWS profile shell injection | Validate profile name against `[A-Za-z0-9_.-]+` |
-| 6 | **HIGH** | H3: Template path traversal | Reject names containing `/` or `..` |
-| 7 | **MEDIUM** | M3: Checkpoint label unvalidated | Apply `validate.NameComponent` |
-| 8 | **MEDIUM** | M4: `http` prefix too broad | Use `https://` / `http://` |
-| 9 | **MEDIUM** | M5: World-readable logs | Use `0600` permissions |
-| 10 | **MEDIUM** | M7: Cron command splitting | Use shell-aware tokenizer |
-| 11 | **MEDIUM** | M1: No memory/cpus validation | Add format regex |
-| 12 | **MEDIUM** | M2: Prompt in label | Base64-encode or omit |
-| 13 | **MEDIUM** | M6: Full env dump | Document risk; no code change needed |
-| — | **GAP** | No `DockerRunCmd.Validate()` | Add flag blocklist method |
+10. **AWS credentials on tmpfs** — `/home/agent/.aws` is a 1MB tmpfs mount with `noexec`, preventing credential persistence on disk.
 
 ---
 
-## 7. Methodology
+## 7. Recommendations Summary (Prioritized)
+
+| # | Severity | ID | Finding | Fix |
+|---|----------|----|---------|-----|
+| 1 | **CRITICAL** | C2 | DinD `--privileged` | Document as VM-root-equivalent; seccomp/memory on sidecar |
+| 2 | **CRITICAL** | C3 | Host Docker socket | Stderr warning; double-opt-in |
+| 3 | **CRITICAL** | C1 | Callback commands | Document container-side; log callback hash |
+| 4 | **HIGH** | H1 | AWS heredoc injection | Replace with `base64 -d` pipe |
+| 5 | **HIGH** | H2 | AWS profile shell injection | Validate against `[A-Za-z0-9_.-]+` |
+| 6 | **HIGH** | H3 | Template path traversal | `validate.NameComponent` + `HasPrefix` check |
+| 7 | **MEDIUM** | M8 | Dry-run leaks credentials | Redact env values in `cmd.Render()` |
+| 8 | **MEDIUM** | M1 | No memory/cpus validation | Add format regex with bounds |
+| 9 | **MEDIUM** | M2 | Prompt in Docker label | Base64-encode or remove |
+| 10 | **MEDIUM** | M3 | Checkpoint label unvalidated | Apply `validate.NameComponent` |
+| 11 | **MEDIUM** | M4 | `http` prefix too broad | Use `https://` / `http://` |
+| 12 | **MEDIUM** | M5 | World-readable logs | Use `0600` permissions |
+| 13 | **MEDIUM** | M7 | Cron command splitting | Use shell-aware tokenizer |
+| 14 | **MEDIUM** | M6 | Full env dump in memory | Document risk |
+| — | **GAP** | — | Auth default mismatch | Align defaults.go with CLAUDE.md |
+| — | **GAP** | — | No `DockerRunCmd.Validate()` | Add flag blocklist method |
+
+---
+
+## 8. Methodology
 
 - Read all 67 Go source files (cmd + pkg + tui)
-- Searched for `exec.Command`, `fmt.Sprintf` with `bash -c`, `Sprintf` with user input
-- Traced all user-input paths from cobra flags → validation → Docker command construction
-- Compared each CLAUDE.md security claim against the corresponding Go code
-- Diffed findings against prior review (`fleet/review-security.md`) to identify fixes and regressions
+- Searched for `exec.Command`, `bash -c`, `fmt.Sprintf` with user input in all call sites
+- Traced all user-input paths from Cobra flags → validation → Docker command construction
+- Compared each CLAUDE.md security claim against corresponding Go code with line references
+- Verified each finding by reading actual source (not just grep output)
+- Diffed findings against second-pass review to track fixes and identify new issues
+- Reviewed test coverage for security-critical validation functions
 - Focused on: command injection, path traversal, unsafe Docker flags, secret exposure, input validation gaps
