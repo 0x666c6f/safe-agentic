@@ -303,16 +303,23 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 	if len(names) == 0 {
 		return nil
 	}
+	fmt.Printf("Waiting for %d agent(s) to complete...\n", len(names))
+	done := make(map[string]bool)
 	for {
 		allDone := true
 		for _, name := range names {
+			if done[name] {
+				continue
+			}
 			state, err := containerState(ctx, exec, name)
 			if err != nil {
-				// Container may not have started yet; treat as not done
 				allDone = false
 				continue
 			}
-			if state != "exited" && state != "dead" {
+			if state == "exited" || state == "dead" {
+				done[name] = true
+				fmt.Printf("  ✓ %s exited\n", name)
+			} else {
 				allDone = false
 			}
 		}
