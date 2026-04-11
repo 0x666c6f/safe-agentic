@@ -252,17 +252,24 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Execute pipeline stages in dependency order.
+	ctx := context.Background()
+	exec := newExecutor()
 	timestamp := time.Now().Format("20060102-150405")
+	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp)
+}
+
+// runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
+func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string) error {
+	name := m.Name
+	if name == "" {
+		name = "(inline)"
+	}
+
 	completed := make(map[string]bool)
 	remaining := make([]fleet.PipelineStage, len(m.Stages))
 	copy(remaining, m.Stages)
 
-	ctx := context.Background()
-	exec := newExecutor()
-
 	for len(remaining) > 0 {
-		// Find stages ready to run (all depends_on satisfied)
 		var ready []fleet.PipelineStage
 		var notReady []fleet.PipelineStage
 		for _, stage := range remaining {
@@ -273,7 +280,6 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if len(ready) == 0 {
-			// Circular dependency or missing dep — bail
 			var names []string
 			for _, s := range notReady {
 				names = append(names, s.Name)
@@ -281,10 +287,23 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("pipeline stuck: stages with unmet dependencies: %s", strings.Join(names, ", "))
 		}
 
-		// Spawn agents for all ready stages (in background)
 		var containerNames []string
 		for _, stage := range ready {
 			fmt.Printf("Running stage: %s\n", stage.Name)
+
+			// Sub-pipeline: recursively execute another pipeline file
+			if stage.Pipeline != "" {
+				fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
+				subManifest, err := fleet.ParsePipeline(stage.Pipeline)
+				if err != nil {
+					return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
+				}
+				if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp); err != nil {
+					return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
+				}
+				continue
+			}
+
 			for _, spec := range stage.Agents {
 				if spec.Type == "" {
 					continue
@@ -300,12 +319,12 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Poll until all containers in ready stages finish
-		if err := waitForContainers(ctx, exec, containerNames); err != nil {
-			return err
+		if len(containerNames) > 0 {
+			if err := waitForContainers(ctx, exec, containerNames); err != nil {
+				return err
+			}
 		}
 
-		// Mark stages complete
 		for _, stage := range ready {
 			completed[stage.Name] = true
 		}

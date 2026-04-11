@@ -47,10 +47,12 @@ type FleetManifest struct {
 // PipelineStage is one stage in a pipeline manifest.
 // A stage holds one or more agents that run in parallel; stages run
 // sequentially according to depends_on ordering.
+// A stage can also reference a sub-pipeline file instead of inline agents.
 type PipelineStage struct {
 	Name      string      `yaml:"name"`
 	DependsOn []string    `yaml:"depends_on"`
 	Agents    []AgentSpec `yaml:"agents"`
+	Pipeline  string      `yaml:"pipeline"` // path to sub-pipeline YAML (mutually exclusive with agents)
 }
 
 // PipelineManifest is the top-level structure for `agent pipeline <manifest.yaml>`.
