@@ -1,0 +1,43 @@
+stages:
+  - name: review
+    agents:
+      - name: codex-review-code
+        type: codex
+        repo: git@github.com:0x666c6f/safe-agentic.git
+        ssh: true
+        reuse_auth: true
+        memory: 8g
+        cpus: "4"
+        prompt: |
+          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
+          Review ALL Go code in cmd/safe-ag/ and pkg/ for: dead code, unused imports, redundant logic, error handling gaps, race conditions, non-idiomatic Go, naming inconsistencies, performance issues.
+          Write findings to fleet/codex-review-code.md with sections: Critical, Important, Minor. Include file:line references.
+          git add fleet/ && git commit -m "review(codex): code quality findings" && git push
+
+      - name: codex-review-tests
+        type: codex
+        repo: git@github.com:0x666c6f/safe-agentic.git
+        ssh: true
+        reuse_auth: true
+        memory: 8g
+        cpus: "4"
+        prompt: |
+          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
+          Review ALL test files (*_test.go) for: missing edge cases, weak assertions, tests that don't verify behavior, missing negative tests, flaky patterns.
+          Run: go test ./... -cover and identify packages below 90%.
+          Write findings to fleet/codex-review-tests.md.
+          git add fleet/ && git commit -m "review(codex): test quality findings" && git push
+
+      - name: codex-review-security
+        type: codex
+        repo: git@github.com:0x666c6f/safe-agentic.git
+        ssh: true
+        reuse_auth: true
+        memory: 8g
+        cpus: "4"
+        prompt: |
+          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
+          Security review ALL Go code: command injection via exec.Command, path traversal, unsafe Docker flags, secrets in env/labels, missing input validation.
+          Compare CLAUDE.md security model against Go code enforcement.
+          Write findings to fleet/codex-review-security.md.
+          git add fleet/ && git commit -m "review(codex): security findings" && git push

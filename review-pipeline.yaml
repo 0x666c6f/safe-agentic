@@ -1,82 +1,12 @@
 stages:
-  - name: review
-    agents:
-      - name: review-code
-        type: claude
-        repo: git@github.com:0x666c6f/safe-agentic.git
-        ssh: true
-        reuse_auth: true
-        auto_trust: true
-        memory: 8g
-        cpus: "4"
-        prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Review ALL Go code in cmd/safe-ag/ and pkg/ for: dead code, unused imports, redundant logic, error handling gaps, race conditions, non-idiomatic Go, naming inconsistencies, performance issues.
-          Write findings to fleet/review-code.md with sections: Critical, Important, Minor. Include file:line references.
-          git add fleet/ && git commit -m "review: code quality findings" && git push
+  - name: claude-review
+    pipeline: review-pipeline-claude.yaml
 
-      - name: review-tests
-        type: claude
-        repo: git@github.com:0x666c6f/safe-agentic.git
-        ssh: true
-        reuse_auth: true
-        auto_trust: true
-        memory: 8g
-        cpus: "4"
-        prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Review ALL test files (*_test.go) for: missing edge cases, weak assertions, tests that don't verify behavior, missing negative tests, flaky patterns.
-          Run: go test ./... -cover and identify packages below 90%.
-          Write findings to fleet/review-tests.md.
-          git add fleet/ && git commit -m "review: test quality findings" && git push
-
-      - name: review-design
-        type: claude
-        repo: git@github.com:0x666c6f/safe-agentic.git
-        ssh: true
-        reuse_auth: true
-        auto_trust: true
-        memory: 8g
-        cpus: "4"
-        prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Review design spec docs/superpowers/specs/2026-04-10-go-rewrite-design.md against actual implementation.
-          Check: spec deviations, package structure, interface design, Executor pattern consistency.
-          Write findings to fleet/review-design.md.
-          git add fleet/ && git commit -m "review: design findings" && git push
-
-      - name: review-security
-        type: claude
-        repo: git@github.com:0x666c6f/safe-agentic.git
-        ssh: true
-        reuse_auth: true
-        auto_trust: true
-        memory: 8g
-        cpus: "4"
-        prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Security review ALL Go code: command injection via exec.Command, path traversal, unsafe Docker flags, secrets in env/labels, missing input validation.
-          Compare CLAUDE.md security model against Go code enforcement.
-          Write findings to fleet/review-security.md.
-          git add fleet/ && git commit -m "review: security findings" && git push
-
-      - name: review-docs
-        type: claude
-        repo: git@github.com:0x666c6f/safe-agentic.git
-        ssh: true
-        reuse_auth: true
-        auto_trust: true
-        memory: 8g
-        cpus: "4"
-        prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Check CLAUDE.md, docs/quickstart.md, docs/usage.md, docs/security.md for stale bash references.
-          Check Go doc comments on exported functions in pkg/.
-          Write findings to fleet/review-docs.md.
-          git add fleet/ && git commit -m "review: docs findings" && git push
+  - name: codex-review
+    pipeline: review-pipeline-codex.yaml
 
   - name: reconcile
-    depends_on: [review]
+    depends_on: [claude-review, codex-review]
     agents:
       - name: reconciler
         type: claude
@@ -88,8 +18,19 @@ stages:
         cpus: "8"
         prompt: |
           git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-          Read all review reports in fleet/: review-code.md, review-tests.md, review-design.md, review-security.md, review-docs.md
-          Create fleet/REVIEW-SUMMARY.md ranking all findings by severity.
+
+          Read ALL review reports in fleet/:
+            Claude reviews: claude-review-code.md, claude-review-tests.md, claude-review-security.md
+            Codex reviews: codex-review-code.md, codex-review-tests.md, codex-review-security.md
+
+          Create fleet/REVIEW-SUMMARY.md that:
+          1. Cross-references findings from both Claude and Codex
+          2. Highlights findings that BOTH reviewers flagged (high confidence)
+          3. Notes findings only one reviewer caught (needs verification)
+          4. Ranks all findings by severity: Critical > High > Medium > Low
+
           Fix all Critical and Important issues directly in the code. Run go test ./... after each fix.
-          After all fixes are done, delete the individual review files (fleet/review-*.md) — keep only REVIEW-SUMMARY.md.
-          git rm fleet/review-*.md && git add -A && git commit -m "fix: address review findings, clean up individual reports" && git push
+
+          After all fixes, delete individual review files:
+          git rm fleet/claude-review-*.md fleet/codex-review-*.md
+          git add -A && git commit -m "fix: address review findings from dual Claude+Codex review" && git push
