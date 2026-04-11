@@ -139,7 +139,16 @@ launch_claude() {
   fi
 
   if $has_prompt; then
-    # Extract the prompt text from args (-p "prompt text")
+    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+      # Fleet/pipeline mode: pass -p directly to Claude so it runs
+      # non-interactively and exits when done.
+      rendered=$(quote_cmd "${cmd[@]}")
+      script -qfc "$rendered" /dev/null || return $?
+      return 0
+    fi
+
+    # Interactive mode: extract prompt, save to file, send via tmux send-keys.
+    # This keeps Claude in full interactive mode with live output in the pane.
     local prompt_text=""
     local skip_next=false
     for arg in "$@"; do
@@ -152,9 +161,6 @@ launch_claude() {
       fi
     done
 
-    # Save prompt to a file; the entrypoint will send it via tmux send-keys
-    # after the interactive session starts. This keeps Claude in full
-    # interactive mode with live output visible in the tmux pane.
     echo "$prompt_text" > "$SESSION_STATE_DIR/pending-prompt"
     rendered=$(quote_cmd claude --dangerously-skip-permissions)
     script -qfc "$rendered" /dev/null || return $?

@@ -385,6 +385,8 @@ func executeSpawn(opts SpawnOpts) error {
 	if opts.FleetVolume != "" {
 		cmd.AddNamedVolume(opts.FleetVolume, "/fleet")
 		cmd.AddLabel(labels.Fleet, opts.FleetVolume)
+		// Tell agent-session.sh to pass -p directly to Claude (non-interactive exit)
+		cmd.AddEnv("SAFE_AGENTIC_FLEET", "1")
 	}
 
 	// Docker access
