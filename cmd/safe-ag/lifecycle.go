@@ -196,19 +196,17 @@ func stopAllContainers(ctx context.Context, exec orb.Executor) error {
 		fmt.Println("No agent containers found.")
 		return nil
 	}
-	// Bulk stop + rm
-	stopArgs := append([]string{"docker", "stop", "-t", "30"}, names...)
-	exec.Run(ctx, stopArgs...)
-	rmArgs := append([]string{"docker", "rm"}, names...)
-	exec.Run(ctx, rmArgs...)
 
-	// Per-container cleanup
-	for _, name := range names {
+	total := len(names)
+	for i, name := range names {
+		fmt.Printf("  [%d/%d] Stopping %s...\n", i+1, total, name)
+		exec.Run(ctx, "docker", "stop", "-t", "10", name)
+		exec.Run(ctx, "docker", "rm", name)
 		docker.RemoveDinDRuntime(ctx, exec, name)
-		netName := docker.ManagedNetworkName(name)
-		docker.RemoveManagedNetwork(ctx, exec, netName)
+		docker.RemoveManagedNetwork(ctx, exec, docker.ManagedNetworkName(name))
 	}
-	fmt.Printf("Stopped %d container(s).\n", len(names))
+
+	fmt.Printf("Done. Stopped %d container(s).\n", total)
 	return nil
 }
 
