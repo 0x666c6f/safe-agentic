@@ -342,11 +342,15 @@ func executeSpawn(opts SpawnOpts) error {
 	}
 
 	// Prompt / instructions / template
-	// Pass prompt as -p CMD arg so agent-session.sh handles it natively:
-	// - background mode: claude runs non-interactively and exits when done
-	// - foreground mode: saved to pending-prompt, sent via tmux send-keys
+	// Pass prompt as CMD arg to agent-session.sh:
+	// - Claude: -p "prompt" (runs non-interactively in fleet mode, tmux send-keys otherwise)
+	// - Codex: bare "prompt" (codex --yolo "$@" handles it)
 	if opts.Prompt != "" {
-		cmd.AddCmdArgs("-p", opts.Prompt)
+		if opts.AgentType == "codex" {
+			cmd.AddCmdArgs(opts.Prompt)
+		} else {
+			cmd.AddCmdArgs("-p", opts.Prompt)
+		}
 		cmd.AddLabel(labels.Prompt, truncate(opts.Prompt, 100))
 	}
 	if opts.Instructions != "" {
