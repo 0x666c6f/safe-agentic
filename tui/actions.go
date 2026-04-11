@@ -417,10 +417,10 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 	running := strings.TrimSpace(string(stateOut)) == "running"
 
 	// Python script: find the session file whose first timestamp is closest
-	// to (and after) the container creation time
+	// to the container creation time. Fall back to file mtime when needed.
 	matchScript := `
-import os, json, sys, glob
-container_created = sys.argv[1][:19]  # trim to seconds
+import os, json, sys, glob, datetime
+container_created = sys.argv[1][:19]
 search_dirs = [p for p in sys.argv[2:] if p]
 
 files = []
@@ -433,31 +433,44 @@ for find_dir in search_dirs:
             seen.add(f)
             files.append(f)
 
+def parse_ts(raw):
+    if not raw:
+        return None
+    raw = raw[:19]
+    try:
+        return datetime.datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+container_dt = parse_ts(container_created)
 best_file = None
-best_delta = float('inf')
+best_score = None
 
 for f in files:
     try:
+        session_dt = None
         with open(f) as fh:
             for line in fh:
-                d = json.loads(line.strip())
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
                 ts = d.get('timestamp', '')
                 if not ts and 'message' in d and isinstance(d['message'], dict):
                     ts = d['message'].get('timestamp', '')
                 if ts:
-                    session_start = ts[:19]
-                    # Simple string comparison works for ISO timestamps
-                    if session_start >= container_created:
-                        delta = ord(session_start[18]) - ord(container_created[18])
-                        if delta < best_delta:
-                            best_delta = delta
-                            best_file = f
+                    session_dt = parse_ts(ts)
                     break
+        if session_dt is None:
+            session_dt = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+        score = abs((session_dt - container_dt).total_seconds()) if container_dt else float('inf')
+        if best_score is None or score < best_score:
+            best_score = score
+            best_file = f
     except:
         pass
 
 if not best_file and files:
-    # Fallback: most recently modified
     best_file = max(files, key=os.path.getmtime)
 
 if best_file:
