@@ -84,3 +84,39 @@ type errString string
 func (e errString) Error() string { return string(e) }
 
 func assertErr(msg string) error { return errString(msg) }
+
+func TestLogsOverlayFallsBackToDockerLogs(t *testing.T) {
+	oldSession := fetchSessionLogsFunc
+	oldPlain := fetchPlainLogsFunc
+	defer func() {
+		fetchSessionLogsFunc = oldSession
+		fetchPlainLogsFunc = oldPlain
+	}()
+
+	fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
+		return nil
+	}
+	fetchPlainLogsFunc = func(name, tailLines string) []byte {
+		return []byte("docker-log-line")
+	}
+
+	app := NewApp()
+	app.table.Update([]Agent{
+		{Name: "agent-claude-done", Type: "claude", Running: false},
+	})
+	app.actions = NewActions(app)
+
+	app.actions.Logs()
+
+	name, prim := app.pages.GetFrontPage()
+	if name != "logs" {
+		t.Fatalf("front page = %q, want logs", name)
+	}
+	tv2, ok := prim.(interface{ GetText(bool) string })
+	if !ok {
+		t.Fatal("logs overlay not created")
+	}
+	if got := tv2.GetText(false); got != "docker-log-line" {
+		t.Fatalf("logs overlay text = %q, want docker fallback", got)
+	}
+}

@@ -267,6 +267,7 @@ func (ac *Actions) StopAgent() {
 type logsState struct {
 	autoRefresh bool
 	tailLines   string // "500", "2000", or "0" (all)
+	rawMode     bool
 }
 
 func (ac *Actions) Logs() {
@@ -277,13 +278,12 @@ func (ac *Actions) Logs() {
 	name := agent.Name
 	state := &logsState{autoRefresh: agent.Running, tailLines: "500"}
 
-	data := ac.fetchDockerLogs(name, state.tailLines)
-	if len(data) == 0 {
+	rendered := ac.loadLogsContent(name, state)
+	if rendered == "" {
 		ac.app.footer.ShowStatus("No session logs found", true)
 		return
 	}
 
-	rendered := renderSessionLog(data)
 	title := ac.logsTitle(name, state)
 	tv := ShowOverlayLive(ac.app, "logs", title, rendered)
 
@@ -330,9 +330,8 @@ func (ac *Actions) Logs() {
 				if !state.autoRefresh {
 					continue
 				}
-				newData := ac.fetchDockerLogs(name, state.tailLines)
-				if len(newData) > 0 {
-					newRendered := renderSessionLog(newData)
+				newRendered := ac.loadLogsContent(name, state)
+				if newRendered != "" {
 					ac.app.tapp.QueueUpdateDraw(func() {
 						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
 							// Preserve scroll position: only auto-scroll if already at bottom
@@ -361,7 +360,26 @@ func (ac *Actions) logsTitle(name string, state *logsState) string {
 	if lines == "0" {
 		lines = "all"
 	}
-	return fmt.Sprintf("Logs: %s | [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, refresh, lines)
+	mode := "session"
+	if state.rawMode {
+		mode = "docker"
+	}
+	return fmt.Sprintf("Logs: %s | mode:%s [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, mode, refresh, lines)
+}
+
+func (ac *Actions) loadLogsContent(name string, state *logsState) string {
+	data := fetchSessionLogsFunc(ac, name, state.tailLines)
+	rendered := renderSessionLog(data)
+	if len(data) > 0 && rendered != "(empty session log)" {
+		state.rawMode = false
+		return rendered
+	}
+	raw := fetchPlainLogsFunc(name, state.tailLines)
+	if len(raw) == 0 {
+		return ""
+	}
+	state.rawMode = true
+	return strings.TrimSpace(string(raw))
 }
 
 func sessionSearchDirs(configDir, repo string) []string {
@@ -506,6 +524,22 @@ if best_file:
 	data, _ := execOrbLong("tail", "-"+tailLines, path)
 	return data
 }
+
+func fetchPlainDockerLogs(name, tailLines string) []byte {
+	args := []string{"docker", "logs"}
+	if tailLines != "0" {
+		args = append(args, "--tail", tailLines)
+	}
+	args = append(args, name)
+	data, _ := execOrbLong(args...)
+	return data
+}
+
+var fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
+	return ac.fetchDockerLogs(name, tailLines)
+}
+
+var fetchPlainLogsFunc = fetchPlainDockerLogs
 
 func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsState) {
 	ac.app.footer.ShowStatus("Loading...", false)
