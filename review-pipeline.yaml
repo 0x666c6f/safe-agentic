@@ -1,4 +1,4 @@
-x-defaults: &defaults
+defaults:
   repo: git@github.com:0x666c6f/safe-agentic.git
   ssh: true
   reuse_auth: true
@@ -6,52 +6,45 @@ x-defaults: &defaults
   memory: 8g
   cpus: "4"
 
-x-branch: &branch "feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation"
-
-x-prompts:
-  code: &prompt-code |
-    git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-    Review ALL Go code in cmd/safe-ag/ and pkg/ for: dead code, unused imports, redundant logic, error handling gaps, race conditions, non-idiomatic Go, naming inconsistencies, performance issues.
-    Write findings to fleet/$AGENT_TYPE-review-code.md with sections: Critical, Important, Minor. Include file:line references.
-    git add fleet/ && git commit -m "review($AGENT_TYPE): code quality findings" && git push
-
-  tests: &prompt-tests |
-    git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-    Review ALL test files (*_test.go) for: missing edge cases, weak assertions, tests that don't verify behavior, missing negative tests, flaky patterns.
-    Run: go test ./... -cover and identify packages below 90%.
-    Write findings to fleet/$AGENT_TYPE-review-tests.md.
-    git add fleet/ && git commit -m "review($AGENT_TYPE): test quality findings" && git push
-
-  security: &prompt-security |
-    git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
-    Security review ALL Go code: command injection via exec.Command, path traversal, unsafe Docker flags, secrets in env/labels, missing input validation.
-    Compare CLAUDE.md security model against Go code enforcement.
-    Write findings to fleet/$AGENT_TYPE-review-security.md.
-    git add fleet/ && git commit -m "review($AGENT_TYPE): security findings" && git push
+vars:
+  branch: "feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation"
 
 stages:
-  - name: claude-review
+  - name: review
+    models: [claude, codex]
     agents:
-      - {<<: *defaults, type: claude, name: claude-review-code, prompt: *prompt-code}
-      - {<<: *defaults, type: claude, name: claude-review-tests, prompt: *prompt-tests}
-      - {<<: *defaults, type: claude, name: claude-review-security, prompt: *prompt-security}
+      - name: review-code
+        prompt: |
+          git checkout ${branch} && git pull
+          Review ALL Go code in cmd/safe-ag/ and pkg/ for: dead code, unused imports, redundant logic, error handling gaps, race conditions, non-idiomatic Go, naming inconsistencies, performance issues.
+          Write findings to fleet/${model}-review-code.md with sections: Critical, Important, Minor. Include file:line references.
+          git add fleet/ && git commit -m "review(${model}): code quality findings" && git push
 
-  - name: codex-review
-    agents:
-      - {<<: *defaults, type: codex, name: codex-review-code, prompt: *prompt-code}
-      - {<<: *defaults, type: codex, name: codex-review-tests, prompt: *prompt-tests}
-      - {<<: *defaults, type: codex, name: codex-review-security, prompt: *prompt-security}
+      - name: review-tests
+        prompt: |
+          git checkout ${branch} && git pull
+          Review ALL test files (*_test.go) for: missing edge cases, weak assertions, tests that don't verify behavior, missing negative tests, flaky patterns.
+          Run: go test ./... -cover and identify packages below 90%.
+          Write findings to fleet/${model}-review-tests.md.
+          git add fleet/ && git commit -m "review(${model}): test quality findings" && git push
+
+      - name: review-security
+        prompt: |
+          git checkout ${branch} && git pull
+          Security review ALL Go code: command injection via exec.Command, path traversal, unsafe Docker flags, secrets in env/labels, missing input validation.
+          Compare CLAUDE.md security model against Go code enforcement.
+          Write findings to fleet/${model}-review-security.md.
+          git add fleet/ && git commit -m "review(${model}): security findings" && git push
 
   - name: reconcile
-    depends_on: [claude-review, codex-review]
+    depends_on: [review]
     agents:
-      - <<: *defaults
+      - name: reconciler
         type: claude
-        name: reconciler
         memory: 16g
         cpus: "8"
         prompt: |
-          git checkout feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation && git pull
+          git checkout ${branch} && git pull
 
           Read ALL review reports in fleet/:
             Claude: claude-review-code.md, claude-review-tests.md, claude-review-security.md
