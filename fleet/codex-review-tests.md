@@ -1,62 +1,60 @@
-# Test Review Findings
+# Codex Test Review
 
-**Branch:** `feature/pla-1192-rewrite-safe-agentic-cli-from-bash-to-go-phase-1-foundation`
-**Date:** 2026-04-11
-**Files reviewed:** 25 `*_test.go` files
+Command run:
 
-## Coverage
+```bash
+PATH=/workspace/.cache/go-mod/golang.org/toolchain@v0.0.1-go1.25.5.linux-arm64/bin:/usr/local/go/bin:$PATH \
+GOPATH=/workspace/.cache/go \
+GOMODCACHE=/workspace/.cache/go-mod \
+GOCACHE=/workspace/.cache/go-build \
+GOTMPDIR=/workspace/.cache/go-tmp \
+/usr/local/go/bin/go test ./... -cover
+```
 
-`go test ./... -cover` passed.
-
-Packages below 90%:
+Packages below 90% coverage:
 
 | Package | Coverage |
 | --- | ---: |
-| `cmd/safe-ag` | 61.6% |
-| `pkg/fleet` | 58.2% |
-| `pkg/inject` | 41.5% |
-| `pkg/labels` | 0.0% |
-| `tui` | 6.2% |
+| `safe-agentic/cmd/safe-ag` | 60.9% |
+| `safe-agentic/pkg/fleet` | 58.2% |
+| `safe-agentic/pkg/inject` | 41.5% |
+| `safe-agentic/pkg/labels` | 0.0% |
+| `safe-agentic/tui` | 6.1% |
+
+`go tool cover -func` reports 46.0% statement coverage overall. The large `integration` suites in [`cmd/safe-ag/integration_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/integration_test.go) and [`cmd/safe-ag/deterministic_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/deterministic_test.go) are build-tagged and do not contribute to the default `go test ./... -cover` result.
 
 ## Findings
 
-### 1. Large command surfaces are effectively untested in `cmd/safe-ag`
+1. `pkg/labels` and most of `tui` are effectively untested.
+[`pkg/labels/labels.go`](/workspace/0x666c6f/safe-agentic/pkg/labels/labels.go) has no `*_test.go` at all, so every label constant plus `ContainerFilter()` can regress silently. [`tui/actions_test.go`](/workspace/0x666c6f/safe-agentic/tui/actions_test.go) only covers a few helpers, while `go tool cover` shows nearly all interactive behavior in [`tui/actions.go`](/workspace/0x666c6f/safe-agentic/tui/actions.go), [`tui/app.go`](/workspace/0x666c6f/safe-agentic/tui/app.go), [`tui/poller.go`](/workspace/0x666c6f/safe-agentic/tui/poller.go), and related UI files at 0.0%. Core flows like attach/resume branches, footer warnings, poller parsing, overlay actions, and preview updates are not pinned down.
 
-The package is below threshold mostly because entire features have no meaningful tests at all: `runPipeline`, `runPipelineManifest`, `waitForContainers`, and `printPipelineTree` in [cmd/safe-ag/fleet.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/fleet.go#L187); the full cron surface in [cmd/safe-ag/cron.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/cron.go#L104); log/session rendering in [cmd/safe-ag/observe.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/observe.go#L62); and VM/TUI lifecycle helpers in [cmd/safe-ag/setup.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/setup.go#L181). The only fleet execution tests in [cmd/safe-ag/command_test.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2949) cover a dry-run banner and an empty manifest, but do not verify the real spawn path, error propagation from volume creation or `executeSpawn`, pipeline dependency deadlocks, sub-pipeline failures, duplicate cron names, invalid schedules, or cron state persistence.
+2. `pkg/fleet` tests only cover happy-path parsing and miss the logic that is most likely to break.
+[`pkg/fleet/manifest_test.go`](/workspace/0x666c6f/safe-agentic/pkg/fleet/manifest_test.go) exercises simple manifest parsing, but there are no tests for `defaults`, `vars`, model expansion, or dependency rewriting. Coverage confirms the gap: `ParsePipeline` is 60.0%, `mergeDefaults` is 51.9%, and `interpolateVars` in [`pkg/fleet/manifest.go`](/workspace/0x666c6f/safe-agentic/pkg/fleet/manifest.go) is 0.0%. Missing negatives include malformed YAML, unknown dependency targets after model expansion, and precedence when agent values override defaults.
 
-### 2. Fleet manifest tests miss the parser branches that are most likely to regress
+3. `pkg/inject` misses the highest-risk file packaging path entirely.
+[`pkg/inject/inject_test.go`](/workspace/0x666c6f/safe-agentic/pkg/inject/inject_test.go) covers basic base64 helpers and single-file config reads, but it never exercises `ReadClaudeSupportFiles`, `tarFile`, or `tarDir` in [`pkg/inject/inject.go`](/workspace/0x666c6f/safe-agentic/pkg/inject/inject.go). That leaves support bundle creation at 0.0% coverage. Missing cases include nested directories, empty support sets, unreadable files, tar member names, and verifying that gzip+tar output can actually be decoded into the expected file tree.
 
-The current tests in [pkg/fleet/manifest_test.go](/workspace/0x666c6f/safe-agentic/pkg/fleet/manifest_test.go#L21) only cover basic happy paths plus missing files. They do not exercise defaults merging, `${var}` interpolation, `models` expansion, rewritten `depends_on` fan-out, or invalid YAML. Those are the exact branches implemented in [pkg/fleet/manifest.go](/workspace/0x666c6f/safe-agentic/pkg/fleet/manifest.go#L84), including `mergeDefaults` and `interpolateVars`, and they explain why `ParsePipeline` is still at 60.0% and `interpolateVars` remains uncovered. Missing negative tests here leave the manifest normalization logic largely unchecked.
+4. Several tests in `cmd/safe-ag/command_test.go` add coverage without verifying behavior.
+[`TestDiagnoseCommand_AllOK`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2061), [`TestSetupCommand_DockerAvailable`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2104), and [`TestSetupCommand_DockerNotAvailable`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2124) intentionally avoid meaningful assertions. The same pattern appears in the execute-spawn branch tests starting at [`TestSpawnWithEphemeralAuth`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2424): they only check for `"Would execute"`, so they do not verify that ephemeral auth, Docker modes, callbacks, templates, instructions, or AWS settings actually change the rendered command/env/labels. [`TestRunFleet_DryRun`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2949) similarly only checks for `"Fleet manifest"` rather than the spawned agent plan.
 
-### 3. `pkg/inject` leaves the tar/gzip support-file path completely uncovered
+5. `pkg/orb` contains a test that explicitly accepts nondeterminism instead of locking behavior down.
+[`TestFakeExecutor_MultiplePrefixMatches_ErrorTakesPriority`](/workspace/0x666c6f/safe-agentic/pkg/orb/orb_test.go#L185) documents that the result may be either success or error because `FakeExecutor.Run` iterates over Go maps in unspecified order. That means the test cannot catch regressions in prefix precedence, and it also hides a real nondeterminism in [`pkg/orb/orb.go`](/workspace/0x666c6f/safe-agentic/pkg/orb/orb.go). This should be replaced with deterministic longest-prefix matching plus an assertion that the exact error wins.
 
-The tests in [pkg/inject/inject_test.go](/workspace/0x666c6f/safe-agentic/pkg/inject/inject_test.go#L10) cover base64 helpers, config reads, and AWS credentials, but there is no test coverage for `ReadClaudeSupportFiles`, `tarFile`, or `tarDir` in [pkg/inject/inject.go](/workspace/0x666c6f/safe-agentic/pkg/inject/inject.go#L49). That means there are no assertions for nested directory entries, relative tar paths, mixed file-and-directory bundles, empty bundle behavior, or error cases like unreadable files encountered during the walk. For a package at 41.5%, this is the largest gap.
+6. `pkg/tmux` has an acknowledged hole in its negative-path testing.
+[`TestAttach_ReturnsErrorFromExecutor`](/workspace/0x666c6f/safe-agentic/pkg/tmux/tmux_test.go#L164) states that the fake cannot simulate `RunInteractive` failure and then just re-runs the happy path. The actual error branch in `Attach` is therefore untested. Either the fake needs an injectable interactive error, or the package should accept a narrower interface that can be stubbed for this case.
 
-### 4. TUI tests only cover pure helpers and barely touch user-visible behavior
+7. The integration-style suites rely on fixed sleeps and skip on transient failures, which makes them flaky and can mask regressions.
+[`cmd/safe-ag/integration_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/integration_test.go) uses fixed sleeps after lifecycle operations at lines 115, 574, 617, 677, 701, 754, and 822 instead of waiting on specific readiness conditions. [`cmd/safe-ag/deterministic_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/deterministic_test.go) has the same pattern at lines 90-98 and 539-549. Both files also use `t.Skipf` for transient runtime issues, for example container readiness or missing injected configs, which converts real failures into skips.
 
-The package is at 6.2%, and the single test file [tui/actions_test.go](/workspace/0x666c6f/safe-agentic/tui/actions_test.go#L9) only exercises helper functions like `buildAttachArgs`, `parseSessionMeta`, and one log-rendering path. None of the behavior-heavy methods in [tui/actions.go](/workspace/0x666c6f/safe-agentic/tui/actions.go#L39) are tested: `Attach`, `Resume`, `StopAgent`, `Logs`, `Checkpoint`, `Diff`, `Todo`, `Fleet`, `Pipeline`, `CreatePR`, and their error branches. Even the existing render test only checks for two substrings, so it would miss regressions in ordering, truncation, formatting, and ignored event types.
+8. Some tests depend on ambient machine state instead of controlled fixtures.
+[`TestDetectGitIdentity_Format`](/workspace/0x666c6f/safe-agentic/pkg/config/identity_test.go#L8) passes or skips depending on the host Git config. [`TestOrbExecutor_Run_SuccessWithRealVM`](/workspace/0x666c6f/safe-agentic/pkg/orb/orb_test.go#L235) depends on a real Orb VM being available. These are better suited to explicit integration tests; the default unit test suite should use fully controlled inputs.
 
-### 5. Several `cmd/safe-ag` tests are intentionally weak and do not verify behavior
+9. There is a broad weak-assertion pattern around rendered shell commands.
+[`pkg/docker/runtime_test.go`](/workspace/0x666c6f/safe-agentic/pkg/docker/runtime_test.go), [`cmd/safe-ag/spawn_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/spawn_test.go), and parts of [`cmd/safe-ag/integration_test.go`](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/integration_test.go) mostly join argv into a string and use `strings.Contains`. That misses duplicate flags, bad ordering, partial matches, and quoting bugs. For command-builders, exact slice assertions are a stronger default.
 
-There are multiple cases where tests explicitly capture output and then discard it, or only assert that a command completed. Examples include [cmd/safe-ag/command_test.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2061), [cmd/safe-ag/command_test.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2104), and [cmd/safe-ag/command_test.go](/workspace/0x666c6f/safe-agentic/cmd/safe-ag/command_test.go#L2124), where `runDiagnose` and `runSetup` are exercised but the tests deliberately avoid asserting any concrete behavior. That makes the tests non-hermetic and low value: changes to user-facing output, branching, or error handling can slip through while the tests still pass.
+## Highest-value follow-ups
 
-### 6. `pkg/config` contains a flaky, environment-dependent test with weak assertions
-
-[pkg/config/identity_test.go](/workspace/0x666c6f/safe-agentic/pkg/config/identity_test.go#L8) calls `DetectGitIdentity()` against the real machine config, skips when no global identity is configured, and only checks for the presence of `<` and `>`. That is both flaky across environments and too weak to catch malformed results like extra text around the address. A stable test should stub the git calls or split the logic so the returned value is validated deterministically.
-
-### 7. `pkg/tmux` has a misleading test that does not exercise the claimed failure path
-
-[pkg/tmux/tmux_test.go](/workspace/0x666c6f/safe-agentic/pkg/tmux/tmux_test.go#L164) is named `TestAttach_ReturnsErrorFromExecutor`, but the body uses `orb.NewFake()` and even documents that the fake cannot return an error from `RunInteractive`. The test therefore proves only the happy path while claiming to cover error propagation. It should use a stub executor that actually fails, otherwise the negative path in `Attach` is still untested.
-
-### 8. `pkg/labels` has no tests at all
-
-[pkg/labels/labels.go](/workspace/0x666c6f/safe-agentic/pkg/labels/labels.go#L1) is simple, but its package coverage is 0.0%. There is no assertion on `ContainerFilter()` or on the label keys shared across the CLI and container inspection flows. A trivial package can still break list/stop/cleanup targeting if the filter or labels drift, and today there is no regression signal at all.
-
-## Notes
-
-I reviewed all `*_test.go` files. The highest-value follow-up would be:
-
-1. Add real command tests for `pipeline`, `cron`, and `logs`.
-2. Expand `pkg/fleet` parser tests to cover defaults, vars, model expansion, and invalid manifests.
-3. Add archive-content tests for `ReadClaudeSupportFiles`.
-4. Replace environment-dependent or no-op tests in `pkg/config` and `pkg/tmux` with deterministic stubs.
+1. Add targeted unit tests for `pkg/labels`, `pkg/inject` support bundle creation, and `pkg/fleet` defaults/vars/model expansion.
+2. Replace no-op coverage tests in `cmd/safe-ag/command_test.go` with assertions on exact commands, labels, env vars, and output.
+3. Make `pkg/orb.FakeExecutor` deterministic so prefix-precedence tests can assert a single outcome.
+4. Convert fixed sleeps in build-tagged integration tests into readiness polling with bounded timeouts and fail on missing required artifacts instead of skipping.
