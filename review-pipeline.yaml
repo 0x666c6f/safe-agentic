@@ -91,4 +91,5 @@ stages:
           Read all review reports in fleet/: review-code.md, review-tests.md, review-design.md, review-security.md, review-docs.md
           Create fleet/REVIEW-SUMMARY.md ranking all findings by severity.
           Fix all Critical and Important issues directly in the code. Run go test ./... after each fix.
-          Commit and push all fixes.
+          After all fixes are done, delete the individual review files (fleet/review-*.md) — keep only REVIEW-SUMMARY.md.
+          git rm fleet/review-*.md && git add -A && git commit -m "fix: address review findings, clean up individual reports" && git push
