@@ -201,9 +201,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	}
 
 	if pipelineDryRun {
-		fmt.Printf("Pipeline: %s\n", name)
-		fmt.Printf("Stages:   %d\n\n", len(m.Stages))
-		printPipelineTree(m.Stages)
+		printPipelineTree(name, m.Stages)
 		return nil
 	}
 
@@ -357,15 +355,16 @@ func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
 	}
 }
 
-// printPipelineTree renders pipeline stages as a tree diagram.
-func printPipelineTree(stages []fleet.PipelineStage) {
-	// Build dependency graph for visual grouping
+// printPipelineTree renders pipeline stages as a tree diagram under a root node.
+func printPipelineTree(name string, stages []fleet.PipelineStage) {
+	fmt.Printf("🔄 %s\n", name)
+
 	for i, stage := range stages {
 		isLast := i == len(stages)-1
-		prefix := "├──"
+		branch := "├──"
 		childPrefix := "│   "
 		if isLast {
-			prefix = "└──"
+			branch = "└──"
 			childPrefix = "    "
 		}
 
@@ -375,18 +374,17 @@ func printPipelineTree(stages []fleet.PipelineStage) {
 			deps = fmt.Sprintf(" (after: %s)", strings.Join(stage.DependsOn, ", "))
 		}
 		if stage.Pipeline != "" {
-			fmt.Printf("%s 📋 %s%s → %s\n", prefix, stage.Name, deps, stage.Pipeline)
+			fmt.Printf("%s 📋 %s%s → %s\n", branch, stage.Name, deps, stage.Pipeline)
 			continue
 		}
 
-		fmt.Printf("%s 📦 %s%s\n", prefix, stage.Name, deps)
+		fmt.Printf("%s 📦 %s%s\n", branch, stage.Name, deps)
 
-		// Agents under this stage
 		for j, spec := range stage.Agents {
 			agentIsLast := j == len(stage.Agents)-1
-			agentPrefix := childPrefix + "├── "
+			agentBranch := childPrefix + "├── "
 			if agentIsLast {
-				agentPrefix = childPrefix + "└── "
+				agentBranch = childPrefix + "└── "
 			}
 
 			icon := "🤖"
@@ -397,11 +395,11 @@ func printPipelineTree(stages []fleet.PipelineStage) {
 				icon = "🔵"
 			}
 
-			name := spec.Name
-			if name == "" {
-				name = spec.Type
+			label := spec.Name
+			if label == "" {
+				label = spec.Type
 			}
-			fmt.Printf("%s%s %s", agentPrefix, icon, name)
+			fmt.Printf("%s%s %s", agentBranch, icon, label)
 			if spec.Memory != "" {
 				fmt.Printf(" [%s", spec.Memory)
 				if spec.CPUs != "" {
