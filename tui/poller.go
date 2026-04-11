@@ -200,9 +200,23 @@ func execOrbTimeout(timeout time.Duration, args ...string) ([]byte, error) {
 }
 
 func fetchAgents() ([]Agent, error) {
+	// Use a custom format with explicit label extraction to avoid comma-in-value
+	// corruption that occurs with Docker's {{json .}} Labels field.
+	format := strings.Join([]string{
+		"{{.Names}}",
+		`{{.Label "safe-agentic.agent-type"}}`,
+		`{{.Label "safe-agentic.repo-display"}}`,
+		`{{.Label "safe-agentic.ssh"}}`,
+		`{{.Label "safe-agentic.auth"}}`,
+		`{{.Label "safe-agentic.gh-auth"}}`,
+		`{{.Label "safe-agentic.docker"}}`,
+		`{{.Label "safe-agentic.network-mode"}}`,
+		`{{.Label "safe-agentic.fleet"}}`,
+		"{{.Status}}",
+	}, "\t")
 	psData, psErr := execOrb("docker", "ps", "-a",
 		"--filter", "name=^"+containerPrefix+"-",
-		"--format", "{{json .}}")
+		"--format", format)
 	if psErr != nil {
 		return nil, psErr
 	}
@@ -231,23 +245,22 @@ func parsePSOutput(data []byte) []Agent {
 		if len(line) == 0 {
 			continue
 		}
-		var entry dockerPSEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+		parts := strings.Split(string(line), "\t")
+		if len(parts) < 10 {
 			continue
 		}
-		labels := parseLabels(entry.Labels)
-		running := strings.HasPrefix(entry.Status, "Up")
+		running := strings.HasPrefix(parts[9], "Up")
 		agents = append(agents, Agent{
-			Name:        entry.Names,
-			Type:        labels["safe-agentic.agent-type"],
-			Repo:        labels["safe-agentic.repo-display"],
-			SSH:         labels["safe-agentic.ssh"],
-			Auth:        labels["safe-agentic.auth"],
-			GHAuth:      labels["safe-agentic.gh-auth"],
-			Docker:      labels["safe-agentic.docker"],
-			NetworkMode: labels["safe-agentic.network-mode"],
-			Fleet:       labels["safe-agentic.fleet"],
-			Status:      entry.Status,
+			Name:        parts[0],
+			Type:        parts[1],
+			Repo:        parts[2],
+			SSH:         parts[3],
+			Auth:        parts[4],
+			GHAuth:      parts[5],
+			Docker:      parts[6],
+			NetworkMode: parts[7],
+			Fleet:       parts[8],
+			Status:      parts[9],
 			Running:     running,
 		})
 	}
