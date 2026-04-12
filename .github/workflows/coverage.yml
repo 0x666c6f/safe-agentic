@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: coverage-${{ github.workflow }}-${{ github.ref }}
@@ -30,6 +30,24 @@ jobs:
           go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tee coverage.txt
 
+      - name: Compute badge payload
+        run: |
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')"
+          color="red"
+          awk "BEGIN {exit !($total >= 80)}" && color="brightgreen" || true
+          if [ "$color" = "red" ]; then
+            awk "BEGIN {exit !($total >= 60)}" && color="yellow" || true
+          fi
+          mkdir -p .badge-out
+          cat > .badge-out/coverage.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${total}%",
+            "color": "${color}"
+          }
+          EOF
+
       - name: Job summary
         run: |
           {
@@ -47,3 +65,22 @@ jobs:
           path: |
             coverage.out
             coverage.txt
+            .badge-out/coverage.json
+
+      - name: Publish coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tmpdir="$(mktemp -d)"
+          git init -b badges "$tmpdir"
+          cd "$tmpdir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p .github/badges
+          cp "$GITHUB_WORKSPACE/.badge-out/coverage.json" .github/badges/coverage.json
+          touch .nojekyll
+          git add .github/badges/coverage.json .nojekyll
+          git commit -m "Update coverage badge"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin badges
