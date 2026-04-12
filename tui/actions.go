@@ -15,6 +15,24 @@ import (
 
 const defaultResumeCWD = "/workspace"
 const tmuxSessionName = "safe-agentic"
+const cliBinary = "safe-ag"
+
+var newCLICmd = func(args ...string) *exec.Cmd {
+	return exec.Command(cliBinary, args...)
+}
+
+func mcpLoginArgs(server, container string) []string {
+	return []string{"mcp-login", server, container}
+}
+
+func sshLabelAllowsPush(v string) bool {
+	switch strings.TrimSpace(v) {
+	case "yes", "true":
+		return true
+	default:
+		return false
+	}
+}
 
 // Actions handles all keybinding-triggered operations.
 type Actions struct {
@@ -30,6 +48,11 @@ func (ac *Actions) selectedOrWarn() *Agent {
 	agent := ac.app.table.SelectedAgent()
 	if agent == nil {
 		ac.app.footer.ShowStatus("No agent selected", true)
+		return nil
+	}
+	if agent.Deleting {
+		ac.app.footer.ShowStatus(fmt.Sprintf("%s is deleting", agent.Name), true)
+		return nil
 	}
 	return agent
 }
@@ -235,15 +258,18 @@ func (ac *Actions) StopAgent() {
 		if !yes {
 			return
 		}
+		ac.app.table.MarkDeleting(*agent)
 		ac.app.footer.ShowStatus(fmt.Sprintf("Stopping %s...", name), false)
 		go func() {
-			cmd := exec.Command("agent", "stop", name)
+			cmd := newCLICmd("stop", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
+					ac.app.table.ClearDeleting(name)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stop failed: %s", strings.TrimSpace(string(out))), true)
 				} else {
+					ac.app.table.FinishDeleting(name)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stopped %s", name), false)
 				}
 			})
@@ -258,6 +284,7 @@ func (ac *Actions) StopAgent() {
 type logsState struct {
 	autoRefresh bool
 	tailLines   string // "500", "2000", or "0" (all)
+	rawMode     bool
 }
 
 func (ac *Actions) Logs() {
@@ -268,13 +295,12 @@ func (ac *Actions) Logs() {
 	name := agent.Name
 	state := &logsState{autoRefresh: agent.Running, tailLines: "500"}
 
-	data := ac.fetchDockerLogs(name, state.tailLines)
-	if len(data) == 0 {
+	rendered := ac.loadLogsContent(name, state)
+	if rendered == "" {
 		ac.app.footer.ShowStatus("No session logs found", true)
 		return
 	}
 
-	rendered := renderSessionLog(data)
 	title := ac.logsTitle(name, state)
 	tv := ShowOverlayLive(ac.app, "logs", title, rendered)
 
@@ -321,13 +347,19 @@ func (ac *Actions) Logs() {
 				if !state.autoRefresh {
 					continue
 				}
-				newData := ac.fetchDockerLogs(name, state.tailLines)
-				if len(newData) > 0 {
-					newRendered := renderSessionLog(newData)
+				newRendered := ac.loadLogsContent(name, state)
+				if newRendered != "" {
 					ac.app.tapp.QueueUpdateDraw(func() {
 						if fp, _ := ac.app.pages.GetFrontPage(); fp == "logs" {
+							// Preserve scroll position: only auto-scroll if already at bottom
+							row, _ := tv.GetScrollOffset()
+							_, _, _, height := tv.GetInnerRect()
+							totalLines := len(strings.Split(tv.GetText(true), "\n"))
+							atBottom := row+height >= totalLines-2
 							tv.SetText(newRendered)
-							tv.ScrollToEnd()
+							if atBottom {
+								tv.ScrollToEnd()
+							}
 						}
 					})
 				}
@@ -345,7 +377,43 @@ func (ac *Actions) logsTitle(name string, state *logsState) string {
 	if lines == "0" {
 		lines = "all"
 	}
-	return fmt.Sprintf("Logs: %s | [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, refresh, lines)
+	mode := "session"
+	if state.rawMode {
+		mode = "docker"
+	}
+	return fmt.Sprintf("Logs: %s | mode:%s [r]efresh:%s [5]00/[2]000/[a]ll:%s | Esc close", name, mode, refresh, lines)
+}
+
+func (ac *Actions) loadLogsContent(name string, state *logsState) string {
+	data := fetchSessionLogsFunc(ac, name, state.tailLines)
+	rendered := renderSessionLog(data)
+	if len(data) > 0 && rendered != "(empty session log)" {
+		state.rawMode = false
+		return rendered
+	}
+	agentRendered := fetchAgentLogsFunc(name, state.tailLines)
+	if strings.TrimSpace(agentRendered) != "" {
+		state.rawMode = false
+		return agentRendered
+	}
+	raw := fetchPlainLogsFunc(name, state.tailLines)
+	if len(raw) == 0 {
+		return ""
+	}
+	state.rawMode = true
+	return strings.TrimSpace(string(raw))
+}
+
+func fetchAgentLogsCLI(name, tailLines string) string {
+	lines := tailLines
+	if lines == "0" {
+		lines = "100000"
+	}
+	out, err := newCLICmd("logs", "--lines", lines, name).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func sessionSearchDirs(configDir, repo string) []string {
@@ -383,10 +451,10 @@ func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
 	running := strings.TrimSpace(string(stateOut)) == "running"
 
 	// Python script: find the session file whose first timestamp is closest
-	// to (and after) the container creation time
+	// to the container creation time. Fall back to file mtime when needed.
 	matchScript := `
-import os, json, sys, glob
-container_created = sys.argv[1][:19]  # trim to seconds
+import os, json, sys, glob, datetime
+container_created = sys.argv[1][:19]
 search_dirs = [p for p in sys.argv[2:] if p]
 
 files = []
@@ -399,31 +467,44 @@ for find_dir in search_dirs:
             seen.add(f)
             files.append(f)
 
+def parse_ts(raw):
+    if not raw:
+        return None
+    raw = raw[:19]
+    try:
+        return datetime.datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+container_dt = parse_ts(container_created)
 best_file = None
-best_delta = float('inf')
+best_score = None
 
 for f in files:
     try:
+        session_dt = None
         with open(f) as fh:
             for line in fh:
-                d = json.loads(line.strip())
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
                 ts = d.get('timestamp', '')
                 if not ts and 'message' in d and isinstance(d['message'], dict):
                     ts = d['message'].get('timestamp', '')
                 if ts:
-                    session_start = ts[:19]
-                    # Simple string comparison works for ISO timestamps
-                    if session_start >= container_created:
-                        delta = ord(session_start[18]) - ord(container_created[18])
-                        if delta < best_delta:
-                            best_delta = delta
-                            best_file = f
+                    session_dt = parse_ts(ts)
                     break
+        if session_dt is None:
+            session_dt = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+        score = abs((session_dt - container_dt).total_seconds()) if container_dt else float('inf')
+        if best_score is None or score < best_score:
+            best_score = score
+            best_file = f
     except:
         pass
 
 if not best_file and files:
-    # Fallback: most recently modified
     best_file = max(files, key=os.path.getmtime)
 
 if best_file:
@@ -491,6 +572,23 @@ if best_file:
 	return data
 }
 
+func fetchPlainDockerLogs(name, tailLines string) []byte {
+	args := []string{"docker", "logs"}
+	if tailLines != "0" {
+		args = append(args, "--tail", tailLines)
+	}
+	args = append(args, name)
+	data, _ := execOrbLong(args...)
+	return data
+}
+
+var fetchSessionLogsFunc = func(ac *Actions, name, tailLines string) []byte {
+	return ac.fetchDockerLogs(name, tailLines)
+}
+
+var fetchAgentLogsFunc = fetchAgentLogsCLI
+var fetchPlainLogsFunc = fetchPlainDockerLogs
+
 func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsState) {
 	ac.app.footer.ShowStatus("Loading...", false)
 	go func() {
@@ -552,38 +650,25 @@ func (ac *Actions) Checkpoint() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	label := fmt.Sprintf("checkpoint-%d", time.Now().Unix())
 	ac.app.footer.ShowStatus(fmt.Sprintf("Creating checkpoint %s...", label), false)
 	go func() {
-		// Stage all changes and create a stash object without modifying the working tree.
-		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
-			"cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create")
-		if err != nil {
-			ac.app.tapp.QueueUpdateDraw(func() {
-				ac.app.footer.ShowStatus("Checkpoint failed: could not create stash", true)
-			})
-			return
-		}
-		stashSHA := strings.TrimSpace(string(out))
-		if stashSHA == "" {
-			ac.app.tapp.QueueUpdateDraw(func() {
-				ac.app.footer.ShowStatus("No changes to checkpoint", false)
-			})
-			return
-		}
-		_, err = execOrbLong("docker", "exec", name, "bash", "-c",
-			fmt.Sprintf("cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/%s %s", label, stashSHA))
+		out, err := newCLICmd("checkpoint", "create", name, label).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint failed: could not save ref %s", label), true)
-			} else {
-				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint '%s' created (%s)", label, stashSHA[:7]), false)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Checkpoint failed"
+				}
+				ac.app.footer.ShowStatus(msg, true)
+				return
 			}
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = fmt.Sprintf("Checkpoint '%s' created", label)
+			}
+			ac.app.footer.ShowStatus(msg, false)
 		})
 	}()
 }
@@ -594,18 +679,17 @@ func (ac *Actions) Diff() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Loading diff for %s...", name), false)
 	go func() {
-		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
-			"cd /workspace/* 2>/dev/null || cd /workspace; git diff")
+		out, err := newCLICmd("diff", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Failed to get diff", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Failed to get diff"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := strings.TrimSpace(string(out))
@@ -624,39 +708,17 @@ func (ac *Actions) Todo() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Loading todos for %s...", name), false)
 	go func() {
-		const pyScript = `
-import json, os, sys
-path = '/workspace/.safe-agentic/todos.json'
-if not os.path.exists(path):
-    print('No todos yet.')
-    sys.exit(0)
-try:
-    with open(path) as f:
-        todos = json.load(f)
-except Exception:
-    print('No todos yet.')
-    sys.exit(0)
-if not todos:
-    print('No todos yet.')
-    sys.exit(0)
-done_count = sum(1 for t in todos if t.get('done'))
-for i, t in enumerate(todos, 1):
-    mark = 'x' if t.get('done') else ' '
-    print('[{}] {}. {}'.format(mark, i, t.get('text', '')))
-print('')
-print('{}/{} complete'.format(done_count, len(todos)))
-`
-		out, err := execOrbLong("docker", "exec", name, "python3", "-c", pyScript)
+		out, err := newCLICmd("todo", "list", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Failed to load todos", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Failed to load todos"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := strings.TrimSpace(string(out))
@@ -713,7 +775,7 @@ func (ac *Actions) ExportSessions() {
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Exporting sessions from %s...", name), false)
 	go func() {
-		cmd := exec.Command("agent", "sessions", name)
+		cmd := newCLICmd("sessions", name)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -755,7 +817,7 @@ func (ac *Actions) McpLogin() {
 		if server == "" {
 			return
 		}
-		cmd := exec.Command("agent", "mcp-login", name, server)
+		cmd := newCLICmd(mcpLoginArgs(server, name)...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -774,15 +836,26 @@ func (ac *Actions) KillAll() {
 		if !yes {
 			return
 		}
+		for _, agent := range ac.app.table.allAgents {
+			ac.app.table.MarkDeleting(agent)
+		}
 		ac.app.footer.ShowStatus("Stopping all agents...", false)
 		go func() {
-			cmd := exec.Command("agent", "stop", "--all")
+			cmd := newCLICmd("stop", "--all")
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
+				var names []string
+				for _, agent := range ac.app.table.allAgents {
+					if agent.Deleting {
+						names = append(names, agent.Name)
+					}
+				}
 				if err != nil {
+					ac.app.table.ClearDeleting(names...)
 					ac.app.footer.ShowStatus(fmt.Sprintf("Stop all failed: %s", strings.TrimSpace(string(out))), true)
 				} else {
+					ac.app.table.FinishDeleting(names...)
 					ac.app.footer.ShowStatus("All agents stopped", false)
 				}
 			})
@@ -1000,18 +1073,17 @@ func (ac *Actions) Review() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus("Running review...", false)
 	go func() {
-		out, err := execOrbLong("docker", "exec", name, "bash", "-lc",
-			"cd /workspace/* 2>/dev/null || cd /workspace; if command -v codex >/dev/null 2>&1; then codex review --uncommitted 2>&1; else git diff 2>&1; fi")
+		out, err := newCLICmd("review", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Review failed", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Review failed"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := string(out)
@@ -1033,7 +1105,7 @@ func (ac *Actions) Cost() {
 	name := agent.Name
 	ac.app.footer.ShowStatus("Analyzing cost...", false)
 	go func() {
-		cmd := exec.Command("agent", "cost", name)
+		cmd := newCLICmd("cost", name)
 		out, err := cmd.Output()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1059,7 +1131,7 @@ func (ac *Actions) Cost() {
 func (ac *Actions) Audit() {
 	ac.app.footer.ShowStatus("Loading audit log...", false)
 	go func() {
-		cmd := exec.Command("agent", "audit")
+		cmd := newCLICmd("audit")
 		out, err := cmd.CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1084,7 +1156,7 @@ func (ac *Actions) Fleet(manifestPath string) {
 	}
 	ac.app.footer.ShowStatus("Spawning fleet from "+manifestPath+"...", false)
 	go func() {
-		cmd := exec.Command("agent", "fleet", manifestPath)
+		cmd := newCLICmd("fleet", manifestPath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1105,7 +1177,7 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 	}
 	ac.app.footer.ShowStatus("Running pipeline from "+pipelinePath+"...", false)
 	go func() {
-		cmd := exec.Command("agent", "pipeline", pipelinePath)
+		cmd := newCLICmd("pipeline", pipelinePath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1130,7 +1202,7 @@ func (ac *Actions) CreatePR() {
 	// Check SSH label first (needed for push)
 	sshLabel, err := execOrb("docker", "inspect", "--format",
 		`{{index .Config.Labels "safe-agentic.ssh"}}`, name)
-	if err != nil || strings.TrimSpace(string(sshLabel)) != "yes" {
+	if err != nil || !sshLabelAllowsPush(string(sshLabel)) {
 		ac.app.footer.ShowStatus(fmt.Sprintf("%s was not spawned with --ssh; push requires SSH", name), true)
 		return
 	}
@@ -1141,7 +1213,7 @@ func (ac *Actions) CreatePR() {
 		}
 		ac.app.footer.ShowStatus(fmt.Sprintf("Creating PR for %s...", name), false)
 		go func() {
-			cmd := exec.Command("agent", "pr", name)
+			cmd := newCLICmd("pr", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {

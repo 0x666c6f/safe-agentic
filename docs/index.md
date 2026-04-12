@@ -13,8 +13,8 @@ hide:
 Claude Code and Codex get full autonomy inside isolated containers with read-only filesystems, dropped capabilities, and dedicated networks. Dangerous features require explicit opt-in.
 
 ```bash
-agent setup                                      # one-time VM + image setup
-agent-claude git@github.com:myorg/myrepo.git     # spawn an agent
+safe-ag setup                                      # one-time VM + image setup
+safe-ag spawn claude --repo git@github.com:myorg/myrepo.git     # spawn an agent
 ```
 
 [Get Started](quickstart.md){ .md-button .md-button--primary }
@@ -44,33 +44,33 @@ Three isolation boundaries separate your machine from the agent. The agent has f
 
 ```bash
 # Spawn with a task or a built-in template
-agent spawn claude --ssh --repo git@github.com:org/api.git \
+safe-ag spawn claude --ssh --repo git@github.com:org/api.git \
   --prompt "Fix the failing CI tests"
-agent spawn claude --ssh --repo git@github.com:org/api.git \
+safe-ag spawn claude --ssh --repo git@github.com:org/api.git \
   --template security-audit
 
 # Check what it's doing
-agent peek --latest
+safe-ag peek --latest
 
 # Quick status overview
-agent summary --latest
+safe-ag summary --latest
 
 # Review its changes
-agent diff --latest
-agent review --latest
+safe-ag diff --latest
+safe-ag review --latest
 
 # Extract the last agent message
-agent output --latest
+safe-ag output --latest
 
 # Track what's left before merging
-agent todo add --latest "Run integration tests"
-agent todo add --latest "Update changelog"
-agent todo list --latest
+safe-ag todo add --latest "Run integration tests"
+safe-ag todo add --latest "Update changelog"
+safe-ag todo list --latest
 
 # Create a PR when ready
-agent todo check --latest 1
-agent todo check --latest 2
-agent pr --latest --title "fix: resolve CI failures"
+safe-ag todo check --latest 1
+safe-ag todo check --latest 2
+safe-ag pr --latest --title "fix: resolve CI failures"
 ```
 
 ---
@@ -103,14 +103,14 @@ agents:
 ```
 
 ```bash
-agent fleet fleet.yaml
-agent tui                 # interactive dashboard to monitor all agents
+safe-ag fleet fleet.yaml
+safe-ag tui                 # interactive dashboard to monitor all agents
 ```
 
 Or orchestrate multi-step workflows:
 
 ```bash
-agent pipeline pipeline.yaml   # sequential steps with retry + failure handlers
+safe-ag pipeline pipeline.yaml   # sequential steps with retry + failure handlers
 ```
 
 ---
@@ -133,9 +133,9 @@ agent pipeline pipeline.yaml   # sequential steps with retry + failure handlers
 ## Track everything
 
 ```bash
-agent cost --latest        # estimate API spend from token usage
-agent audit                # every spawn, stop, attach — timestamped JSONL
-agent sessions --latest    # export full conversation history
+safe-ag cost --latest        # estimate API spend from token usage
+safe-ag audit                # every spawn, stop, attach — timestamped JSONL
+safe-ag sessions --latest    # export full conversation history
 ```
 
 ---

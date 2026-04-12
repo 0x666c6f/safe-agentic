@@ -64,7 +64,7 @@ An agent with SSH access can push to any repository your key can access. If the 
 
 Multiple containers sharing an auth volume can read each other's OAuth tokens. A compromised container could exfiltrate the token.
 
-**Mitigation:** Use ephemeral auth (the default) for untrusted work. Run `agent cleanup --auth` to revoke tokens.
+**Mitigation:** Use ephemeral auth (the default) for untrusted work. Run `safe-ag cleanup --auth` to revoke tokens.
 
 ### OrbStack VM escape
 

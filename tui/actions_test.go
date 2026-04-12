@@ -87,6 +87,29 @@ func TestSessionSearchDirsWithoutRepo(t *testing.T) {
 	}
 }
 
+func TestMcpLoginArgs(t *testing.T) {
+	got := mcpLoginArgs("linear", "agent-claude-demo")
+	want := []string{"mcp-login", "linear", "agent-claude-demo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mcpLoginArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSSHLabelAllowsPush(t *testing.T) {
+	cases := map[string]bool{
+		"yes":   true,
+		"true":  true,
+		" no ":  false,
+		"false": false,
+		"":      false,
+	}
+	for input, want := range cases {
+		if got := sshLabelAllowsPush(input); got != want {
+			t.Fatalf("sshLabelAllowsPush(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
 func TestRenderSessionLogCurrentCodexFormat(t *testing.T) {
 	data := []byte(
 		`{"timestamp":"2026-04-10T07:46:06.385Z","type":"session_meta","payload":{"timestamp":"2026-04-10T07:46:01.762Z","cwd":"/workspace/morpho-org/hermes-agent-sre","cli_version":"0.118.0","originator":"codex-tui"}}` + "\n" +

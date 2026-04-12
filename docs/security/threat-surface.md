@@ -44,7 +44,7 @@ sequenceDiagram
 
 ## `--reuse-auth` — Persistent OAuth Tokens
 
-**What it does:** Stores the Claude/Codex OAuth token in a named Docker volume (`agent-claude-auth` or `agent-codex-auth`) instead of an anonymous volume.
+**What it does:** Stores the Claude/Codex OAuth token in a named Docker volume (`safe-ag spawn claude --repo-auth` or `safe-ag spawn codex --repo-auth`) instead of an anonymous volume.
 
 **The agent can:**
 
@@ -54,11 +54,11 @@ sequenceDiagram
 
 - A second container with `--reuse-auth` shares the same volume — it reads the token
 - If the volume is compromised, the attacker gets a valid API token
-- The token survives container removal until `agent cleanup --auth`
+- The token survives container removal until `safe-ag cleanup --auth`
 
 **When to use:** Avoid re-authenticating every session.
 
-**Mitigation:** Run `agent cleanup --auth` to destroy the volume and invalidate the token.
+**Mitigation:** Run `safe-ag cleanup --auth` to destroy the volume and invalidate the token.
 
 ## `--reuse-gh-auth` — Persistent GitHub CLI Auth
 
@@ -81,7 +81,7 @@ sequenceDiagram
 
 - Credentials live on tmpfs — not persisted to a Docker volume
 - Assumed-role sessions expire (~1 hour), limiting the attack window
-- `agent aws-refresh` re-injects credentials without restarting the container
+- `safe-ag aws-refresh` re-injects credentials without restarting the container
 
 **When to use:** Infrastructure work (terraform, aws-cli, boto3).
 

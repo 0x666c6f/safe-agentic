@@ -43,7 +43,7 @@ The agent can:
 
 ## Blocked operations
 
-These Docker flags are explicitly rejected by `bin/agent-lib.sh`:
+These Docker flags are explicitly rejected by the Go CLI runtime:
 
 - `--privileged` — gives the container full host capabilities
 - `--network host` — shares the VM's network namespace

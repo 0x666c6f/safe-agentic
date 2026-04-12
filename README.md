@@ -1,5 +1,10 @@
 # safe-agentic
 
+[![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/0x666c6f/safe-agentic)](https://goreportcard.com/report/github.com/0x666c6f/safe-agentic)
+[![Go Coverage](https://gocover.io/_badge/github.com/0x666c6f/safe-agentic)](https://gocover.io/github.com/0x666c6f/safe-agentic)
+
 Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks get egress guardrails, images are local-only at launch, and resource limits apply.
 
 ## Features
@@ -16,36 +21,37 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 
 **Agent Lifecycle**
 - `--prompt 'task'` — send an initial task so the agent starts working immediately
-- Tmux-backed reattach — `agent attach`/TUI resume reopen the live agent session; detach with `Ctrl-b d`
-- Container persistence — containers survive exit, `agent attach` restarts stopped ones
-- `agent list` — show running + stopped containers with metadata
-- `agent stop` / `agent cleanup` — stop, remove, and clean up resources
-- `agent cp` — extract files, logs, or build artifacts from containers
-- `agent sessions` — export session history for archival
-- `agent diagnose` — health check for OrbStack, VM, Docker, image, SSH, defaults
+- Tmux-backed reattach — `safe-ag attach`/TUI resume reopen the live agent session; detach with `Ctrl-b d`
+- Container persistence — containers survive exit, `safe-ag attach` restarts stopped ones
+- `safe-ag list` — show running + stopped containers with metadata
+- `safe-ag stop` / `safe-ag cleanup` — stop, remove, and clean up resources
+- `safe-ag cp` — extract files, logs, or build artifacts from containers
+- `safe-ag sessions` — export session history for archival
+- `safe-ag diagnose` — health check for OrbStack, VM, Docker, image, SSH, defaults
 
 **Developer Workflow**
-- `agent diff` — show git diff from an agent's working tree
-- `agent checkpoint` — create/list/revert working tree snapshots (git stash refs)
-- `agent todo` — track merge requirements; blocks PR creation until all checked off
-- `agent pr` — create a GitHub PR from the agent's branch (push + `gh pr create`)
-- `agent review` — AI code review via `codex review` or raw diff fallback
+- `safe-ag diff` — show git diff from an agent's working tree
+- `safe-ag checkpoint` — create/list/revert working tree snapshots (git stash refs)
+- `safe-ag todo` — track merge requirements; blocks PR creation until all checked off
+- `safe-ag pr` — create a GitHub PR from the agent's branch (push + `gh pr create`)
+- `safe-ag review` — AI code review via `codex review` or raw diff fallback
 - `safe-agentic.json` — lifecycle scripts (`setup` runs after repo clone)
 
 **Fleet & Orchestration**
-- `agent fleet manifest.yaml` — spawn multiple agents from a YAML manifest
-- `agent pipeline pipeline.yaml` — multi-step workflows with retry, dependencies, failure handlers
+- `safe-ag fleet manifest.yaml` — spawn multiple agents from a YAML manifest
+- `safe-ag pipeline pipeline.yaml` — multi-step workflows with retry, dependencies, failure handlers
 
 **Analytics**
-- `agent cost` — estimate API spend by parsing session token usage
-- `agent audit` — append-only JSONL log of all spawn/stop/attach operations
+- `safe-ag cost` — estimate API spend by parsing session token usage
+- `safe-ag audit` — append-only JSONL log of all spawn/stop/attach operations
+- `safe-ag dashboard` — browser dashboard backed by the same poller as the TUI
 
 **Auth & Config**
 - `--ssh` — SSH agent forwarding via socat relay (userns-remap compatible)
 - `--reuse-auth` — persist Claude/Codex OAuth tokens across sessions
 - `--reuse-gh-auth` — persist GitHub CLI auth across sessions
-- `--aws <profile>` — inject AWS credentials from `~/.aws/credentials`; refresh with `agent aws-refresh`
-- `agent mcp-login` — MCP OAuth login (Linear, Notion, etc.) with token persistence
+- `--aws <profile>` — inject AWS credentials from `~/.aws/credentials`; refresh with `safe-ag aws-refresh`
+- `safe-ag mcp-login` — MCP OAuth login (Linear, Notion, etc.) with token persistence
 - Host config auto-injection: `~/.codex/config.toml` and `~/.claude/settings.json` carry MCP servers, model settings, features, and plugins into containers
 - `--identity` — explicit git author/committer attribution
 - `defaults.sh` — persistent defaults for memory, CPU, network, Docker, auth, identity
@@ -54,7 +60,6 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 - `--docker` — per-session Docker-in-Docker sidecar
 - `--docker-socket` — direct VM Docker daemon access
 - `--network` — join custom or isolated Docker networks
-- Quick aliases: `agent-claude` / `agent-codex` with auto SSH detection
 - Multi-repo support: clone multiple repos into a single container
 
 **Tools Included**
@@ -71,29 +76,26 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 brew tap 0x666c6f/tap && brew install safe-agentic
 ```
 
-This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
+This installs `safe-ag` and `safe-ag-tui`. Check the installed version with `safe-ag --version`.
 
-**From source:** Clone the repo, add `bin/` to your PATH, and use `agent`, `agent-claude`, `agent-codex`.
-
-> The rest of this README uses `agent` as the command name. Substitute `safe-ag` if installed via Homebrew.
+**From source:** Clone the repo, run `make build-all`, then add `bin/` to your PATH.
 
 ## Quick Start
 
 ```bash
-agent setup
-agent-claude git@github.com:myorg/myrepo.git
-agent diagnose
+safe-ag setup
+safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+safe-ag diagnose
 ```
 
-- `agent-claude` / `agent-codex` auto-enable `--ssh` for `git@` and `ssh://` repos
 - add `--reuse-auth` to keep Claude/Codex OAuth between sessions
 - add `--reuse-gh-auth` to keep `gh auth login` state between sessions
 - add `--prompt 'task'` to send an initial task to the agent
-- add `--aws <profile>` to inject AWS credentials; refresh with `agent aws-refresh <name>`
+- add `--aws <profile>` to inject AWS credentials; refresh with `safe-ag aws-refresh <name>`
 - add `--docker` for Docker-in-Docker, or `--docker-socket` to mount the VM daemon directly
 - add `--identity 'You <you@example.com>'` to avoid `Agent <agent@localhost>` commits
 - host `~/.codex/config.toml` and `~/.claude/settings.json` are auto-injected into containers (MCP servers, model settings carry over)
-- containers persist after exit — `agent attach` restarts stopped ones; tmux sessions detach with `Ctrl-b d`
+- containers persist after exit — `safe-ag attach` restarts stopped ones; tmux sessions detach with `Ctrl-b d`
 - put defaults in `~/.config/safe-agentic/defaults.sh` for memory, CPUs, network, Docker mode, shared auth, and git identity
   - format: simple `KEY=value` lines only; no shell snippets
 
@@ -102,7 +104,7 @@ agent diagnose
 ```mermaid
 graph TB
     subgraph mac["macOS Host"]
-        cli["bin/agent CLI"]
+        cli["safe-ag CLI"]
         op["1Password SSH Agent"]
         orb["OrbStack"]
     end
@@ -147,7 +149,7 @@ graph TB
 - `--network <name>` — Joins an existing Docker network in the VM and bypasses the default managed-network egress guardrails. Use only for deliberately shared or isolated networks you created.
 
 **Known limitations:**
-- **OrbStack hardening is best-effort.** OrbStack does not yet support per-VM file sharing disable ([#169](https://github.com/orbstack/orbstack/issues/169)). `vm/setup.sh` mounts tmpfs over macOS paths and removes mac commands, but OrbStack may re-enable sharing on VM restart. Re-run `agent setup` after VM restarts, and disable file sharing in OrbStack UI (Settings > Linux) for defense-in-depth.
+- **OrbStack hardening is best-effort.** OrbStack does not yet support per-VM file sharing disable ([#169](https://github.com/orbstack/orbstack/issues/169)). `vm/setup.sh` mounts tmpfs over macOS paths and removes mac commands, but OrbStack may re-enable sharing on VM restart. Re-run `safe-ag setup` after VM restarts, and disable file sharing in OrbStack UI (Settings > Linux) for defense-in-depth.
 - **`--dangerously-skip-permissions` is broad.** Claude Code in this mode can execute any command inside the container. With `--ssh`, a malicious repo could push to other repos or exfiltrate data over the network.
 - **Codex yolo mode is equally broad.** Codex runs with `--yolo`, so it can execute any command inside the container. With `--ssh`, a malicious repo could push to other repos or exfiltrate data over the network.
 - **Build chain still trusts upstream signing roots and registries.** Direct-download binaries are pinned and checksum-verified; apt repos are signed; npm packages are lockfile-pinned. A compromised upstream signing chain could still affect builds.
@@ -155,12 +157,12 @@ graph TB
 **For untrusted repos:**
 ```bash
 # Create an isolated Docker network with no internet access (one-time)
-agent vm ssh
+safe-ag vm ssh
 docker network create --internal agent-isolated
 exit
 
 # Spawn without SSH, on isolated network
-agent spawn claude --repo <untrusted-repo> --network agent-isolated
+safe-ag spawn claude --repo <untrusted-repo> --network agent-isolated
 ```
 
 ## Prerequisites
@@ -171,15 +173,21 @@ agent spawn claude --repo <untrusted-repo> --network agent-isolated
    - SSH key for GitHub configured in 1Password
 3. **CLI**: Install via Homebrew (see [Installation](#installation) above), or add `safe-agentic/bin` to your PATH for source installs
 
+For isolated local runs or dedicated test VMs, `SAFE_AGENTIC_VM_NAME` overrides the target OrbStack VM:
+
+```bash
+SAFE_AGENTIC_VM_NAME=safe-agentic-alt safe-ag list
+```
+
 ## Setup
 
 ```bash
-agent setup
+safe-ag setup
 ```
 
 Creates OrbStack VM, hardens it, installs Docker, builds the agent image. Progress now prints numbered phases during VM bootstrap and image build.
 
-**After VM restarts:** Run `agent vm start` (auto re-applies hardening).
+**After VM restarts:** Run `safe-ag vm start` (auto re-applies hardening).
 
 ## Usage
 
@@ -187,93 +195,90 @@ Creates OrbStack VM, hardens it, installs Docker, builds the agent image. Progre
 
 ```bash
 # Claude Code with SSH (required for git@ repos)
-agent spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 
 # HTTPS repo without SSH forwarding
-agent spawn claude --repo https://github.com/myorg/myrepo.git
+safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
 
 # Codex with persistent auth (skip OAuth next time)
-agent spawn codex --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
+safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 
 # Reuse GitHub CLI auth too
-agent spawn codex --ssh --reuse-auth --reuse-gh-auth --repo git@github.com:myorg/myrepo.git
+safe-ag spawn codex --ssh --reuse-auth --reuse-gh-auth --repo git@github.com:myorg/myrepo.git
 
 # Docker support: DinD by default, host socket only when you ask for it
-agent shell --docker --repo https://github.com/myorg/myrepo.git
-agent shell --docker-socket --repo https://github.com/myorg/myrepo.git
+safe-ag shell --docker --repo https://github.com/myorg/myrepo.git
+safe-ag shell --docker-socket --repo https://github.com/myorg/myrepo.git
 
 # Named session
-agent spawn claude --ssh --repo git@github.com:myorg/api.git --name api-refactor
+safe-ag spawn claude --ssh --repo git@github.com:myorg/api.git --name api-refactor
 
 # Multiple repos (cloned as org/repo to avoid name collisions)
-agent spawn claude --ssh --repo git@github.com:myorg/api.git --repo git@github.com:other/api.git
+safe-ag spawn claude --ssh --repo git@github.com:myorg/api.git --repo git@github.com:other/api.git
 
-# Quick aliases (auto-enable --ssh only for SSH repos)
-agent-claude git@github.com:myorg/myrepo.git
-agent-codex git@github.com:myorg/myrepo.git
-
-# Advanced alias usage still works
-agent-claude --name api-fix --reuse-auth --identity 'You <you@example.com>' git@github.com:myorg/api.git
+# Name + auth reuse
+safe-ag spawn claude --ssh --name api-fix --reuse-auth --identity 'You <you@example.com>' --repo git@github.com:myorg/api.git
 
 # Untrusted repo — no SSH, isolated network
-agent spawn claude --repo https://github.com/myorg/untrusted.git --network agent-isolated
+safe-ag spawn claude --repo https://github.com/myorg/untrusted.git --network agent-isolated
 
 # Tune limits explicitly when needed
-agent shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
+safe-ag shell --repo https://github.com/myorg/myrepo.git --memory 12g --cpus 6
 ```
 
 ### Manage agents
 
 ```bash
-agent list                  # List running + stopped agents
-agent attach <name>         # Tmux attach (restarts stopped containers)
-agent attach --latest       # Attach to newest agent
-agent cp <name> <container-path> <host-path>  # Copy files out safely
-agent cp --latest <container-path> <host-path>
-agent stop <name>           # Stop and remove specific agent
-agent stop --latest         # Stop and remove newest agent
-agent stop --all            # Stop and remove all agents
-agent cleanup               # Stop all + keep shared auth + prune managed networks
-agent cleanup --auth        # Also remove shared auth volumes
-agent mcp-login <server>    # MCP OAuth login (persists in auth volume)
-agent sessions <name>       # Export session history from container
-agent peek <name>            # Show last 30 lines of agent's tmux pane
-agent peek --latest --lines 50
-agent aws-refresh <name>    # Refresh AWS credentials in running container
-agent diagnose              # Check orb/VM/docker/image/SSH/defaults
+safe-ag list                  # List running + stopped agents
+safe-ag attach <name>         # Tmux attach (restarts stopped containers)
+safe-ag attach --latest       # Attach to newest agent
+safe-ag cp <name> <container-path> <host-path>  # Copy files out safely
+safe-ag cp --latest <container-path> <host-path>
+safe-ag stop <name>           # Stop and remove specific agent
+safe-ag stop --latest         # Stop and remove newest agent
+safe-ag stop --all            # Stop and remove all agents
+safe-ag cleanup               # Stop all + keep shared auth + prune managed networks
+safe-ag cleanup --auth        # Also remove shared auth volumes
+safe-ag mcp-login <server>    # MCP OAuth login (persists in auth volume)
+safe-ag sessions <name>       # Export session history from container
+safe-ag peek <name>           # Show last 30 lines of agent's tmux pane
+safe-ag peek --latest --lines 50
+safe-ag aws-refresh <name>    # Refresh AWS credentials in running container
+safe-ag diagnose              # Check orb/VM/docker/image/SSH/defaults
+safe-ag dashboard --bind localhost:8420   # Web dashboard
 ```
 
-Use `agent cp` when you need logs, test output, or build artifacts on the host without adding bind mounts:
+Use `safe-ag cp` when you need logs, test output, or build artifacts on the host without adding bind mounts:
 
 ```bash
-agent cp api-refactor /workspace/tmp/test.log ./test.log
-agent cp --latest /workspace/dist ./dist
+safe-ag cp api-refactor /workspace/tmp/test.log ./test.log
+safe-ag cp --latest /workspace/dist ./dist
 ```
 
-Older `agent cleanup` removed shared auth volumes too. Full reset now needs `agent cleanup --auth`.
+Older `safe-ag cleanup` removed shared auth volumes too. Full reset now needs `safe-ag cleanup --auth`.
 
-Claude and Codex sessions run inside `tmux` in the container with a large scrollback buffer. Detach with `Ctrl-b d`; reattach later with `agent attach` or the TUI.
+Claude and Codex sessions run inside `tmux` in the container with a large scrollback buffer. Detach with `Ctrl-b d`; reattach later with `safe-ag attach` or the TUI.
 
 ### Interactive shell (no agent, no auth)
 
 ```bash
-agent shell --ssh --repo git@github.com:myorg/myrepo.git
+safe-ag shell --ssh --repo git@github.com:myorg/myrepo.git
 ```
 
 ### Maintenance
 
 ```bash
-agent update                # Rebuild image
-agent update --quick        # Rebuild AI CLI layer only (fast)
-agent update --full         # Full rebuild, no cache
+safe-ag update                # Rebuild image
+safe-ag update --quick        # Rebuild AI CLI layer only (fast)
+safe-ag update --full         # Full rebuild, no cache
 ```
 
 ### VM management
 
 ```bash
-agent vm ssh                # SSH into the VM for debugging
-agent vm stop               # Stop the VM
-agent vm start              # Start the VM (re-applies hardening)
+safe-ag vm ssh                # SSH into the VM for debugging
+safe-ag vm stop               # Stop the VM
+safe-ag vm start              # Start the VM (re-applies hardening)
 ```
 
 ## Tools included
@@ -298,7 +303,7 @@ Node.js 22, `pnpm`, Bun, Python 3.12, Go 1.23
 | SSH agent | OFF | `--ssh` (socat relay for userns-remap compat) |
 | Auth persistence | Ephemeral per-session volume | `--reuse-auth` |
 | GitHub CLI auth | Ephemeral per-session volume | `--reuse-gh-auth` |
-| AWS credentials | OFF | `--aws <profile>` (tmpfs-backed, refresh with `agent aws-refresh`) |
+| AWS credentials | OFF | `--aws <profile>` (tmpfs-backed, refresh with `safe-ag aws-refresh`) |
 | Docker access | OFF | `--docker` (DinD) / `--docker-socket` |
 | Root filesystem | Read-only | — |
 | Capabilities | Dropped (`ALL`) + `no-new-privileges` | — |
@@ -312,17 +317,17 @@ Node.js 22, `pnpm`, Bun, Python 3.12, Go 1.23
 
 ### Claude Code / Codex (OAuth)
 
-On first `agent spawn`, the CLI shows an OAuth URL. Open it in your macOS browser to authenticate with your subscription.
+On first `safe-ag spawn`, the CLI shows an OAuth URL. Open it in your macOS browser to authenticate with your subscription.
 
 - **Default**: OAuth token is stored in an anonymous per-session volume. You log in each time. Container exit discards the token.
-- **`--reuse-auth`**: Token persists in a shared volume (`agent-claude-auth` / `agent-codex-auth`). Log in once, reuse across sessions.
+- **`--reuse-auth`**: Token persists in a shared volume (`safe-ag spawn claude --repo-auth` / `safe-ag spawn codex --repo-auth`). Log in once, reuse across sessions.
 
 ### GitHub CLI (`gh`)
 
 `gh` is installed in the image.
 
 - **Default**: `gh auth login` state lives in an anonymous per-session volume at `/home/agent/.config/gh`.
-- **`--reuse-gh-auth`**: GitHub CLI auth persists in `agent-gh-auth`. Reuse across sessions; remove with `agent cleanup --auth`.
+- **`--reuse-gh-auth`**: GitHub CLI auth persists in `agent-gh-auth`. Reuse across sessions; remove with `safe-ag cleanup --auth`.
 
 ### Git (SSH via 1Password)
 
@@ -345,7 +350,7 @@ If you want explicit attribution, export it before launch:
 ```bash
 GIT_AUTHOR_NAME="Your Name" \
 GIT_AUTHOR_EMAIL="you@example.com" \
-agent spawn claude --repo https://github.com/myorg/myrepo.git
+safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
 ```
 
 `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` are also honored if you set them explicitly.
@@ -353,7 +358,7 @@ agent spawn claude --repo https://github.com/myorg/myrepo.git
 Or use a one-off flag:
 
 ```bash
-agent spawn claude --identity "Your Name <you@example.com>" --repo https://github.com/myorg/myrepo.git
+safe-ag spawn claude --identity "Your Name <you@example.com>" --repo https://github.com/myorg/myrepo.git
 ```
 
 Or set persistent defaults in `${XDG_CONFIG_HOME:-~/.config}/safe-agentic/defaults.sh`:
@@ -381,7 +386,7 @@ If you want Docker on by default, set `SAFE_AGENTIC_DEFAULT_DOCKER=true` in `def
 
 ### Launch behavior
 
-`agent spawn` / `agent shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `agent update` or `agent setup`.
+`safe-ag spawn` / `safe-ag shell` now require the VM to already have `safe-agentic:latest`. They will not auto-pull from a registry. If the image is missing, run `safe-ag update` or `safe-ag setup`.
 
 ### Host config injection
 
@@ -392,11 +397,11 @@ If no host config is found, safe-agentic writes minimal defaults:
 - Codex: `~/.codex/config.toml` with `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`
 - Claude: `~/.claude/settings.json` with bypass-permissions mode
 
-This keeps manual `codex` / `claude` runs from `agent shell` aligned with the sandbox model.
+This keeps manual `codex` / `claude` runs from `safe-ag shell` aligned with the sandbox model.
 
 ### Build context safety
 
-`agent update` sends only git-tracked files that exist on disk to the VM. Untracked files (including `.env` or scratch files) are excluded from the build context.
+`safe-ag update` sends only git-tracked files that exist on disk to the VM. Untracked files (including `.env` or scratch files) are excluded from the build context.
 
 ## More docs
 

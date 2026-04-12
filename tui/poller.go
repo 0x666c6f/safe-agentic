@@ -64,6 +64,15 @@ func (p *Poller) Stop() {
 	}
 }
 
+// GetAgents returns a copy of the current agent list (thread-safe).
+func (p *Poller) GetAgents() []Agent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := make([]Agent, len(p.agents))
+	copy(result, p.agents)
+	return result
+}
+
 // ForceRefresh triggers an immediate poll outside the regular interval.
 func (p *Poller) ForceRefresh() {
 	go p.poll()
@@ -191,9 +200,24 @@ func execOrbTimeout(timeout time.Duration, args ...string) ([]byte, error) {
 }
 
 func fetchAgents() ([]Agent, error) {
+	// Use a custom format with explicit label extraction to avoid comma-in-value
+	// corruption that occurs with Docker's {{json .}} Labels field.
+	format := strings.Join([]string{
+		"{{.Names}}",
+		`{{.Label "safe-agentic.agent-type"}}`,
+		`{{.Label "safe-agentic.repo-display"}}`,
+		`{{.Label "safe-agentic.ssh"}}`,
+		`{{.Label "safe-agentic.auth"}}`,
+		`{{.Label "safe-agentic.gh-auth"}}`,
+		`{{.Label "safe-agentic.docker"}}`,
+		`{{.Label "safe-agentic.network-mode"}}`,
+		`{{.Label "safe-agentic.fleet"}}`,
+		`{{.Label "safe-agentic.hierarchy"}}`,
+		"{{.Status}}",
+	}, "\t")
 	psData, psErr := execOrb("docker", "ps", "-a",
 		"--filter", "name=^"+containerPrefix+"-",
-		"--format", "{{json .}}")
+		"--format", format)
 	if psErr != nil {
 		return nil, psErr
 	}
@@ -222,22 +246,23 @@ func parsePSOutput(data []byte) []Agent {
 		if len(line) == 0 {
 			continue
 		}
-		var entry dockerPSEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+		parts := strings.Split(string(line), "\t")
+		if len(parts) < 11 {
 			continue
 		}
-		labels := parseLabels(entry.Labels)
-		running := strings.HasPrefix(entry.Status, "Up")
+		running := strings.HasPrefix(parts[10], "Up")
 		agents = append(agents, Agent{
-			Name:        entry.Names,
-			Type:        labels["safe-agentic.agent-type"],
-			Repo:        labels["safe-agentic.repo-display"],
-			SSH:         labels["safe-agentic.ssh"],
-			Auth:        labels["safe-agentic.auth"],
-			GHAuth:      labels["safe-agentic.gh-auth"],
-			Docker:      labels["safe-agentic.docker"],
-			NetworkMode: labels["safe-agentic.network-mode"],
-			Status:      entry.Status,
+			Name:        parts[0],
+			Type:        parts[1],
+			Repo:        parts[2],
+			SSH:         parts[3],
+			Auth:        parts[4],
+			GHAuth:      parts[5],
+			Docker:      parts[6],
+			NetworkMode: parts[7],
+			Fleet:       parts[8],
+			Hierarchy:   parts[9],
+			Status:      parts[10],
 			Running:     running,
 		})
 	}

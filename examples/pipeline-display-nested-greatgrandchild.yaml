@@ -1,0 +1,9 @@
+name: display-nested-greatgrandchild
+defaults:
+  auto_trust: true
+stages:
+  - name: greatgrandchild-leaf
+    agents:
+      - name: greatgrandchild-leaf
+        type: codex
+        prompt: Reply OK.

@@ -30,8 +30,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run non-live suite
-        run: SAFE_AGENTIC_SKIP_LIVE=1 bash tests/run-all.sh
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go suite
+        run: go test ./...
 
   shellcheck:
     if: github.event_name != 'schedule'
@@ -49,11 +54,7 @@ jobs:
       - name: Lint shell entrypoints
         run: |
           shellcheck \
-            bin/agent \
-            bin/agent-alias \
-            bin/agent-lib.sh \
-            bin/agent-claude \
-            bin/agent-codex \
+            bin/agent-session.sh \
             bin/repo-url.sh \
             entrypoint.sh \
             vm/setup.sh

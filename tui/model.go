@@ -15,6 +15,8 @@ type Agent struct {
 	GHAuth      string
 	Docker      string
 	NetworkMode string
+	Fleet       string // fleet/pipeline volume name (empty if standalone)
+	Hierarchy   string // slash-separated nested fleet/pipeline hierarchy
 	Status      string
 	Running     bool
 	Activity    string // "Working", "Idle", "Stopped"
@@ -22,6 +24,8 @@ type Agent struct {
 	Memory      string
 	NetIO       string
 	PIDs        string
+	Deleting    bool   // transient TUI state while stop/remove is in progress
+	Progress    string // transient spinner/progress frame for long-running actions
 }
 
 // Column defines a table column.
@@ -49,8 +53,21 @@ var columns = []Column{
 }
 
 // SortAgents sorts agents by column index.
+// Fleet/pipeline agents are grouped together (fleet first, then standalone).
 func SortAgents(agents []Agent, col int, ascending bool) {
 	sort.SliceStable(agents, func(i, j int) bool {
+		// Primary: group by hierarchy/fleet (grouped agents first)
+		hi, hj := groupKey(agents[i]), groupKey(agents[j])
+		if hi != hj {
+			if hi == "" {
+				return false // standalone after fleet
+			}
+			if hj == "" {
+				return true // fleet before standalone
+			}
+			return hi < hj // different groups sorted alphabetically
+		}
+		// Secondary: sort by selected column within group
 		a, b := fieldByColumn(agents[i], col), fieldByColumn(agents[j], col)
 		if ascending {
 			return a < b
@@ -59,7 +76,32 @@ func SortAgents(agents []Agent, col int, ascending bool) {
 	})
 }
 
+func groupSegments(a Agent) []string {
+	if a.Hierarchy != "" {
+		return strings.Split(a.Hierarchy, "/")
+	}
+	if a.Fleet != "" {
+		return []string{a.Fleet}
+	}
+	return nil
+}
+
+func groupKey(a Agent) string {
+	return strings.Join(groupSegments(a), "\x00")
+}
+
 func fieldByColumn(a Agent, col int) string {
+	if a.Deleting {
+		switch col {
+		case 8:
+			return "Deleting"
+		case 9:
+			if a.Progress != "" {
+				return a.Progress
+			}
+			return "…"
+		}
+	}
 	switch col {
 	case 0:
 		return a.Name
@@ -94,7 +136,6 @@ func fieldByColumn(a Agent, col int) string {
 	}
 }
 
-
 // FilterAgents returns agents matching the filter string (case-insensitive substring on any field).
 func FilterAgents(agents []Agent, filter string) []Agent {
 	if filter == "" {
@@ -111,7 +152,7 @@ func FilterAgents(agents []Agent, filter string) []Agent {
 }
 
 func matchesFilter(a Agent, filter string) bool {
-	fields := []string{a.Name, a.Type, a.Repo, a.SSH, a.Auth, a.GHAuth, a.Docker, a.NetworkMode, a.Status, a.CPU, a.Memory, a.NetIO, a.PIDs}
+	fields := []string{a.Name, a.Type, a.Repo, a.SSH, a.Auth, a.GHAuth, a.Docker, a.NetworkMode, a.Fleet, a.Hierarchy, a.Status, a.CPU, a.Memory, a.NetIO, a.PIDs}
 	for _, f := range fields {
 		if strings.Contains(strings.ToLower(f), filter) {
 			return true
