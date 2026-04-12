@@ -30,6 +30,21 @@ jobs:
           go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tee coverage.txt
 
+      - name: Install local goreportcard CLI
+        run: |
+          tmpdir="$(mktemp -d)"
+          git clone --depth 1 https://github.com/gojp/goreportcard "$tmpdir"
+          (
+            cd "$tmpdir"
+            ./scripts/make-install.sh
+            go install ./cmd/goreportcard-cli
+          )
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run local goreportcard
+        run: |
+          goreportcard-cli | tee goreport.txt
+
       - name: Compute badge payload
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')"
@@ -48,6 +63,26 @@ jobs:
           }
           EOF
 
+          grade="$(awk '/^Grade/ {print $(NF-1)}' goreport.txt)"
+          score="$(awk '/^Grade/ {print $NF}' goreport.txt)"
+          report_color="lightgrey"
+          case "$grade" in
+            A+|A) report_color="brightgreen" ;;
+            B) report_color="green" ;;
+            C) report_color="yellowgreen" ;;
+            D) report_color="yellow" ;;
+            E) report_color="orange" ;;
+            F) report_color="red" ;;
+          esac
+          cat > .badge-out/goreport.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "go report",
+            "message": "${grade} ${score}",
+            "color": "${report_color}"
+          }
+          EOF
+
       - name: Job summary
         run: |
           {
@@ -55,6 +90,12 @@ jobs:
             echo
             echo '```text'
             cat coverage.txt
+            echo '```'
+            echo
+            echo "## Go Report"
+            echo
+            echo '```text'
+            cat goreport.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -65,7 +106,9 @@ jobs:
           path: |
             coverage.out
             coverage.txt
+            goreport.txt
             .badge-out/coverage.json
+            .badge-out/goreport.json
 
       - name: Publish coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -79,8 +122,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p .github/badges
           cp "$GITHUB_WORKSPACE/.badge-out/coverage.json" .github/badges/coverage.json
+          cp "$GITHUB_WORKSPACE/.badge-out/goreport.json" .github/badges/goreport.json
           touch .nojekyll
-          git add .github/badges/coverage.json .nojekyll
-          git commit -m "Update coverage badge"
+          git add .github/badges/coverage.json .github/badges/goreport.json .nojekyll
+          git commit -m "Update quality badges"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin badges
