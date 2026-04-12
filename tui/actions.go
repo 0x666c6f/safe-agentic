@@ -17,6 +17,23 @@ const defaultResumeCWD = "/workspace"
 const tmuxSessionName = "safe-agentic"
 const cliBinary = "safe-ag"
 
+var newCLICmd = func(args ...string) *exec.Cmd {
+	return exec.Command(cliBinary, args...)
+}
+
+func mcpLoginArgs(server, container string) []string {
+	return []string{"mcp-login", server, container}
+}
+
+func sshLabelAllowsPush(v string) bool {
+	switch strings.TrimSpace(v) {
+	case "yes", "true":
+		return true
+	default:
+		return false
+	}
+}
+
 // Actions handles all keybinding-triggered operations.
 type Actions struct {
 	app *App
@@ -244,7 +261,7 @@ func (ac *Actions) StopAgent() {
 		ac.app.table.MarkDeleting(*agent)
 		ac.app.footer.ShowStatus(fmt.Sprintf("Stopping %s...", name), false)
 		go func() {
-			cmd := exec.Command(cliBinary, "stop", name)
+			cmd := newCLICmd("stop", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
@@ -392,7 +409,7 @@ func fetchAgentLogsCLI(name, tailLines string) string {
 	if lines == "0" {
 		lines = "100000"
 	}
-	out, err := exec.Command(cliBinary, "logs", "--lines", lines, name).CombinedOutput()
+	out, err := newCLICmd("logs", "--lines", lines, name).CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -633,38 +650,25 @@ func (ac *Actions) Checkpoint() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	label := fmt.Sprintf("checkpoint-%d", time.Now().Unix())
 	ac.app.footer.ShowStatus(fmt.Sprintf("Creating checkpoint %s...", label), false)
 	go func() {
-		// Stage all changes and create a stash object without modifying the working tree.
-		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
-			"cd /workspace/* 2>/dev/null || cd /workspace; git add -A && git stash create")
-		if err != nil {
-			ac.app.tapp.QueueUpdateDraw(func() {
-				ac.app.footer.ShowStatus("Checkpoint failed: could not create stash", true)
-			})
-			return
-		}
-		stashSHA := strings.TrimSpace(string(out))
-		if stashSHA == "" {
-			ac.app.tapp.QueueUpdateDraw(func() {
-				ac.app.footer.ShowStatus("No changes to checkpoint", false)
-			})
-			return
-		}
-		_, err = execOrbLong("docker", "exec", name, "bash", "-c",
-			fmt.Sprintf("cd /workspace/* 2>/dev/null || cd /workspace; git update-ref refs/safe-agentic/checkpoints/%s %s", label, stashSHA))
+		out, err := newCLICmd("checkpoint", "create", name, label).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint failed: could not save ref %s", label), true)
-			} else {
-				ac.app.footer.ShowStatus(fmt.Sprintf("Checkpoint '%s' created (%s)", label, stashSHA[:7]), false)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Checkpoint failed"
+				}
+				ac.app.footer.ShowStatus(msg, true)
+				return
 			}
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = fmt.Sprintf("Checkpoint '%s' created", label)
+			}
+			ac.app.footer.ShowStatus(msg, false)
 		})
 	}()
 }
@@ -675,18 +679,17 @@ func (ac *Actions) Diff() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Loading diff for %s...", name), false)
 	go func() {
-		out, err := execOrbLong("docker", "exec", name, "bash", "-c",
-			"cd /workspace/* 2>/dev/null || cd /workspace; git diff")
+		out, err := newCLICmd("diff", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Failed to get diff", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Failed to get diff"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := strings.TrimSpace(string(out))
@@ -705,39 +708,17 @@ func (ac *Actions) Todo() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent is not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Loading todos for %s...", name), false)
 	go func() {
-		const pyScript = `
-import json, os, sys
-path = '/workspace/.safe-agentic/todos.json'
-if not os.path.exists(path):
-    print('No todos yet.')
-    sys.exit(0)
-try:
-    with open(path) as f:
-        todos = json.load(f)
-except Exception:
-    print('No todos yet.')
-    sys.exit(0)
-if not todos:
-    print('No todos yet.')
-    sys.exit(0)
-done_count = sum(1 for t in todos if t.get('done'))
-for i, t in enumerate(todos, 1):
-    mark = 'x' if t.get('done') else ' '
-    print('[{}] {}. {}'.format(mark, i, t.get('text', '')))
-print('')
-print('{}/{} complete'.format(done_count, len(todos)))
-`
-		out, err := execOrbLong("docker", "exec", name, "python3", "-c", pyScript)
+		out, err := newCLICmd("todo", "list", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Failed to load todos", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Failed to load todos"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := strings.TrimSpace(string(out))
@@ -794,7 +775,7 @@ func (ac *Actions) ExportSessions() {
 	name := agent.Name
 	ac.app.footer.ShowStatus(fmt.Sprintf("Exporting sessions from %s...", name), false)
 	go func() {
-		cmd := exec.Command(cliBinary, "sessions", name)
+		cmd := newCLICmd("sessions", name)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -836,7 +817,7 @@ func (ac *Actions) McpLogin() {
 		if server == "" {
 			return
 		}
-		cmd := exec.Command(cliBinary, "mcp-login", name, server)
+		cmd := newCLICmd(mcpLoginArgs(server, name)...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -860,7 +841,7 @@ func (ac *Actions) KillAll() {
 		}
 		ac.app.footer.ShowStatus("Stopping all agents...", false)
 		go func() {
-			cmd := exec.Command(cliBinary, "stop", "--all")
+			cmd := newCLICmd("stop", "--all")
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {
@@ -1092,18 +1073,17 @@ func (ac *Actions) Review() {
 	if agent == nil {
 		return
 	}
-	if !agent.Running {
-		ac.app.footer.ShowStatus("Agent not running", true)
-		return
-	}
 	name := agent.Name
 	ac.app.footer.ShowStatus("Running review...", false)
 	go func() {
-		out, err := execOrbLong("docker", "exec", name, "bash", "-lc",
-			"cd /workspace/* 2>/dev/null || cd /workspace; if command -v codex >/dev/null 2>&1; then codex review --uncommitted 2>&1; else git diff 2>&1; fi")
+		out, err := newCLICmd("review", name).CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
-				ac.app.footer.ShowStatus("Review failed", true)
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Review failed"
+				}
+				ac.app.footer.ShowStatus(msg, true)
 				return
 			}
 			content := string(out)
@@ -1125,7 +1105,7 @@ func (ac *Actions) Cost() {
 	name := agent.Name
 	ac.app.footer.ShowStatus("Analyzing cost...", false)
 	go func() {
-		cmd := exec.Command(cliBinary, "cost", name)
+		cmd := newCLICmd("cost", name)
 		out, err := cmd.Output()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1151,7 +1131,7 @@ func (ac *Actions) Cost() {
 func (ac *Actions) Audit() {
 	ac.app.footer.ShowStatus("Loading audit log...", false)
 	go func() {
-		cmd := exec.Command(cliBinary, "audit")
+		cmd := newCLICmd("audit")
 		out, err := cmd.CombinedOutput()
 		ac.app.tapp.QueueUpdateDraw(func() {
 			if err != nil {
@@ -1176,7 +1156,7 @@ func (ac *Actions) Fleet(manifestPath string) {
 	}
 	ac.app.footer.ShowStatus("Spawning fleet from "+manifestPath+"...", false)
 	go func() {
-		cmd := exec.Command(cliBinary, "fleet", manifestPath)
+		cmd := newCLICmd("fleet", manifestPath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1197,7 +1177,7 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 	}
 	ac.app.footer.ShowStatus("Running pipeline from "+pipelinePath+"...", false)
 	go func() {
-		cmd := exec.Command(cliBinary, "pipeline", pipelinePath)
+		cmd := newCLICmd("pipeline", pipelinePath)
 		out, err := cmd.CombinedOutput()
 		ac.app.poller.ForceRefresh()
 		ac.app.tapp.QueueUpdateDraw(func() {
@@ -1222,7 +1202,7 @@ func (ac *Actions) CreatePR() {
 	// Check SSH label first (needed for push)
 	sshLabel, err := execOrb("docker", "inspect", "--format",
 		`{{index .Config.Labels "safe-agentic.ssh"}}`, name)
-	if err != nil || strings.TrimSpace(string(sshLabel)) != "yes" {
+	if err != nil || !sshLabelAllowsPush(string(sshLabel)) {
 		ac.app.footer.ShowStatus(fmt.Sprintf("%s was not spawned with --ssh; push requires SSH", name), true)
 		return
 	}
@@ -1233,7 +1213,7 @@ func (ac *Actions) CreatePR() {
 		}
 		ac.app.footer.ShowStatus(fmt.Sprintf("Creating PR for %s...", name), false)
 		go func() {
-			cmd := exec.Command(cliBinary, "pr", name)
+			cmd := newCLICmd("pr", name)
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {

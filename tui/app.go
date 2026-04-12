@@ -368,17 +368,17 @@ Actions
 
 Inspect
   p                   Toggle preview pane (last output)
-  l                   Logs (docker logs)
+  l                   Logs (safe-ag logs)
   d                   Describe container (docker inspect)
-  y                   YAML view
-  f                   Diff (git diff in workspace)
-  x                   Checkpoint (create snapshot)
+  y                   Raw inspect JSON
+  f                   Diff (safe-ag diff)
+  x                   Checkpoint create
   t                   Todo list
   e                   Export sessions
-  c                   Copy files from container
+  c                   Copy files to VM path
   $                   Cost estimate
   A                   Audit log
-  R                   Code review (codex)
+  R                   Code review (safe-ag review)
   g                   Create PR
   m                   MCP OAuth login
 
