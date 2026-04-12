@@ -16,11 +16,11 @@ import (
 )
 
 const (
-	vmName     = "safe-agentic"
 	testPrefix = "agent-e2e-test"
 )
 
 var orbExec *orb.OrbExecutor
+var testVMName = "safe-agentic"
 
 // binaryPath holds the path to the built safe-ag binary.
 // Set relative to the module root by TestMain.
@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv("SAFE_AGENTIC_INTEGRATION") != "1" {
 		fmt.Println("SKIP: set SAFE_AGENTIC_INTEGRATION=1 to run integration tests")
 		os.Exit(0)
+	}
+	if v := os.Getenv("SAFE_AGENTIC_INTEGRATION_VM"); v != "" {
+		testVMName = v
 	}
 
 	// Build the binary
@@ -54,13 +57,20 @@ func TestMain(m *testing.M) {
 	}
 
 	// Verify VM + Docker
-	orbExec = &orb.OrbExecutor{VMName: vmName}
+	orbExec = &orb.OrbExecutor{VMName: testVMName}
 	ctx := context.Background()
-	if _, err := orbExec.Run(ctx, "docker", "info"); err != nil {
-		fmt.Fprintf(os.Stderr, "docker not available in VM: %v\n", err)
+	var infoErr error
+	for i := 0; i < 6; i++ {
+		if _, infoErr = orbExec.Run(ctx, "docker", "info"); infoErr == nil {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	if infoErr != nil {
+		fmt.Fprintf(os.Stderr, "docker not available in VM %s: %v\n", testVMName, infoErr)
 		os.Exit(1)
 	}
-	fmt.Println("VM and Docker OK")
+	fmt.Printf("VM %s and Docker OK\n", testVMName)
 
 	code := m.Run()
 
@@ -99,6 +109,7 @@ func cleanupTestContainers() {
 func runSafeAg(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(binaryPath, args...)
+	cmd.Env = append(os.Environ(), "SAFE_AGENTIC_VM_NAME="+testVMName)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

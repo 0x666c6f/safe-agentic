@@ -13,6 +13,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func configuredVMName() string {
+	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+		return v
+	}
+	return "safe-agentic"
+}
+
 // ─── setup ─────────────────────────────────────────────────────────────────
 
 var setupCmd = &cobra.Command{
@@ -26,6 +33,7 @@ func init() {
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
+	vmName := configuredVMName()
 	// Step 1: Check if orb is installed.
 	if _, err := exec.LookPath("orb"); err != nil {
 		return fmt.Errorf("orb not found in PATH: install OrbStack from https://orbstack.dev")
@@ -39,7 +47,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	orbExec := exec.Command("orb", "list")
 	if out, err := orbExec.Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "safe-agentic") {
+			if strings.Contains(line, vmName) {
 				vmExists = true
 				break
 			}
@@ -48,8 +56,8 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Step 3: Create VM if needed.
 	if !vmExists {
-		fmt.Println("Creating VM safe-agentic (ubuntu:noble)…")
-		create := exec.Command("orb", "create", "ubuntu:noble", "safe-agentic")
+		fmt.Printf("Creating VM %s (ubuntu:noble)…\n", vmName)
+		create := exec.Command("orb", "create", "ubuntu:noble", vmName)
 		create.Stdout = cmd.OutOrStdout()
 		create.Stderr = cmd.ErrOrStderr()
 		if err := create.Run(); err != nil {
@@ -60,7 +68,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		// Give the VM a moment to boot.
 		time.Sleep(3 * time.Second)
 	} else {
-		fmt.Println("✓ VM safe-agentic already exists")
+		fmt.Printf("✓ VM %s already exists\n", vmName)
 	}
 
 	orbRunner := newExecutor()
@@ -69,8 +77,8 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("To complete setup, run the VM bootstrap script manually:")
 	fmt.Println()
-	fmt.Println("  orb push -m safe-agentic vm/setup.sh /tmp/setup.sh")
-	fmt.Println("  orb run -m safe-agentic bash /tmp/setup.sh")
+	fmt.Printf("  orb push -m %s vm/setup.sh /tmp/setup.sh\n", vmName)
+	fmt.Printf("  orb run -m %s bash /tmp/setup.sh\n", vmName)
 	fmt.Println()
 
 	// Attempt a quick check: is Docker already running in the VM?
@@ -83,7 +91,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		if buildErr != nil {
 			fmt.Println("Could not build image automatically.")
 			fmt.Println("Copy build context first:")
-			fmt.Println("  orb push -m safe-agentic . /tmp/build-context/")
+			fmt.Printf("  orb push -m %s . /tmp/build-context/\n", vmName)
 			fmt.Println("Then run: safe-ag update")
 		} else {
 			fmt.Print(string(buildOut))
@@ -91,7 +99,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		fmt.Println("Docker not yet available in VM — run the bootstrap script above, then:")
-		fmt.Println("  orb push -m safe-agentic . /tmp/build-context/")
+		fmt.Printf("  orb push -m %s . /tmp/build-context/\n", vmName)
 		fmt.Println("  safe-ag update")
 	}
 
@@ -179,21 +187,23 @@ func runVMSSH(cmd *cobra.Command, args []string) error {
 }
 
 func runVMStart(cmd *cobra.Command, args []string) error {
-	fmt.Println("Starting VM safe-agentic…")
-	start := exec.Command("orb", "start", "safe-agentic")
+	vmName := configuredVMName()
+	fmt.Printf("Starting VM %s…\n", vmName)
+	start := exec.Command("orb", "start", vmName)
 	start.Stdout = cmd.OutOrStdout()
 	start.Stderr = cmd.ErrOrStderr()
 	if err := start.Run(); err != nil {
 		return fmt.Errorf("orb start: %w", err)
 	}
 	fmt.Println("✓ VM started")
-	fmt.Println("Tip: run setup script to re-harden: orb run -m safe-agentic bash /tmp/setup.sh")
+	fmt.Printf("Tip: run setup script to re-harden: orb run -m %s bash /tmp/setup.sh\n", vmName)
 	return nil
 }
 
 func runVMStop(cmd *cobra.Command, args []string) error {
-	fmt.Println("Stopping VM safe-agentic…")
-	stop := exec.Command("orb", "stop", "safe-agentic")
+	vmName := configuredVMName()
+	fmt.Printf("Stopping VM %s…\n", vmName)
+	stop := exec.Command("orb", "stop", vmName)
 	stop.Stdout = cmd.OutOrStdout()
 	stop.Stderr = cmd.ErrOrStderr()
 	if err := stop.Run(); err != nil {
@@ -265,6 +275,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 func runDiagnose(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	vmName := configuredVMName()
 
 	check := func(label string, ok bool, detail string) {
 		icon := "✓"
@@ -295,13 +306,13 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	vmExists := false
 	if out, err := exec.Command("orb", "list").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "safe-agentic") {
+			if strings.Contains(line, vmName) {
 				vmExists = true
 				break
 			}
 		}
 	}
-	check("VM safe-agentic exists", vmExists, "")
+	check("VM "+vmName+" exists", vmExists, "")
 
 	if !vmExists {
 		fmt.Println()
