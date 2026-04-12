@@ -576,14 +576,15 @@ func TestDet_MultipleRepos(t *testing.T) {
 // Group 8: Security Preamble & Config Injection
 // ═══════════════════════════════════════════════════════════════════════════
 
-func TestDet_SecurityPreambleNotInjectedWithoutTemplate(t *testing.T) {
+func TestDet_SecurityPreambleInjectedByEntrypoint(t *testing.T) {
 	ensureSharedContainer(t)
-	// The security-preamble.md template is NOT baked into the Docker image;
-	// it's injected by the CLI at spawn time. Containers created via
-	// docker run directly should NOT have CLAUDE.md.
-	_, err := detExecMayFail(t, "test", "-f", "/home/agent/.claude/CLAUDE.md")
-	if err == nil {
-		t.Fatal("CLAUDE.md should NOT exist without preamble template (not baked into image)")
+	out := detExec(t, "cat", "/home/agent/.claude/CLAUDE.md")
+	if !strings.Contains(out, "safe-agentic:security-preamble") {
+		t.Fatalf("CLAUDE.md should contain injected security preamble marker, got: %s", out)
+	}
+	out = detExec(t, "cat", "/home/agent/.codex/AGENTS.md")
+	if !strings.Contains(out, "safe-agentic:security-preamble") {
+		t.Fatalf("AGENTS.md should contain injected security preamble marker, got: %s", out)
 	}
 }
 
