@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"safe-agentic/pkg/audit"
-	"safe-agentic/pkg/config"
-	"safe-agentic/pkg/fleet"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/audit"
+	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
 // ─── test harness ─────────────────────────────────────────────────────────────

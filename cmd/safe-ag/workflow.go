@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"safe-agentic/pkg/docker"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 
 	"github.com/spf13/cobra"
 )

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"strings"
 	"testing"
 )

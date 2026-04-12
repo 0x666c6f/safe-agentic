@@ -3,8 +3,8 @@ package docker
 import (
 	"context"
 	"fmt"
-	"safe-agentic/pkg/labels"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/labels"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
 func VolumeExists(ctx context.Context, exec orb.Executor, name string) (bool, error) {

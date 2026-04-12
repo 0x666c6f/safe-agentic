@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 
 	"github.com/spf13/cobra"
 )

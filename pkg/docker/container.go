@@ -3,7 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"strings"
 )
 
