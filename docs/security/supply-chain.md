@@ -34,9 +34,9 @@ This prevents accidental leakage of secrets or local-only files into the image.
 ## Image build modes
 
 ```bash
-agent update              # uses Docker layer cache
-agent update --quick      # busts only the AI CLI layer (fast)
-agent update --full       # no cache, rebuilds from scratch
+safe-ag update              # uses Docker layer cache
+safe-ag update --quick      # busts only the AI CLI layer (fast)
+safe-ag update --full       # no cache, rebuilds from scratch
 ```
 
 - `--quick` is useful after Claude Code or Codex releases a new version — it rebuilds only the npm/installer layer

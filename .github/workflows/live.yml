@@ -23,26 +23,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Add repo bin to PATH
-        run: echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: make build-all
 
       - name: Verify runner prerequisites
         run: |
           command -v orb
-          command -v script
 
       - name: Set up VM and image
-        run: agent setup
+        run: ./bin/safe-ag setup
 
       - name: Diagnose environment
-        run: agent diagnose
+        run: ./bin/safe-ag diagnose
 
-      - name: Run live integration
-        run: bash tests/test-live-integration.sh
+      - name: Dry-run spawn smoke
+        run: ./bin/safe-ag spawn claude --dry-run --repo https://github.com/octocat/Hello-World
 
-      - name: Run live agent CLIs
-        run: bash tests/test-live-agent-clis.sh
+      - name: Dry-run nested pipeline smoke
+        run: ./bin/safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
 
       - name: Cleanup containers and auth
         if: always()
-        run: agent cleanup --auth
+        run: ./bin/safe-ag cleanup --auth

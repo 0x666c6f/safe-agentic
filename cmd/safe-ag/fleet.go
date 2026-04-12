@@ -56,7 +56,7 @@ func runFleet(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			opts := specToSpawnOpts(spec, "fleet-dry-run")
-			fmt.Printf("  Would spawn: agent spawn %s", opts.AgentType)
+			fmt.Printf("  Would spawn: safe-ag spawn %s", opts.AgentType)
 			if opts.Name != "" {
 				fmt.Printf(" --name %s", opts.Name)
 			}

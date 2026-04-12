@@ -84,7 +84,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 			fmt.Println("Could not build image automatically.")
 			fmt.Println("Copy build context first:")
 			fmt.Println("  orb push -m safe-agentic . /tmp/build-context/")
-			fmt.Println("Then run: agent update")
+			fmt.Println("Then run: safe-ag update")
 		} else {
 			fmt.Print(string(buildOut))
 			fmt.Println("✓ Image built")
@@ -92,7 +92,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Println("Docker not yet available in VM — run the bootstrap script above, then:")
 		fmt.Println("  orb push -m safe-agentic . /tmp/build-context/")
-		fmt.Println("  agent update")
+		fmt.Println("  safe-ag update")
 	}
 
 	return nil
@@ -305,7 +305,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 
 	if !vmExists {
 		fmt.Println()
-		fmt.Println("Run: agent setup")
+		fmt.Println("Run: safe-ag setup")
 		return nil
 	}
 
@@ -328,7 +328,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if orbErr == nil && vmExists && dockerErr == nil && imageExists {
 		fmt.Println("All checks passed. Environment is ready.")
 	} else {
-		fmt.Println("Some checks failed. Run: agent setup")
+		fmt.Println("Some checks failed. Run: safe-ag setup")
 	}
 
 	return nil

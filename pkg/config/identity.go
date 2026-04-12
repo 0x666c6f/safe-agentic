@@ -8,7 +8,7 @@ import (
 
 // ParseIdentity parses an identity string of the form "Name <email>" and
 // returns the name and email components. It mirrors the parse_identity()
-// function in bin/agent-lib.sh.
+// from the legacy shell implementation.
 func ParseIdentity(identity string) (string, string, error) {
 	if identity == "" {
 		return "", "", fmt.Errorf("identity must not be empty")
@@ -31,7 +31,7 @@ func ParseIdentity(identity string) (string, string, error) {
 
 // DetectGitIdentity reads the global git config and returns "Name <email>" if
 // both user.name and user.email are set, or an empty string otherwise. It
-// mirrors detect_git_identity() in bin/agent-lib.sh.
+// ports the old shell detect_git_identity behavior.
 func DetectGitIdentity() string {
 	nameOut, err := exec.Command("git", "config", "--global", "user.name").Output()
 	if err != nil {

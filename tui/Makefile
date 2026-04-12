@@ -1,10 +1,10 @@
 .PHONY: build install clean
 
 build:
-	go build -o agent-tui .
+	go build -o safe-ag-tui .
 
 install:
-	go build -o ../bin/agent-tui .
+	go build -o ../bin/safe-ag-tui .
 
 clean:
-	rm -f agent-tui ../bin/agent-tui
+	rm -f safe-ag-tui ../bin/safe-ag-tui

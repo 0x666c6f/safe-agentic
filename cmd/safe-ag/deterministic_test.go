@@ -579,8 +579,8 @@ func TestDet_MultipleRepos(t *testing.T) {
 func TestDet_SecurityPreambleNotInjectedWithoutTemplate(t *testing.T) {
 	ensureSharedContainer(t)
 	// The security-preamble.md template is NOT baked into the Docker image;
-	// it's injected by bin/agent at spawn time. Containers created via
-	// docker run directly (without bin/agent) should NOT have CLAUDE.md.
+	// it's injected by the CLI at spawn time. Containers created via
+	// docker run directly should NOT have CLAUDE.md.
 	_, err := detExecMayFail(t, "test", "-f", "/home/agent/.claude/CLAUDE.md")
 	if err == nil {
 		t.Fatal("CLAUDE.md should NOT exist without preamble template (not baked into image)")

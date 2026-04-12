@@ -36,7 +36,7 @@ func main() {
 	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Println("Usage: agent-tui [--dashboard [--bind host:port]]")
+		fmt.Println("Usage: safe-ag-tui [--dashboard [--bind host:port]]")
 		fmt.Println()
 		fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
 		fmt.Println("  --dashboard    Start web dashboard instead of TUI")
@@ -91,7 +91,7 @@ func preflight() error {
 		return fmt.Errorf("failed to list VMs: %w", err)
 	}
 	if !strings.Contains(string(out), vmName) {
-		return fmt.Errorf("VM '%s' not found. Run 'agent setup' first", vmName)
+		return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", vmName)
 	}
 	return nil
 }

@@ -65,7 +65,7 @@ const dashboardHTML = `
 </tbody>
 </table>
 {{else}}
-<div class="empty">No agents running. Use <code>agent spawn</code> to start one.</div>
+<div class="empty">No agents running. Use <code>safe-ag spawn</code> to start one.</div>
 {{end}}
 <p class="refresh-note">Auto-refreshes every 5 seconds</p>
 <script>

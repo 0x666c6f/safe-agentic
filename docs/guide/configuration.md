@@ -2,7 +2,7 @@
 
 ## Defaults file
 
-`~/.config/safe-agentic/defaults.sh` — loaded on every `agent` command.
+`~/.config/safe-agentic/defaults.sh` — loaded on every `safe-ag` command.
 
 ```bash
 SAFE_AGENTIC_DEFAULT_MEMORY=16g
@@ -19,42 +19,42 @@ Simple `KEY=value` lines only. Not sourced as shell.
 
 ## Config command
 
-`agent config` manages defaults from the command line instead of editing the defaults file directly.
+`safe-ag config` manages defaults from the command line instead of editing the defaults file directly.
 
 ```bash
 # Show all current defaults
-agent config show
+safe-ag config show
 
 # Get a single value
-agent config get memory
+safe-ag config get memory
 
 # Set a value
-agent config set memory 16g
-agent config set cpus 8
-agent config set reuse_auth true
-agent config set identity "Your Name <you@example.com>"
+safe-ag config set memory 16g
+safe-ag config set cpus 8
+safe-ag config set reuse_auth true
+safe-ag config set identity "Your Name <you@example.com>"
 
 # Reset to built-in defaults
-agent config reset memory
-agent config reset --all
+safe-ag config reset memory
+safe-ag config reset --all
 ```
 
-Changes write to `~/.config/safe-agentic/defaults.sh` and take effect on the next `agent` command.
+Changes write to `~/.config/safe-agentic/defaults.sh` and take effect on the next `safe-ag` command.
 
 ## Template command
 
-`agent template` manages built-in and custom prompt templates.
+`safe-ag template` manages built-in and custom prompt templates.
 
 ```bash
 # List all templates (built-in + custom)
-agent template list
+safe-ag template list
 
 # Preview a template's prompt
-agent template show security-audit
-agent template show my-custom-template
+safe-ag template show security-audit
+safe-ag template show my-custom-template
 
 # Create a new custom template (opens $EDITOR)
-agent template create backend-engineer
+safe-ag template create backend-engineer
 ```
 
 Custom templates are stored in `~/.config/safe-agentic/templates/`. Built-in templates (`security-audit`, `code-review`, `test-coverage`, `dependency-update`, `bug-fix`, `docs-review`) are read-only and cannot be overwritten.
@@ -62,15 +62,15 @@ Custom templates are stored in `~/.config/safe-agentic/templates/`. Built-in tem
 Use templates at spawn time:
 
 ```bash
-agent spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+safe-ag spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
 ```
 
 ## MCP OAuth login
 
 ```bash
-agent mcp-login linear       # uses default codex auth volume
-agent mcp-login notion
-agent mcp-login <name> linear  # target a specific container
+safe-ag mcp-login linear       # uses default codex auth volume
+safe-ag mcp-login notion
+safe-ag mcp-login <name> linear  # target a specific container
 ```
 
 Tokens persist in the auth volume. One-time setup per MCP server.
@@ -79,11 +79,11 @@ Tokens persist in the auth volume. One-time setup per MCP server.
 
 ```bash
 # Inject at spawn time
-agent spawn claude --ssh --aws my-aws-profile --repo ...
+safe-ag spawn claude --ssh --aws my-aws-profile --repo ...
 
 # Refresh in a running container
-agent aws-refresh api-refactor
-agent aws-refresh --latest my-profile
+safe-ag aws-refresh api-refactor
+safe-ag aws-refresh --latest my-profile
 ```
 
 Credentials stored on tmpfs. AWS SDKs re-read automatically — no restart needed.
@@ -92,23 +92,23 @@ Credentials stored on tmpfs. AWS SDKs re-read automatically — no restart neede
 
 ```bash
 # Safer: per-session Docker-in-Docker sidecar
-agent spawn claude --docker --repo ...
+safe-ag spawn claude --docker --repo ...
 
 # Broader: mount VM Docker socket directly
-agent spawn claude --docker-socket --repo ...
+safe-ag spawn claude --docker-socket --repo ...
 ```
 
 ## Setup and maintenance
 
 ```bash
-agent setup               # first-time VM + image creation
-agent update               # rebuild image (cached)
-agent update --quick       # rebuild AI CLI layer only
-agent update --full        # full rebuild, no cache
-agent vm start             # start VM + re-harden
-agent vm stop              # stop VM
-agent vm ssh               # debug the VM
-agent diagnose             # health check
+safe-ag setup               # first-time VM + image creation
+safe-ag update               # rebuild image (cached)
+safe-ag update --quick       # rebuild AI CLI layer only
+safe-ag update --full        # full rebuild, no cache
+safe-ag vm start             # start VM + re-harden
+safe-ag vm stop              # stop VM
+safe-ag vm ssh               # debug the VM
+safe-ag diagnose             # health check
 ```
 
 ## Troubleshooting
@@ -116,8 +116,8 @@ agent diagnose             # health check
 ### `No SSH_AUTH_SOCK in VM`
 
 ```bash
-agent diagnose
-agent vm start
+safe-ag diagnose
+safe-ag vm start
 ```
 
 Verify 1Password SSH agent is enabled on macOS.
@@ -125,7 +125,7 @@ Verify 1Password SSH agent is enabled on macOS.
 ### `Image not found`
 
 ```bash
-agent update
+safe-ag update
 ```
 
 ### OAuth hangs

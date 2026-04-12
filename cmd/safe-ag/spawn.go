@@ -222,7 +222,7 @@ func executeSpawn(opts SpawnOpts) error {
 	cmd := docker.NewRunCmd(containerName, imageName)
 	cmd.AddEnv("AGENT_TYPE", opts.AgentType)
 	if len(opts.Repos) > 0 {
-		cmd.AddEnv("REPOS", strings.Join(opts.Repos, " "))
+		cmd.AddEnv("REPOS", strings.Join(opts.Repos, ","))
 	}
 	if gitName != "" {
 		cmd.AddEnv("GIT_AUTHOR_NAME", gitName)

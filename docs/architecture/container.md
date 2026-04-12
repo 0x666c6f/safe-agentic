@@ -61,9 +61,9 @@ The Dockerfile is a multi-layer build with strict supply chain controls:
 
 ```bash
 # Build the image
-agent update              # uses Docker cache
-agent update --quick      # rebuilds only AI CLI layer
-agent update --full       # no cache, rebuilds everything
+safe-ag update              # uses Docker cache
+safe-ag update --quick      # rebuilds only AI CLI layer
+safe-ag update --full       # no cache, rebuilds everything
 ```
 
 The build context is constructed from `git ls-files -c` filtered by `test -e` — only tracked files that exist on disk are sent. This prevents `.env` files, credentials, or untracked data from leaking into the image.
@@ -103,9 +103,9 @@ Key security checks during entrypoint:
 Claude and Codex run inside a tmux session named `safe-agentic`. This enables:
 
 - **Detach without stopping**: `Ctrl-b d` detaches the tmux session while the agent keeps running
-- **Reattach**: `agent attach` reconnects to the live tmux session
-- **Resume**: If the container was stopped, `agent attach` restarts it and the agent's `--continue` / `resume --last` picks up the previous conversation
-- **Preview**: `agent peek` captures the last N lines of the tmux pane without attaching
+- **Reattach**: `safe-ag attach` reconnects to the live tmux session
+- **Resume**: If the container was stopped, `safe-ag attach` restarts it and the agent's `--continue` / `resume --last` picks up the previous conversation
+- **Preview**: `safe-ag peek` captures the last N lines of the tmux pane without attaching
 - **Session state**: A state file at `/workspace/.safe-agentic/started` tracks whether this is a fresh start or resume
 
 ## Container lifecycle
@@ -113,12 +113,12 @@ Claude and Codex run inside a tmux session named `safe-agentic`. This enables:
 ```mermaid
 sequenceDiagram
     actor User
-    participant CLI as bin/agent
+    participant CLI as safe-ag
     participant Docker as Docker (in VM)
     participant Container
     participant Entry as entrypoint.sh
 
-    User->>CLI: agent spawn claude --ssh --repo git@...
+    User->>CLI: safe-ag spawn claude --ssh --repo git@...
     CLI->>CLI: Parse flags, validate inputs
     CLI->>Docker: Create dedicated bridge network
     CLI->>Docker: docker run (detached, hardened flags)
@@ -131,15 +131,15 @@ sequenceDiagram
 
     alt User detaches (Ctrl-b d)
         Note over Container: Container keeps running
-        User->>CLI: agent attach <name>
+        User->>CLI: safe-ag attach <name>
         CLI->>Docker: docker exec tmux attach
     else Agent exits
         Note over Container: Container stops, persists
-        User->>CLI: agent attach <name>
+        User->>CLI: safe-ag attach <name>
         CLI->>Docker: docker start <name>
         CLI->>Docker: docker exec tmux attach
     else User stops explicitly
-        User->>CLI: agent stop <name>
+        User->>CLI: safe-ag stop <name>
         CLI->>Docker: docker stop + docker rm
         CLI->>Docker: Remove bridge network
     end

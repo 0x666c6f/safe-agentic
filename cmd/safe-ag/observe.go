@@ -116,8 +116,75 @@ func runLogs(cmd *cobra.Command, args []string) error {
 }
 
 func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDir string, searchDirs []string, findCmd string, tailCount int, running bool) ([]byte, error) {
+	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
+	promptHint, _ := docker.InspectLabel(ctx, exec, name, labels.Prompt)
+	promptHint = strings.TrimSuffix(promptHint, "...")
+	matchScript := `
+import os, json, sys, glob, datetime
+container_created = sys.argv[1][:19]
+prompt_hint = sys.argv[2]
+search_dirs = [p for p in sys.argv[3:] if p]
+
+def parse_ts(raw):
+    if not raw:
+        return None
+    raw = raw[:19]
+    try:
+        return datetime.datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+container_dt = parse_ts(container_created)
+files = []
+seen = set()
+for find_dir in search_dirs:
+    for pattern in (os.path.join(find_dir, '*.jsonl'), os.path.join(find_dir, '**', '*.jsonl')):
+        for f in glob.glob(pattern, recursive=True):
+            if f.endswith('history.jsonl') or '/subagents/' in f or f in seen:
+                continue
+            seen.add(f)
+            files.append(f)
+
+best_file = None
+best_score = None
+for f in files:
+    try:
+        session_dt = None
+        prompt_match = False
+        with open(f) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                if prompt_hint and prompt_hint in line:
+                    prompt_match = True
+                d = json.loads(line)
+                ts = d.get('timestamp', '')
+                if not ts and 'message' in d and isinstance(d['message'], dict):
+                    ts = d['message'].get('timestamp', '')
+                if ts:
+                    session_dt = parse_ts(ts)
+                if prompt_match and session_dt is not None:
+                    break
+        if session_dt is None:
+            session_dt = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+        score = abs((session_dt - container_dt).total_seconds()) if container_dt else float('inf')
+        key = (0 if prompt_match else 1, score)
+        if best_score is None or key < best_score:
+            best_score = key
+            best_file = f
+    except Exception:
+        pass
+
+if not best_file and files:
+    best_file = max(files, key=os.path.getmtime)
+if best_file:
+    print(best_file)
+`
+
 	if running {
-		out, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", findCmd)
+		args := append([]string{"docker", "exec", name, "python3", "-c", matchScript, createdAt, promptHint}, searchDirs...)
+		out, err := exec.Run(ctx, args...)
 		if err != nil {
 			return readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, tailCount, false)
 		}
@@ -148,10 +215,22 @@ func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDi
 	for _, dir := range searchDirs {
 		localDirs = append(localDirs, filepath.Join(localRoot, strings.TrimPrefix(dir, configDir+"/")))
 	}
-	localFindCmd := fmt.Sprintf(
-		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
-		strings.Join(localDirs, " "))
-	out, err := exec.Run(ctx, "bash", "-c", localFindCmd)
+	args := append([]string{"python3", "-c", matchScript, createdAt, promptHint}, localDirs...)
+	out, err := exec.Run(ctx, args...)
+	if err == nil {
+		jsonlPath := strings.TrimSpace(string(out))
+		if jsonlPath != "" {
+			tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, shellQuote(jsonlPath))
+			out, err = exec.Run(ctx, "bash", "-c", tailCmd)
+			if err != nil {
+				return nil, fmt.Errorf("read session log: %w", err)
+			}
+			return out, nil
+		}
+	}
+
+	localFindCmd := strings.ReplaceAll(findCmd, configDir, localRoot)
+	out, err = exec.Run(ctx, "bash", "-c", localFindCmd)
 	if err != nil {
 		return nil, fmt.Errorf("find session log: %w", err)
 	}
@@ -428,6 +507,10 @@ func runOutput(cmd *cobra.Command, args []string) error {
 
 		lastMessage, _ := readLastSessionMessage(ctx, exec, name)
 		if lastMessage == "" {
+			rendered, _ := readRenderedAgentLogs(ctx, exec, name, 200)
+			lastMessage = summarizeAgentLogs(rendered)
+		}
+		if lastMessage == "" {
 			logsOut, _ := exec.Run(ctx, "docker", "logs", "--tail", "20", name)
 			lastMessage = strings.TrimSpace(string(logsOut))
 			if len(lastMessage) > 500 {
@@ -449,6 +532,14 @@ func runOutput(cmd *cobra.Command, args []string) error {
 			fmt.Println(lastMessage)
 			return nil
 		}
+		if rendered, _ := readRenderedAgentLogs(ctx, exec, name, 50); strings.TrimSpace(rendered) != "" {
+			if summary := summarizeAgentLogs(rendered); summary != "" {
+				fmt.Println(summary)
+				return nil
+			}
+			fmt.Println(rendered)
+			return nil
+		}
 		// For tmux containers, capture the pane (docker logs only shows entrypoint)
 		termLabel, _ := docker.InspectLabel(ctx, exec, name, "safe-agentic.terminal")
 		if running && termLabel == "tmux" {
@@ -467,6 +558,75 @@ func runOutput(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func readRenderedAgentLogs(ctx context.Context, exec orb.Executor, name string, lines int) (string, error) {
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	configDir := agentConfigDir(agentType)
+	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
+	searchDirs := sessionSearchDirs(configDir, repoLabel)
+	running, _ := docker.IsRunning(ctx, exec, name)
+	findCmd := fmt.Sprintf(
+		"find %s -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
+		searchDirs[0])
+
+	data, err := readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, lines*3, running)
+	if err != nil {
+		return "", err
+	}
+
+	rendered := make([]string, 0, lines)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		entry := renderLogEntry(scanner.Text())
+		if entry == "" {
+			continue
+		}
+		rendered = append(rendered, entry)
+		if len(rendered) >= lines {
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(rendered, "\n")), nil
+}
+
+func summarizeAgentLogs(logs string) string {
+	logs = stripANSI(logs)
+	var last string
+	for _, line := range strings.Split(logs, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, ">") || strings.HasPrefix(line, "[tool:") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			continue
+		}
+		last = line
+	}
+	return last
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inEsc {
+			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		if c == 0x1b {
+			inEsc = true
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 func readLastSessionMessage(ctx context.Context, exec orb.Executor, name string) (string, error) {
@@ -498,7 +658,7 @@ func extractLastAssistantMessage(data []byte) string {
 			var msg map[string]interface{}
 			if err := json.Unmarshal(msgRaw, &msg); err == nil {
 				if role, _ := msg["role"].(string); role == "assistant" {
-					if content := extractAssistantText(msg); strings.TrimSpace(content) != "" {
+					if content := extractAssistantTextForOutput(msg); strings.TrimSpace(content) != "" {
 						last = strings.TrimSpace(content)
 					}
 				}
@@ -507,13 +667,42 @@ func extractLastAssistantMessage(data []byte) string {
 		if typ := jsonString(obj, "type"); typ == "assistant" {
 			var msg map[string]interface{}
 			if msgRaw, ok := obj["message"]; ok && json.Unmarshal(msgRaw, &msg) == nil {
-				if content := extractAssistantText(msg); strings.TrimSpace(content) != "" {
+				if content := extractAssistantTextForOutput(msg); strings.TrimSpace(content) != "" {
 					last = strings.TrimSpace(content)
 				}
 			}
 		}
 	}
 	return last
+}
+
+func extractAssistantTextForOutput(msg map[string]interface{}) string {
+	content, ok := msg["content"]
+	if !ok {
+		return ""
+	}
+	if s, ok := content.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	blocks, ok := content.([]interface{})
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		block, ok := b.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		bType, _ := block["type"].(string)
+		switch bType {
+		case "text", "output_text", "input_text":
+			if t, ok := block["text"].(string); ok && strings.TrimSpace(t) != "" {
+				parts = append(parts, strings.TrimSpace(t))
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func runGitOnStoppedWorkspace(ctx context.Context, exec orb.Executor, name, gitCmd string) ([]byte, error) {

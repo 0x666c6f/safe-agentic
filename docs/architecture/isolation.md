@@ -29,7 +29,7 @@ graph LR
 
 ### How hardening is applied
 
-`vm/setup.sh` runs on every `agent setup` and `agent vm start`:
+`vm/setup.sh` runs on every `safe-ag setup` and `safe-ag vm start`:
 
 1. Mounts tmpfs over `/Users`, `/mnt/mac`, `/Volumes`, `/mnt/machines`
 2. Adds fstab entries so mounts persist across reboots
@@ -39,7 +39,7 @@ graph LR
 
 ### Known limitation
 
-OrbStack does not yet support per-VM file sharing configuration ([issue #169](https://github.com/orbstack/orbstack/issues/169)). The tmpfs overlay approach is a workaround — it blocks access effectively but must be reapplied if OrbStack resets the VM. Always use `agent vm start` instead of starting the VM directly.
+OrbStack does not yet support per-VM file sharing configuration ([issue #169](https://github.com/orbstack/orbstack/issues/169)). The tmpfs overlay approach is a workaround — it blocks access effectively but must be reapplied if OrbStack resets the VM. Always use `safe-ag vm start` instead of starting the VM directly.
 
 ## Boundary 2: Docker Container
 
@@ -89,7 +89,7 @@ graph LR
 --tmpfs /home/agent/.config:rw,noexec,nosuid,size=32m
 ```
 
-These flags are built as bash arrays in `bin/agent-lib.sh` to prevent injection. Unsafe flags (`--privileged`, `host` network, `--` passthrough) are explicitly blocked.
+These runtime flags are assembled by the Go CLI and validated before `docker run`. Unsafe flags (`--privileged`, `host` network, `--` passthrough) are explicitly blocked.
 
 ## Boundary 3: Container-to-Container Isolation
 

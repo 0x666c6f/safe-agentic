@@ -31,7 +31,7 @@ type Config struct {
 	GitCommitterEmail string
 }
 
-// Defaults returns a Config with the same hardcoded defaults as bin/agent:
+// Defaults returns a Config with the CLI hardcoded defaults:
 // DEFAULT_CPUS=4, DEFAULT_MEMORY=8g, DEFAULT_PIDS_LIMIT=512.
 func Defaults() Config {
 	return Config{
@@ -44,7 +44,7 @@ func Defaults() Config {
 }
 
 // DefaultsPath returns the path to the defaults file, respecting
-// XDG_CONFIG_HOME. It mirrors the DEFAULTS_FILE variable in bin/agent-lib.sh.
+// XDG_CONFIG_HOME.
 func DefaultsPath() string {
 	xdg := os.Getenv("XDG_CONFIG_HOME")
 	if xdg == "" {
@@ -57,7 +57,7 @@ func DefaultsPath() string {
 // LoadDefaults reads and parses a defaults file at path, returning a populated
 // Config. If the file does not exist, it returns Defaults() with no error. It
 // mirrors load_user_defaults() / parse_defaults_line() / parse_defaults_value()
-// in bin/agent-lib.sh.
+// in the former shell implementation.
 func LoadDefaults(path string) (Config, error) {
 	cfg := Defaults()
 
@@ -129,7 +129,7 @@ func parseLine(line string, lineNo int, cfg *Config) error {
 // parseValue parses a raw value string. It handles double-quoted values
 // (with \" and \\ escape sequences), single-quoted values (no escapes), and
 // bare words (rejected if they contain whitespace). It mirrors
-// parse_defaults_value() in bin/agent-lib.sh.
+// from the legacy shell parser.
 func parseValue(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 
@@ -155,7 +155,7 @@ func parseValue(raw string) (string, error) {
 }
 
 // KeyAllowed returns true if key is in the allowlist of supported keys. It
-// mirrors default_key_allowed() in bin/agent-lib.sh.
+// from the legacy shell parser.
 func KeyAllowed(key string) bool {
 	switch key {
 	case

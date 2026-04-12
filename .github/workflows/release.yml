@@ -95,18 +95,22 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
-          go-version-file: tui/go.mod
-          cache-dependency-path: tui/go.sum
+          go-version-file: go.mod
 
-      - name: Build universal TUI binary
+      - name: Build universal binaries
         if: steps.version.outputs.skip != 'true'
         run: |
-          cd tui
-          GOOS=darwin GOARCH=amd64 go build -o agent-tui-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -o agent-tui-arm64 .
-          lipo -create -output agent-tui agent-tui-amd64 agent-tui-arm64
-          rm agent-tui-amd64 agent-tui-arm64
-          chmod +x agent-tui
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o safe-ag-amd64 ./cmd/safe-ag
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o safe-ag-arm64 ./cmd/safe-ag
+          lipo -create -output safe-ag safe-ag-amd64 safe-ag-arm64
+          rm safe-ag-amd64 safe-ag-arm64
+          chmod +x safe-ag
+
+          GOOS=darwin GOARCH=amd64 go build -o safe-ag-tui-amd64 ./tui
+          GOOS=darwin GOARCH=arm64 go build -o safe-ag-tui-arm64 ./tui
+          lipo -create -output safe-ag-tui safe-ag-tui-amd64 safe-ag-tui-arm64
+          rm safe-ag-tui-amd64 safe-ag-tui-arm64
+          chmod +x safe-ag-tui
 
       - name: Package tarball
         if: steps.version.outputs.skip != 'true'
@@ -114,21 +118,16 @@ jobs:
         run: |
           version="${{ steps.version.outputs.version }}"
           staging="safe-agentic-${version}"
-          mkdir -p "$staging"/{bin,config,templates,tui,vm}
+          mkdir -p "$staging"/{bin,config,templates,vm}
 
-          cp bin/agent bin/agent-lib.sh bin/agent-claude bin/agent-codex \
-             bin/agent-alias bin/agent-session.sh bin/docker-runtime.sh \
-             bin/repo-url.sh "$staging/bin/"
-
-          cp tui/agent-tui "$staging/tui/"
+          cp safe-ag safe-ag-tui "$staging/bin/"
+          cp bin/agent-session.sh bin/repo-url.sh "$staging/bin/"
 
           cp config/* "$staging/config/"
           cp templates/* "$staging/templates/"
           cp vm/setup.sh "$staging/vm/"
 
           cp Dockerfile entrypoint.sh package.json package-lock.json op-env.sh "$staging/"
-
-          sed -i '' "s/VERSION=\"dev\"/VERSION=\"${version}\"/" "$staging/bin/agent"
 
           tarball="safe-agentic-${version}-darwin-universal.tar.gz"
           tar -czf "$tarball" "$staging"
@@ -175,9 +174,8 @@ jobs:
 
             def install
               libexec.install Dir["*"]
-              {"agent" => "safe-ag", "agent-claude" => "safe-ag-claude", "agent-codex" => "safe-ag-codex"}.each do |src, dst|
-                bin.install_symlink libexec/"bin"/src => dst
-              end
+              bin.install_symlink libexec/"bin"/"safe-ag"
+              bin.install_symlink libexec/"bin"/"safe-ag-tui"
             end
 
             test do

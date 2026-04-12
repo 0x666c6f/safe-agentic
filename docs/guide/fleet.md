@@ -5,8 +5,8 @@ Run multiple agents in parallel or chain them into workflows.
 ## Fleet — spawn from manifest
 
 ```bash
-agent fleet fleet.yaml
-agent fleet fleet.yaml --dry-run    # preview without spawning
+safe-ag fleet fleet.yaml
+safe-ag fleet fleet.yaml --dry-run    # preview without spawning
 ```
 
 ### Manifest format
@@ -55,13 +55,13 @@ agents:
 | `background` | bool | Headless mode, no interactive attach |
 | `auto_trust` | bool | Skip trust prompt on first run |
 
-Agents spawn in parallel. Monitor them with `agent tui`.
+Agents spawn in parallel. Monitor them with `safe-ag tui`.
 
 ## Pipeline — multi-step workflows
 
 ```bash
-agent pipeline pipeline.yaml
-agent pipeline pipeline.yaml --dry-run
+safe-ag pipeline pipeline.yaml
+safe-ag pipeline pipeline.yaml --dry-run
 ```
 
 ### Pipeline format
@@ -122,13 +122,13 @@ Fleet agents run in separate containers and can't share files directly. The patt
 
 ```bash
 # Phase 1: parallel review (each agent pushes to a review/* branch)
-agent fleet examples/fleet-review-and-fix.yaml
+safe-ag fleet examples/fleet-review-and-fix.yaml
 
 # Monitor with TUI — wait for all agents to finish
-agent tui
+safe-ag tui
 
 # Phase 2: consolidate findings → fix critical issues → create PR
-agent pipeline examples/pipeline-consolidate-and-fix.yaml
+safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
 
 This gives you parallel review speed with coordinated follow-up action.
@@ -148,7 +148,7 @@ agents:
     template: security-audit
     background: true
     auto_trust: true
-    on_exit: "agent output --latest --json >> /tmp/audit-results.json"
+    on_exit: "safe-ag output --latest --json >> /tmp/audit-results.json"
 
   - name: audit-web
     type: claude
@@ -158,12 +158,12 @@ agents:
     template: security-audit
     background: true
     auto_trust: true
-    on_exit: "agent output --latest --json >> /tmp/audit-results.json"
+    on_exit: "safe-ag output --latest --json >> /tmp/audit-results.json"
 ```
 
 ```bash
-agent fleet security-audit-fleet.yaml
-agent tui  # monitor both audits
+safe-ag fleet security-audit-fleet.yaml
+safe-ag tui  # monitor both audits
 ```
 
 ### Example 1: Parallel dependency updates across repos
@@ -192,8 +192,8 @@ agents:
 ```
 
 ```bash
-agent fleet fix-all-deps.yaml
-agent tui  # monitor all 3 agents
+safe-ag fleet fix-all-deps.yaml
+safe-ag tui  # monitor all 3 agents
 ```
 
 ### Example 2: Security audit fleet
@@ -216,8 +216,8 @@ agents:
 ```
 
 ```bash
-agent fleet security-audit.yaml
-agent tui  # watch both audits run in parallel
+safe-ag fleet security-audit.yaml
+safe-ag tui  # watch both audits run in parallel
 ```
 
 ### Example 3: CI-like pipeline
@@ -251,8 +251,8 @@ steps:
 
 ```bash
 # Dry run first to see the plan
-agent pipeline ci-pipeline.yaml --dry-run
+safe-ag pipeline ci-pipeline.yaml --dry-run
 
 # Run it
-agent pipeline ci-pipeline.yaml
+safe-ag pipeline ci-pipeline.yaml
 ```

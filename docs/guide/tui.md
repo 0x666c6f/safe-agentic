@@ -3,7 +3,7 @@
 A k9s-style interactive dashboard for monitoring and managing all your agents.
 
 ```bash
-agent tui
+safe-ag tui
 ```
 
 ## Layout
@@ -16,8 +16,8 @@ The TUI has three zones stacked vertically:
 
 | NAME | TYPE | REPO | SSH | STATUS | ACTIVITY | CPU | MEM |
 |------|------|------|-----|--------|----------|-----|-----|
-| **agent-claude-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
-| agent-codex-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
+| **safe-ag spawn claude --repo-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
+| safe-ag spawn codex --repo-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
 | agent-shell-debug | shell | — | off | Exited | Stopped | — | — |
 
 **Footer** — shortcut hints, replaced by filter input, command bar, or confirmation prompts during those modes
@@ -100,7 +100,7 @@ Press `:` to open the command bar. Available commands:
 |---------|-------------|
 | `:q` / `:quit` | Exit |
 | `:fleet <file>` | Spawn agents from a YAML manifest |
-| `:pipeline <file>` | Run a multi-step agent pipeline |
+| `:pipeline <file>` | Run a multi-step safe-ag pipeline |
 | `:audit` | Show the audit log |
 
 ## Preview pane

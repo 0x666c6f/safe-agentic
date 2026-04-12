@@ -3,7 +3,7 @@
 ## List
 
 ```bash
-agent list
+safe-ag list
 ```
 
 Shows all containers (running + stopped) with name, type, repo, auth, network, and status.
@@ -11,8 +11,8 @@ Shows all containers (running + stopped) with name, type, repo, auth, network, a
 ## Attach
 
 ```bash
-agent attach api-refactor
-agent attach --latest
+safe-ag attach api-refactor
+safe-ag attach --latest
 ```
 
 Reattaches to the agent's tmux session. If the container is stopped, it restarts first. Detach without stopping: `Ctrl-b d`.
@@ -20,8 +20,8 @@ Reattaches to the agent's tmux session. If the container is stopped, it restarts
 ## Peek
 
 ```bash
-agent peek api-refactor           # last 30 lines
-agent peek --latest --lines 50    # more context
+safe-ag peek api-refactor           # last 30 lines
+safe-ag peek --latest --lines 50    # more context
 ```
 
 See what an agent is doing without attaching. Works on running tmux containers only.
@@ -29,8 +29,8 @@ See what an agent is doing without attaching. Works on running tmux containers o
 ## Copy files out
 
 ```bash
-agent cp api-refactor /workspace/tmp/test.log ./test.log
-agent cp --latest /workspace/dist ./dist
+safe-ag cp api-refactor /workspace/tmp/test.log ./test.log
+safe-ag cp --latest /workspace/dist ./dist
 ```
 
 Extract files from a container without bind mounts.
@@ -38,9 +38,9 @@ Extract files from a container without bind mounts.
 ## Stop
 
 ```bash
-agent stop api-refactor      # one agent
-agent stop --latest          # newest
-agent stop --all             # everything
+safe-ag stop api-refactor      # one agent
+safe-ag stop --latest          # newest
+safe-ag stop --all             # everything
 ```
 
 Removes the container, its network, and any DinD sidecar.
@@ -48,15 +48,15 @@ Removes the container, its network, and any DinD sidecar.
 ## Cleanup
 
 ```bash
-agent cleanup          # stop all, keep auth volumes
-agent cleanup --auth   # also remove auth volumes
+safe-ag cleanup          # stop all, keep auth volumes
+safe-ag cleanup --auth   # also remove auth volumes
 ```
 
 ## Export sessions
 
 ```bash
-agent sessions api-refactor
-agent sessions --latest ~/my-sessions/
+safe-ag sessions api-refactor
+safe-ag sessions --latest ~/my-sessions/
 ```
 
 Copies conversation history from the container to host. Works on running and stopped containers.
@@ -65,12 +65,12 @@ Copies conversation history from the container to host. Works on running and sto
 
 ```mermaid
 graph LR
-    spawn["agent spawn"] --> running["Running"]
+    spawn["safe-ag spawn"] --> running["Running"]
     running -->|"agent exits"| stopped["Stopped"]
-    running -->|"agent attach"| running
-    stopped -->|"agent attach"| running
-    running -->|"agent stop"| gone["Removed"]
-    stopped -->|"agent stop"| gone
+    running -->|"safe-ag attach"| running
+    stopped -->|"safe-ag attach"| running
+    running -->|"safe-ag stop"| gone["Removed"]
+    stopped -->|"safe-ag stop"| gone
 
     style spawn fill:#e3f2fd,stroke:#1565c0
     style running fill:#dfd,stroke:#393
@@ -83,7 +83,7 @@ Containers persist after exit. Reattach to resume, or stop to remove.
 ## Interactive TUI
 
 ```bash
-agent tui
+safe-ag tui
 ```
 
 k9s-style terminal dashboard with live stats (CPU, MEM, PIDs), activity detection, and keybindings for all operations:

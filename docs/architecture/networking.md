@@ -9,16 +9,16 @@ graph TB
     internet["Internet"]
 
     subgraph vm["OrbStack VM"]
-        subgraph net_a["agent-claude-task-net (bridge)"]
-            container_a["agent-claude-task"]
+        subgraph net_a["safe-ag spawn claude --repo-task-net (bridge)"]
+            container_a["safe-ag spawn claude --repo-task"]
         end
 
-        subgraph net_b["agent-codex-fix-net (bridge)"]
-            container_b["agent-codex-fix"]
+        subgraph net_b["safe-ag spawn codex --repo-fix-net (bridge)"]
+            container_b["safe-ag spawn codex --repo-fix"]
         end
 
         subgraph net_isolated["agent-isolated (--internal)"]
-            container_c["agent-claude-untrusted"]
+            container_c["safe-ag spawn claude --repo-untrusted"]
         end
     end
 
@@ -47,7 +47,7 @@ This means agents can clone repos, fetch packages, and call APIs — but cannot 
 Pass `--network <name>` to join an existing Docker network:
 
 ```bash
-agent spawn claude --network my-shared-net --repo ...
+safe-ag spawn claude --network my-shared-net --repo ...
 ```
 
 Custom networks bypass safe-agentic's egress filtering. You control the network's configuration. The following network modes are blocked for safety:
@@ -62,12 +62,12 @@ For untrusted repos, create an internal network with no internet access:
 
 ```bash
 # Create the network (one-time, inside the VM)
-agent vm ssh
+safe-ag vm ssh
 docker network create --internal agent-isolated
 exit
 
 # Spawn on the isolated network
-agent spawn claude --repo https://github.com/untrusted/repo.git --network agent-isolated
+safe-ag spawn claude --repo https://github.com/untrusted/repo.git --network agent-isolated
 ```
 
 The `--internal` flag prevents any outbound traffic. The agent can work on code but cannot exfiltrate data, phone home, or access external services.

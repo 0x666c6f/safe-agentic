@@ -9,7 +9,7 @@ An isolated environment for running AI coding agents (Claude Code, Codex) inside
 ## Architecture
 
 ```text
-macOS Host (bin/agent CLI)
+macOS Host (safe-ag CLI)
   -> OrbStack VM "safe-agentic" (Ubuntu 24.04, hardened)
     -> Docker containers (ephemeral, per-agent)
        - read-only rootfs + tmpfs scratch
@@ -29,12 +29,11 @@ See [docs/architecture.md](/Users/florian/perso/safe-agentic/docs/architecture.m
 
 ## Key Files
 
-- [bin/agent](/Users/florian/perso/safe-agentic/bin/agent): host-side CLI dispatcher; `cmd_*` functions; calls into VM via `orb run -m safe-agentic`.
-- [bin/agent-lib.sh](/Users/florian/perso/safe-agentic/bin/agent-lib.sh): validation, Docker runtime construction, network lifecycle, volume helpers; Docker commands built as bash arrays.
-- [bin/agent-claude](/Users/florian/perso/safe-agentic/bin/agent-claude): quick Claude alias; auto-detects SSH URLs.
-- [bin/agent-codex](/Users/florian/perso/safe-agentic/bin/agent-codex): quick Codex alias; auto-detects SSH URLs.
-- [bin/agent-session.sh](/Users/florian/perso/safe-agentic/bin/agent-session.sh): tmux session wrapper; fresh vs resume handling.
-- [vm/setup.sh](/Users/florian/perso/safe-agentic/vm/setup.sh): idempotent VM bootstrap + hardening; re-run on `agent vm start`.
+- [bin/safe-ag](/Users/florian/perso/safe-agentic/bin/safe-ag): compiled Go CLI.
+- [bin/safe-ag-tui](/Users/florian/perso/safe-agentic/bin/safe-ag-tui): compiled Go TUI.
+- [bin/agent-session.sh](/Users/florian/perso/safe-agentic/bin/agent-session.sh): tmux session wrapper inside the container.
+- [bin/repo-url.sh](/Users/florian/perso/safe-agentic/bin/repo-url.sh): repo URL parsing and clone-path validation.
+- [vm/setup.sh](/Users/florian/perso/safe-agentic/vm/setup.sh): idempotent VM bootstrap + hardening; re-run on `safe-ag vm start`.
 - [Dockerfile](/Users/florian/perso/safe-agentic/Dockerfile): pinned downloads, checksum verification, non-root `agent` user, no sudo.
 - [entrypoint.sh](/Users/florian/perso/safe-agentic/entrypoint.sh): container init, git config injection, optional auth/config seeding, repo clone validation, agent launch.
 - [config/bashrc](/Users/florian/perso/safe-agentic/config/bashrc): shell defaults inside containers.
@@ -44,11 +43,10 @@ See [docs/architecture.md](/Users/florian/perso/safe-agentic/docs/architecture.m
 
 ## Project Structure
 
-- `bin/`: host-side CLI entrypoints and shared shell helpers
+- `bin/`: built binaries plus retained runtime shell helpers
 - `config/`: shell and prompt config copied into the container
 - `docs/`: architecture, quickstart, usage, security docs
 - `examples/`, `templates/`, `tui/`: example assets, templates, terminal UI
-- `tests/`: shell test suites and smoke checks
 - `vm/`: OrbStack VM bootstrap and hardening
 - `.claude/skills/`, `.codex/skills/`: repo-local skill bundles; keep pairs aligned
 
@@ -56,72 +54,62 @@ See [docs/architecture.md](/Users/florian/perso/safe-agentic/docs/architecture.m
 
 ```bash
 # First-time setup
-agent setup
+safe-ag setup
 
 # Rebuild image
-agent update
-agent update --quick
-agent update --full
+safe-ag update
 
 # Spawn agents
-agent spawn claude --ssh --repo git@github.com:org/repo.git
-agent spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
-agent spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
-
-# Quick aliases
-agent-claude git@github.com:org/repo.git
-agent-codex https://github.com/org/repo.git
+safe-ag spawn claude --ssh --repo git@github.com:org/repo.git
+safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
+safe-ag spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
 
 # Management
-agent list
-agent attach <name>
-agent stop <name|--all>
-agent cleanup
-agent tui
+safe-ag list
+safe-ag attach <name>
+safe-ag stop <name|--all>
+safe-ag cleanup
+safe-ag tui
 
 # VM
-agent vm start
-agent vm stop
-agent vm ssh
+safe-ag vm start
+safe-ag vm stop
+safe-ag vm ssh
 ```
 
 ```bash
 # Sessions, output, workflows
-agent peek <container>
-agent output <name>|--latest
-agent summary <name>|--latest
-agent diff <name>|--latest [--stat]
-agent checkpoint create <name> [label]
-agent checkpoint list <name>
-agent checkpoint revert <name> <ref>
-agent todo add <name> "text"
-agent todo list <name>
-agent retry <name>|--latest [--feedback "text"]
-agent pr <name> [--title T --base B]
-agent review <name> [--base B]
+safe-ag peek <container>
+safe-ag output <name>|--latest
+safe-ag summary <name>|--latest
+safe-ag diff <name>|--latest [--stat]
+safe-ag checkpoint create <name> [label]
+safe-ag checkpoint list <name>
+safe-ag checkpoint revert <name> <ref>
+safe-ag todo add <name> "text"
+safe-ag todo list <name>
+safe-ag retry <name>|--latest [--feedback "text"]
+safe-ag pr <name> [--title T --base B]
+safe-ag review <name> [--base B]
 ```
 
 ## Build And Verify
 
 Minimum bar for changes:
 
-- `bash -n bin/agent entrypoint.sh vm/setup.sh`
-- run affected test suites in `tests/`
-- prefer smoke tests for touched flows: `agent setup`, `agent spawn`, `agent shell`, cleanup path
+- `bash -n bin/agent-session.sh bin/repo-url.sh entrypoint.sh vm/setup.sh`
+- `make build-all`
+- `go test ./...`
+- prefer smoke tests for touched flows: `safe-ag setup`, `safe-ag spawn`, `safe-ag shell`, cleanup path
 - validate touched repo-local skills
 - update docs when behavior/flags/security posture changes
 
 Useful commands:
 
 ```bash
-# Full test run
-bash tests/run-all.sh
-
-# Single suite
-bash tests/test-docker-cmd.sh
-
-# Syntax-only
-bash tests/test-syntax.sh
+# Build + test
+make build-all
+go test ./...
 
 # Skill validation
 codex skills validate .codex/skills/<skill-name>
@@ -129,52 +117,19 @@ codex skills validate .codex/skills/<skill-name>
 
 If fixing a bug, add the smallest regression check that fits.
 
-## Testing Inventory
-
-- `tests/test-syntax.sh`: `bash -n` on scripts
-- `tests/test-validation.sh`: name + network validation
-- `tests/test-repo-clone-path.sh`: URL parsing, traversal, injection
-- `tests/test-docker-cmd.sh`: security flags, volumes, SSH, git identity
-- `tests/test-dockerfile.sh`: checksums, non-root user, no `curl | bash`
-- `tests/test-entrypoint.sh`: git config, clone validation, agent launch
-- `tests/test-entrypoint-runtime.sh`: runtime entrypoint behavior
-- `tests/test-vm-setup.sh`: mount blocking, `userns-remap`, `fstab`
-- `tests/test-cli-dispatch.sh`: help, errors, aliases, multi-repo
-- `tests/test-agent-lifecycle.sh`: attach, stop, cleanup, custom networks
-- `tests/test-management-commands.sh`: management command coverage
-- `tests/test-update.sh`: tracked-only build context, quick/full rebuild
-- `tests/test-audit.sh`: audit logging
-- `tests/test-checkpoint.sh`: checkpoint create/list/revert
-- `tests/test-copy-command.sh`: file copy commands
-- `tests/test-cost.sh`: cost estimation
-- `tests/test-diagnose.sh`: diagnostic commands
-- `tests/test-diff.sh`: diff display
-- `tests/test-fleet.sh`: fleet manifest parsing and spawning
-- `tests/test-lifecycle-scripts.sh`: `safe-agentic.json` lifecycle scripts
-- `tests/test-pipeline.sh`: pipeline YAML parsing and execution
-- `tests/test-pr.sh`: PR creation
-- `tests/test-review.sh`: review command
-- `tests/test-todo.sh`: todo management
-- `tests/test-live-integration.sh`: real VM/Docker smoke tests; optional
-- `tests/test-live-agent-clis.sh`: live agent CLI tests; optional
-- `tests/agent-cli-security.sh`: end-to-end security regressions
-
-Tests use a fake `orb` binary to capture Docker commands without requiring a real VM.
-
 ## Coding Conventions
 
-- Bash-first repo; scripts use `set -euo pipefail`
+- Go-first repo; retained shell runtime scripts use `set -euo pipefail`
 - 2-space indentation
 - quote expansions unless word splitting required
 - prefer small helpers over long inline blocks
 - use kebab-case filenames
-- CLI subcommands live in `cmd_*` functions
+- CLI subcommands live under `cmd/safe-ag`
 - comment non-obvious trust boundaries, mounts, auth, isolation details
 
 Implementation patterns:
 
-- build Docker commands as bash arrays
-- use `vm_exec()` / `orb run -m "$VM_NAME"` for VM operations
+- use `orb run -m "$VM_NAME"` for VM operations
 - keep read-only rootfs pattern intact: baked configs copied into tmpfs at runtime
 - validate repo clone paths via `repo_clone_path()`
 - build context from tracked files only
@@ -225,7 +180,7 @@ Repo-local skills currently cover:
 
 ## Known Limitations
 
-- OrbStack VM hardening remains best-effort; per-VM file sharing disable still missing. Re-harden on VM restart with `agent vm start`.
+- OrbStack VM hardening remains best-effort; per-VM file sharing disable still missing. Re-harden on VM restart with `safe-ag vm start`.
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 
@@ -242,8 +197,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/). Commit prefixe
 
 Scopes optional: `feat(tui):`, `fix(ci):`, etc.
 
-Every push to `main` triggers `.github/workflows/release.yml` which runs CI, computes version, builds a universal macOS TUI binary, creates a GitHub Release with changelog, and updates the Homebrew tap (`0x666c6f/homebrew-tap`).
+Every push to `main` triggers `.github/workflows/release.yml` which runs CI, computes version, builds universal macOS `safe-ag` and `safe-ag-tui` binaries, creates a GitHub Release with changelog, and updates the Homebrew tap (`0x666c6f/homebrew-tap`).
 
-`bin/agent` has `VERSION="dev"` at line 5. The release workflow injects the real version. `agent --version` prints `safe-agentic vX.Y.Z`.
+`safe-ag --version` prints `safe-agentic vX.Y.Z`. The release workflow injects the version with Go ldflags.
 
 Keep commits focused. Before handoff, prefer full gate over partial checks.

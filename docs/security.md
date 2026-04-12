@@ -102,7 +102,7 @@ Stores the OAuth token in a named Docker volume that survives container restarts
 Stores GitHub CLI auth in a named Docker volume (`agent-gh-auth`) that survives container restarts.
 
 **When to use:** You want `gh auth login` once and reuse it across sessions.
-**Risk:** A compromised container could steal the GitHub token from the shared volume. Run `agent cleanup --auth` to revoke.
+**Risk:** A compromised container could steal the GitHub token from the shared volume. Run `safe-ag cleanup --auth` to revoke.
 
 ### `--aws <profile>`
 
@@ -140,7 +140,7 @@ Safe-agentic-managed bridges now get a VM firewall policy:
 - no access to local/private address ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, etc.)
 - no access to OrbStack/macOS mount paths when hardening is healthy
 
-This keeps default agent sessions usable for Git, package downloads, and Claude/Codex traffic while blocking the most dangerous east-west and local-host pivots. If you need broader network access, you must opt into a custom network explicitly.
+This keeps default safe-ag sessions usable for Git, package downloads, and Claude/Codex traffic while blocking the most dangerous east-west and local-host pivots. If you need broader network access, you must opt into a custom network explicitly.
 
 ## Supply chain hardening
 
