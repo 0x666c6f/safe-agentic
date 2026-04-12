@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"safe-agentic/pkg/config"
-	"safe-agentic/pkg/docker"
-	"safe-agentic/pkg/inject"
-	"safe-agentic/pkg/labels"
+	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/inject"
+	"github.com/0x666c6f/safe-agentic/pkg/labels"
 
 	"github.com/spf13/cobra"
 )

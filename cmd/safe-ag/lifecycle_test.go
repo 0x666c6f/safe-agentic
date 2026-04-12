@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
 // ─── containerState helper ─────────────────────────────────────────────────

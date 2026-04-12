@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
-	"safe-agentic/pkg/audit"
-	"safe-agentic/pkg/docker"
-	"safe-agentic/pkg/inject"
-	"safe-agentic/pkg/labels"
-	"safe-agentic/pkg/orb"
-	"safe-agentic/pkg/tmux"
+	"github.com/0x666c6f/safe-agentic/pkg/audit"
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/inject"
+	"github.com/0x666c6f/safe-agentic/pkg/labels"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 
 	"github.com/spf13/cobra"
 )
@@ -514,4 +514,3 @@ func splitLines(s string) []string {
 	}
 	return result
 }
-

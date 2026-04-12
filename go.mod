@@ -1,4 +1,4 @@
-module safe-agentic
+module github.com/0x666c6f/safe-agentic
 
 go 1.25.5
 

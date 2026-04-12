@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"strings"
 	"testing"
 )

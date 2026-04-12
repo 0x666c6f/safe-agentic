@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"safe-agentic/pkg/fleet"
-	"safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 
 	"github.com/spf13/cobra"
 )
