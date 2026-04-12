@@ -1,5 +1,10 @@
 # safe-agentic
 
+[![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/0x666c6f/safe-agentic)](https://goreportcard.com/report/github.com/0x666c6f/safe-agentic)
+[![Go Coverage](https://gocover.io/_badge/github.com/0x666c6f/safe-agentic)](https://gocover.io/github.com/0x666c6f/safe-agentic)
+
 Isolated environment for running AI coding agents (Claude Code, Codex) safely. Safe by default: SSH forwarding is opt-in, auth is ephemeral unless reused explicitly, containers run read-only with all Linux capabilities dropped, `no-new-privileges`, dedicated per-session networks get egress guardrails, images are local-only at launch, and resource limits apply.
 
 ## Features
