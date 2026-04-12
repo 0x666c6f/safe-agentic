@@ -39,6 +39,7 @@ Isolated environment for running AI coding agents (Claude Code, Codex) safely. S
 **Analytics**
 - `safe-ag cost` — estimate API spend by parsing session token usage
 - `safe-ag audit` — append-only JSONL log of all spawn/stop/attach operations
+- `safe-ag dashboard` — browser dashboard backed by the same poller as the TUI
 
 **Auth & Config**
 - `--ssh` — SSH agent forwarding via socat relay (userns-remap compatible)
@@ -167,6 +168,12 @@ safe-ag spawn claude --repo <untrusted-repo> --network agent-isolated
    - SSH key for GitHub configured in 1Password
 3. **CLI**: Install via Homebrew (see [Installation](#installation) above), or add `safe-agentic/bin` to your PATH for source installs
 
+For isolated local runs or dedicated test VMs, `SAFE_AGENTIC_VM_NAME` overrides the target OrbStack VM:
+
+```bash
+SAFE_AGENTIC_VM_NAME=safe-agentic-alt safe-ag list
+```
+
 ## Setup
 
 ```bash
@@ -233,6 +240,7 @@ safe-ag peek <name>           # Show last 30 lines of agent's tmux pane
 safe-ag peek --latest --lines 50
 safe-ag aws-refresh <name>    # Refresh AWS credentials in running container
 safe-ag diagnose              # Check orb/VM/docker/image/SSH/defaults
+safe-ag dashboard --bind localhost:8420   # Web dashboard
 ```
 
 Use `safe-ag cp` when you need logs, test output, or build artifacts on the host without adding bind mounts:

@@ -16,8 +16,8 @@ The TUI has three zones stacked vertically:
 
 | NAME | TYPE | REPO | SSH | STATUS | ACTIVITY | CPU | MEM |
 |------|------|------|-----|--------|----------|-----|-----|
-| **safe-ag spawn claude --repo-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
-| safe-ag spawn codex --repo-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
+| **agent-claude-api-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
+| agent-codex-lint-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
 | agent-shell-debug | shell | — | off | Exited | Stopped | — | — |
 
 **Footer** — shortcut hints, replaced by filter input, command bar, or confirmation prompts during those modes
@@ -45,19 +45,19 @@ Three zones:
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `l` | Logs | Show session log in scrollable overlay |
+| `l` | Logs | Show `safe-ag logs` output in a scrollable overlay |
 | `d` | Describe | Show `docker inspect` in formatted overlay |
 | `y` | YAML | Show raw `docker inspect` JSON |
-| `p` | Preview | Toggle live tmux pane preview panel |
-| `f` | Diff | Show `git diff` from agent's working tree |
-| `R` | Review | Run AI code review (codex review or git diff) |
+| `p` | Preview | Toggle live preview; falls back to logs for stopped agents |
+| `f` | Diff | Show `safe-ag diff` output |
+| `R` | Review | Run `safe-ag review` |
 
 ### Workflow
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `t` | Todos | Show agent's todo list |
-| `x` | Checkpoint | Create a working tree snapshot |
+| `t` | Todos | Show `safe-ag todo list` output |
+| `x` | Checkpoint | Run `safe-ag checkpoint create` |
 | `g` | PR | Create a GitHub PR from agent's branch |
 
 ### Analytics
@@ -72,7 +72,7 @@ Three zones:
 | Key | Action | Description |
 |-----|--------|-------------|
 | `e` | Export | Export session history to host |
-| `c` | Copy | Open form to copy files from container |
+| `c` | Copy | Open form to copy files to a VM path |
 | `m` | MCP login | Run MCP OAuth login interactively |
 
 ### Navigation
@@ -105,7 +105,7 @@ Press `:` to open the command bar. Available commands:
 
 ## Preview pane
 
-Press `p` to toggle a split view showing the last 30 lines of the selected agent's tmux output. Updates on each poll cycle (every 2 seconds). Only available for running Claude/Codex containers.
+Press `p` to toggle a split view showing the last 30 lines of the selected agent's tmux output. Updates on each poll cycle (every 2 seconds). For stopped agents, preview falls back to recent logs.
 
 ## Spawn form
 

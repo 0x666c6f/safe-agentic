@@ -70,7 +70,7 @@ safe-ag spawn claude --ssh --repo git@github.com:org/api.git --template security
 ```bash
 safe-ag mcp-login linear       # uses default codex auth volume
 safe-ag mcp-login notion
-safe-ag mcp-login <name> linear  # target a specific container
+safe-ag mcp-login linear <name>  # target a specific container
 ```
 
 Tokens persist in the auth volume. One-time setup per MCP server.
@@ -110,6 +110,31 @@ safe-ag vm stop              # stop VM
 safe-ag vm ssh               # debug the VM
 safe-ag diagnose             # health check
 ```
+
+## Advanced environment variables
+
+These are mainly useful for isolated local runs, CI, or integration tests.
+
+```bash
+SAFE_AGENTIC_VM_NAME=safe-agentic-alt
+```
+
+- Overrides the OrbStack VM targeted by `safe-ag`.
+- Useful when you want the CLI to operate against a dedicated test VM instead of the default `safe-agentic`.
+
+```bash
+SAFE_AGENTIC_INTEGRATION_VM=safe-agentic-alt
+SAFE_AGENTIC_DEEP_INTEGRATION=1
+```
+
+- `SAFE_AGENTIC_INTEGRATION_VM` tells the integration harness which VM to target.
+- `SAFE_AGENTIC_DEEP_INTEGRATION=1` enables the heaviest live cases:
+  - dashboard HTTP
+  - config/auth injection
+  - AWS injection
+  - Docker mode validation
+  - live fleet/pipeline execution
+  - Claude/Codex startup probes
 
 ## Troubleshooting
 

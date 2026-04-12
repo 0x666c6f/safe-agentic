@@ -100,6 +100,9 @@ Minimum bar for changes:
 - `bash -n bin/agent-session.sh bin/repo-url.sh entrypoint.sh vm/setup.sh`
 - `make build-all`
 - `go test ./...`
+- if touching live integration harness, prefer:
+  - `SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag`
+  - `SAFE_AGENTIC_DEEP_INTEGRATION=1 SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag -run <focused-case>`
 - prefer smoke tests for touched flows: `safe-ag setup`, `safe-ag spawn`, `safe-ag shell`, cleanup path
 - validate touched repo-local skills
 - update docs when behavior/flags/security posture changes
@@ -110,6 +113,12 @@ Useful commands:
 # Build + test
 make build-all
 go test ./...
+
+# Live integration
+SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag
+
+# Heavier live cases
+SAFE_AGENTIC_DEEP_INTEGRATION=1 SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag -run <focused-case>
 
 # Skill validation
 codex skills validate .codex/skills/<skill-name>
@@ -133,6 +142,7 @@ Implementation patterns:
 - keep read-only rootfs pattern intact: baked configs copied into tmpfs at runtime
 - validate repo clone paths via `repo_clone_path()`
 - build context from tracked files only
+- `SAFE_AGENTIC_VM_NAME` overrides the target VM; use it for isolated test VMs
 
 ## Security Model
 

@@ -18,9 +18,14 @@
 | `safe-ag todo ...` | Track merge requirements |
 | `safe-ag review <name>` | Run review over changes |
 | `safe-ag pr <name>` | Push + open PR |
+| `safe-ag aws-refresh <name>` | Refresh AWS credentials in a running container |
+| `safe-ag mcp-login <service> [container]` | Authenticate an MCP service |
+| `safe-ag config ...` | Manage persistent defaults |
+| `safe-ag template ...` | Manage prompt templates |
 | `safe-ag fleet manifest.yaml` | Parallel fleet |
 | `safe-ag pipeline pipeline.yaml` | Sequential orchestration |
 | `safe-ag tui` | Launch TUI |
+| `safe-ag dashboard` | Launch web dashboard |
 | `safe-ag cleanup [--auth]` | Remove containers and optional auth volumes |
 
 ## Typical flows
@@ -65,6 +70,7 @@ safe-ag cleanup --auth
 
 ```bash
 safe-ag tui
+safe-ag dashboard --bind localhost:8420
 ```
 
 ### Orchestration
@@ -108,6 +114,14 @@ SAFE_AGENTIC_DEFAULT_MEMORY="12g"
 SAFE_AGENTIC_DEFAULT_CPUS="6"
 SAFE_AGENTIC_DEFAULT_REUSE_AUTH="1"
 ```
+
+## VM override
+
+```bash
+SAFE_AGENTIC_VM_NAME=safe-agentic-alt safe-ag list
+```
+
+Use this when you want the CLI to target a different OrbStack VM than the default `safe-agentic`.
 
 ## Troubleshooting
 

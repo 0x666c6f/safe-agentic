@@ -9,16 +9,16 @@ graph TB
     internet["Internet"]
 
     subgraph vm["OrbStack VM"]
-        subgraph net_a["safe-ag spawn claude --repo-task-net (bridge)"]
-            container_a["safe-ag spawn claude --repo-task"]
+        subgraph net_a["agent-claude-task (bridge)"]
+            container_a["agent-claude-task"]
         end
 
-        subgraph net_b["safe-ag spawn codex --repo-fix-net (bridge)"]
-            container_b["safe-ag spawn codex --repo-fix"]
+        subgraph net_b["agent-codex-fix (bridge)"]
+            container_b["agent-codex-fix"]
         end
 
         subgraph net_isolated["agent-isolated (--internal)"]
-            container_c["safe-ag spawn claude --repo-untrusted"]
+            container_c["agent-claude-untrusted"]
         end
     end
 
