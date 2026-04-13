@@ -40,19 +40,19 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 
 		setupCmd := fmt.Sprintf(
 			"pkill -f 'socat.*safe-agentic-ssh-agent' 2>/dev/null || true; "+
-				"rm -f %s; "+
+				"sudo rm -rf %s; "+
 				"printf '%%s' '%s' > /tmp/safe-agentic-ssh-relay.sh; "+
 				"chmod +x /tmp/safe-agentic-ssh-relay.sh",
 			sshRelaySocket, relayScript)
 
 		exec.Run(ctx, "bash", "-c", setupCmd)
-		exec.Run(ctx, "start-stop-daemon", "--start", "--background",
-			"--exec", "/tmp/safe-agentic-ssh-relay.sh")
+		exec.Run(ctx, "bash", "-lc",
+			"nohup /tmp/safe-agentic-ssh-relay.sh >/tmp/safe-agentic-ssh-relay.log 2>&1 &")
 	}
 
-	// Wait for relay socket to appear (up to 1s)
+	// Wait for relay socket to appear (up to 2s)
 	relayOK := false
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		_, err := exec.Run(ctx, "test", "-S", sshRelaySocket)
 		if err == nil {
 			relayOK = true

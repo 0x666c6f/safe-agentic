@@ -33,3 +33,33 @@ func TestRunPipeline_DryRunNestedExample(t *testing.T) {
 		t.Fatalf("dry-run unexpectedly started agent:\n%s", output)
 	}
 }
+
+func TestRunPipeline_BackgroundDelegatesToLauncher(t *testing.T) {
+	origBackground := pipelineBackground
+	origLauncher := launchDetachedPipeline
+	defer func() {
+		pipelineBackground = origBackground
+		launchDetachedPipeline = origLauncher
+	}()
+
+	pipelineBackground = true
+	var gotManifest string
+	launchDetachedPipeline = func(manifestPath string) error {
+		gotManifest = manifestPath
+		return nil
+	}
+
+	path := filepath.Join("..", "..", "examples", "pipeline-display-nested.yaml")
+	output := captureOutput(func() {
+		if err := runPipeline(pipelineCmd, []string{path}); err != nil {
+			t.Fatalf("runPipeline() error = %v", err)
+		}
+	})
+
+	if gotManifest != path {
+		t.Fatalf("launcher manifest = %q, want %q", gotManifest, path)
+	}
+	if output != "" {
+		t.Fatalf("expected no direct pipeline output, got:\n%s", output)
+	}
+}

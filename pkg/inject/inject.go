@@ -46,6 +46,28 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	return envs, nil
 }
 
+func ReadClaudeAuth(homeDir string) (map[string]string, error) {
+	envs := make(map[string]string)
+	authPath := filepath.Join(homeDir, ".claude.json")
+	data, err := os.ReadFile(authPath)
+	if os.IsNotExist(err) {
+		return envs, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read claude auth: %w", err)
+	}
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write(data); err != nil {
+		return nil, fmt.Errorf("gzip claude auth: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("gzip claude auth close: %w", err)
+	}
+	envs["SAFE_AGENTIC_CLAUDE_AUTH_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	return envs, nil
+}
+
 // ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
 // from configDir and returns them as SAFE_AGENTIC_CLAUDE_SUPPORT_B64.
 // The entrypoint extracts this into ~/.claude/ inside the container.
@@ -162,6 +184,20 @@ func ReadCodexConfig(codexHome string) (map[string]string, error) {
 		return nil, fmt.Errorf("read codex config: %w", err)
 	}
 	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
+	return envs, nil
+}
+
+func ReadCodexAuth(codexHome string) (map[string]string, error) {
+	envs := make(map[string]string)
+	authPath := filepath.Join(codexHome, "auth.json")
+	data, err := os.ReadFile(authPath)
+	if os.IsNotExist(err) {
+		return envs, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read codex auth: %w", err)
+	}
+	envs["SAFE_AGENTIC_CODEX_AUTH_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 

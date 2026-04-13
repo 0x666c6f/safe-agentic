@@ -1,7 +1,8 @@
-# Pipeline: Claude review + Codex review -> final reconciliation
+# Pipeline: review matrix -> reconcile -> fix -> PR
 #
-# Based on fleet-self-review.yaml, but runs a matched review prompt through both
-# models and then reconciles their findings into one report.
+# Inspired by the richer Claude PR review workflow, but encoded as a safe-agentic
+# pipeline that both Claude and Codex can run. Each review category uses one
+# shared review branch so the Claude and Codex passes publish side-by-side.
 #
 # Usage:
 #   safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
@@ -14,16 +15,48 @@ defaults:
   auto_trust: true
 
 stages:
-  - name: self-review
-    models: [claude, codex]
+  - name: claude-reviews
     agents:
-      - name: reviewer
-        prompt: "Perform a thorough self-review of the safe-agentic repository using the same intent as examples/fleet-self-review.yaml. Focus on code quality, error handling, edge cases, bash quoting, docs-to-code drift, isolation guarantees, and missing tests. Write findings to REVIEW-${model}.md at the repo root with severity labels (critical/high/medium/low). Then create a branch named review/self-${model}, commit only that review file, and push it to origin."
-
-  - name: reconcile
-    depends_on:
-      - self-review
-    agents:
-      - name: reconcilor
+      - name: code-review-claude
         type: claude
-        prompt: "You must do ALL of the following steps in order. Step 1: git fetch origin review/self-claude review/self-codex. Step 2: extract the two reports with git show origin/review/self-claude:REVIEW-claude.md > /tmp/REVIEW-claude.md and git show origin/review/self-codex:REVIEW-codex.md > /tmp/REVIEW-codex.md. Step 3: read both files and produce a reconciled report that groups findings into: shared findings, Claude-only findings, Codex-only findings, and conflicts/uncertainties. Step 4: write that report to REVIEW-RECONCILED.md at the repo root. Step 5: create a branch named review/self-reconciled, commit only REVIEW-RECONCILED.md, and push it to origin. Step 6: delete the investigation branches with git push origin --delete review/self-claude review/self-codex. Ignore errors if a branch is already gone. Step 7: print a short summary of the shared critical/high findings and the branch name."
+        prompt: "Review this repository for correctness and maintainability. Focus on bugs, logic errors, race conditions, edge cases, API misuse, shell quoting, and unnecessary complexity. Write findings to REVIEW-CODE-CLAUDE.md with severity labels (critical/high/medium/low) and concrete fixes. Then publish to the shared branch with: git fetch origin review/code-review || true; git checkout -B review/code-review --track origin/review/code-review 2>/dev/null || git checkout -b review/code-review; git add REVIEW-CODE-CLAUDE.md; git commit -m 'review(code): claude findings'; git push -u origin review/code-review."
+      - name: security-review-claude
+        type: claude
+        prompt: "Review this repository for security issues. Focus on secret exposure, command injection, path traversal, missing input validation, over-permissive runtime/auth defaults, isolation boundary gaps, and unsafe Docker/VM behavior. Write findings to REVIEW-SECURITY-CLAUDE.md with severity labels and concrete fixes. Then publish to the shared branch with: git fetch origin review/security-review || true; git checkout -B review/security-review --track origin/review/security-review 2>/dev/null || git checkout -b review/security-review; git add REVIEW-SECURITY-CLAUDE.md; git commit -m 'review(security): claude findings'; git push -u origin review/security-review."
+      - name: docs-review-claude
+        type: claude
+        prompt: "Review docs, comments, and user-facing guidance. Focus on docs-to-code drift, misleading comments, missing operational guidance, outdated examples, and broken assumptions in README.md, docs/, CLAUDE.md, and AGENTS.md. Write findings to REVIEW-DOCS-CLAUDE.md with file references and concrete fixes. Then publish to the shared branch with: git fetch origin review/docs-review || true; git checkout -B review/docs-review --track origin/review/docs-review 2>/dev/null || git checkout -b review/docs-review; git add REVIEW-DOCS-CLAUDE.md; git commit -m 'review(docs): claude findings'; git push -u origin review/docs-review."
+      - name: tests-review-claude
+        type: claude
+        prompt: "Review test coverage and test quality. Focus on critical untested paths, missing negative/error cases, missing regression coverage, flaky patterns, and gaps between behavior changes and tests. Write findings to REVIEW-TESTS-CLAUDE.md with concrete test suggestions. Then publish to the shared branch with: git fetch origin review/tests-review || true; git checkout -B review/tests-review --track origin/review/tests-review 2>/dev/null || git checkout -b review/tests-review; git add REVIEW-TESTS-CLAUDE.md; git commit -m 'review(tests): claude findings'; git push -u origin review/tests-review."
+      - name: design-types-review-claude
+        type: claude
+        prompt: "Review type, API, and design boundaries. Focus on structs/interfaces/types, validation boundaries, illegal states, weak abstractions, brittle coupling, and confusing public surfaces. Write findings to REVIEW-DESIGN-TYPES-CLAUDE.md with severity labels and concrete fixes. Then publish to the shared branch with: git fetch origin review/design-types-review || true; git checkout -B review/design-types-review --track origin/review/design-types-review 2>/dev/null || git checkout -b review/design-types-review; git add REVIEW-DESIGN-TYPES-CLAUDE.md; git commit -m 'review(design-types): claude findings'; git push -u origin review/design-types-review."
+
+  - name: codex-reviews
+    depends_on:
+      - claude-reviews
+    agents:
+      - name: code-review-codex
+        type: codex
+        prompt: "Run an independent code review of this repository. Focus on bugs, logic errors, race conditions, edge cases, API misuse, shell quoting, and unnecessary complexity. Write findings to REVIEW-CODE-CODEX.md with severity labels (critical/high/medium/low) and concrete fixes. Then publish to the same shared branch with: git fetch origin review/code-review || true; git checkout -B review/code-review --track origin/review/code-review 2>/dev/null || git checkout -b review/code-review; git add REVIEW-CODE-CODEX.md; git commit -m 'review(code): codex findings'; git push -u origin review/code-review."
+      - name: security-review-codex
+        type: codex
+        prompt: "Run an independent security review of this repository. Focus on secret exposure, command injection, path traversal, missing input validation, over-permissive runtime/auth defaults, isolation boundary gaps, and unsafe Docker/VM behavior. Write findings to REVIEW-SECURITY-CODEX.md with severity labels and concrete fixes. Then publish to the same shared branch with: git fetch origin review/security-review || true; git checkout -B review/security-review --track origin/review/security-review 2>/dev/null || git checkout -b review/security-review; git add REVIEW-SECURITY-CODEX.md; git commit -m 'review(security): codex findings'; git push -u origin review/security-review."
+      - name: docs-review-codex
+        type: codex
+        prompt: "Run an independent docs and comments review. Focus on docs-to-code drift, misleading comments, missing operational guidance, outdated examples, and broken assumptions in README.md, docs/, CLAUDE.md, and AGENTS.md. Write findings to REVIEW-DOCS-CODEX.md with file references and concrete fixes. Then publish to the same shared branch with: git fetch origin review/docs-review || true; git checkout -B review/docs-review --track origin/review/docs-review 2>/dev/null || git checkout -b review/docs-review; git add REVIEW-DOCS-CODEX.md; git commit -m 'review(docs): codex findings'; git push -u origin review/docs-review."
+      - name: tests-review-codex
+        type: codex
+        prompt: "Run an independent test review. Focus on critical untested paths, missing negative/error cases, missing regression coverage, flaky patterns, and gaps between behavior changes and tests. Write findings to REVIEW-TESTS-CODEX.md with concrete test suggestions. Then publish to the same shared branch with: git fetch origin review/tests-review || true; git checkout -B review/tests-review --track origin/review/tests-review 2>/dev/null || git checkout -b review/tests-review; git add REVIEW-TESTS-CODEX.md; git commit -m 'review(tests): codex findings'; git push -u origin review/tests-review."
+      - name: design-types-review-codex
+        type: codex
+        prompt: "Run an independent design and type review. Focus on structs/interfaces/types, validation boundaries, illegal states, weak abstractions, brittle coupling, and confusing public surfaces. Write findings to REVIEW-DESIGN-TYPES-CODEX.md with severity labels and concrete fixes. Then publish to the same shared branch with: git fetch origin review/design-types-review || true; git checkout -B review/design-types-review --track origin/review/design-types-review 2>/dev/null || git checkout -b review/design-types-review; git add REVIEW-DESIGN-TYPES-CODEX.md; git commit -m 'review(design-types): codex findings'; git push -u origin review/design-types-review."
+
+  - name: reconcile-fix-pr
+    depends_on:
+      - codex-reviews
+    agents:
+      - name: reconciler
+        type: codex
+        prompt: "You must do ALL of the following steps in order. Step 1: git fetch origin review/code-review review/security-review review/docs-review review/tests-review review/design-types-review. Step 2: extract all review files from those branches into /tmp using git show. Files to collect: REVIEW-CODE-CLAUDE.md, REVIEW-CODE-CODEX.md, REVIEW-SECURITY-CLAUDE.md, REVIEW-SECURITY-CODEX.md, REVIEW-DOCS-CLAUDE.md, REVIEW-DOCS-CODEX.md, REVIEW-TESTS-CLAUDE.md, REVIEW-TESTS-CODEX.md, REVIEW-DESIGN-TYPES-CLAUDE.md, REVIEW-DESIGN-TYPES-CODEX.md. Step 3: read the reports and synthesize a reconciled findings list grouped by category, with shared findings first and conflicts called out explicitly. Step 4: write REVIEW-RECONCILED.md at the repo root. Step 5: create a fix branch: git checkout -b fix/reconciled-review-findings. Step 6: implement all critical and high severity actionable fixes, plus any medium findings that are low-risk and clearly correct. Step 7: run the most relevant validation available; at minimum run go test ./pkg/fleet and any focused tests for files you changed. Step 8: commit the fixes and REVIEW-RECONCILED.md, push the branch, and create a PR with gh pr create --head fix/reconciled-review-findings --base main --title 'fix: reconcile multi-review findings' --body 'Applies fixes from the multi-agent review matrix and includes REVIEW-RECONCILED.md for traceability.' Step 9: delete the investigation branches with git push origin --delete review/code-review review/security-review review/docs-review review/tests-review review/design-types-review. Ignore errors if a branch is already gone. Step 10: print the PR URL and a short summary of the shared critical/high findings you fixed."

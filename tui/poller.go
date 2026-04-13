@@ -91,7 +91,14 @@ func (p *Poller) Restart() {
 
 func (p *Poller) loop() {
 	defer close(p.stopped)
-	p.poll() // initial fetch
+	// Delay the initial poll slightly so TUI callers have time to start the
+	// tview event loop before onUpdate triggers QueueUpdateDraw.
+	select {
+	case <-p.stopCh:
+		return
+	case <-time.After(100 * time.Millisecond):
+	}
+	p.poll()
 	ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
 	defer ticker.Stop()
 	for {

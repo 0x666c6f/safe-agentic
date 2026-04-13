@@ -113,3 +113,8 @@ Use a pipeline when:
 
 Use both when:
 - parallel review or analysis feeds a later consolidation/fix stage
+
+The `examples/pipeline-double-review-reconcile.yaml` example shows a richer version:
+- category-specific review branches
+- both Claude and Codex contributing reports to the same branch per category
+- a final Codex reconciliation/fix/PR stage

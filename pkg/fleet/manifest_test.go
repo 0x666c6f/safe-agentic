@@ -277,36 +277,48 @@ func TestParsePipeline_DoubleReviewReconcileExample(t *testing.T) {
 		t.Fatalf("Name = %q, want double-review-reconcile", m.Name)
 	}
 	if len(m.Stages) != 3 {
-		t.Fatalf("want 3 stages after model expansion, got %d", len(m.Stages))
+		t.Fatalf("want 3 stages, got %d", len(m.Stages))
 	}
 
-	if got := m.Stages[0].Name; got != "self-review-claude" {
+	if got := m.Stages[0].Name; got != "claude-reviews" {
 		t.Fatalf("stage[0].Name = %q", got)
 	}
-	if got := m.Stages[1].Name; got != "self-review-codex" {
+	if got := m.Stages[1].Name; got != "codex-reviews" {
 		t.Fatalf("stage[1].Name = %q", got)
 	}
-	if got := m.Stages[2].Name; got != "reconcile" {
+	if got := m.Stages[2].Name; got != "reconcile-fix-pr" {
 		t.Fatalf("stage[2].Name = %q", got)
 	}
 
-	if got := m.Stages[0].Agents[0].Type; got != "claude" {
-		t.Fatalf("stage[0].Agents[0].Type = %q", got)
+	if len(m.Stages[0].Agents) != 5 {
+		t.Fatalf("stage[0] agent count = %d, want 5", len(m.Stages[0].Agents))
 	}
-	if got := m.Stages[1].Agents[0].Type; got != "codex" {
-		t.Fatalf("stage[1].Agents[0].Type = %q", got)
+	if len(m.Stages[1].Agents) != 5 {
+		t.Fatalf("stage[1] agent count = %d, want 5", len(m.Stages[1].Agents))
 	}
-	if got := m.Stages[2].Agents[0].Type; got != "claude" {
+	if len(m.Stages[2].Agents) != 1 {
+		t.Fatalf("stage[2] agent count = %d, want 1", len(m.Stages[2].Agents))
+	}
+
+	for i, agent := range m.Stages[0].Agents {
+		if agent.Type != "claude" {
+			t.Fatalf("stage[0].Agents[%d].Type = %q", i, agent.Type)
+		}
+	}
+	for i, agent := range m.Stages[1].Agents {
+		if agent.Type != "codex" {
+			t.Fatalf("stage[1].Agents[%d].Type = %q", i, agent.Type)
+		}
+	}
+	if got := m.Stages[2].Agents[0].Type; got != "codex" {
 		t.Fatalf("stage[2].Agents[0].Type = %q", got)
 	}
 
-	deps := m.Stages[2].DependsOn
-	if len(deps) != 2 {
-		t.Fatalf("want 2 rewritten deps, got %v", deps)
+	if deps := m.Stages[1].DependsOn; len(deps) != 1 || deps[0] != "claude-reviews" {
+		t.Fatalf("stage[1].DependsOn = %v, want [claude-reviews]", deps)
 	}
-	depSet := map[string]bool{deps[0]: true, deps[1]: true}
-	if !depSet["self-review-claude"] || !depSet["self-review-codex"] {
-		t.Fatalf("unexpected rewritten deps: %v", deps)
+	if deps := m.Stages[2].DependsOn; len(deps) != 1 || deps[0] != "codex-reviews" {
+		t.Fatalf("stage[2].DependsOn = %v, want [codex-reviews]", deps)
 	}
 }
 

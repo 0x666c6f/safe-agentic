@@ -41,10 +41,11 @@ safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
 ```
 
 This:
-1. Runs the same self-review intent through both Claude and Codex
-2. Pushes each model's findings to its own `review/self-*` branch
-3. Runs a final reconciliation pass that fetches both reports
-4. Produces `REVIEW-RECONCILED.md` on `review/self-reconciled`
+1. Runs five review categories: code, security, docs, tests, design/types
+2. Has both Claude and Codex review each category
+3. Publishes both model reports onto the same review branch per category
+4. Runs a Codex reconciliation pass that synthesizes findings, applies fixes, and opens a PR
+5. Cleans up the intermediate review branches after the PR is created
 
 ## Standalone pipeline
 
