@@ -1,101 +1,102 @@
 # Managing Agents
 
-## List
+This page is about container lifecycle after a session has been spawned.
+
+## List and inspect
 
 ```bash
 safe-ag list
+safe-ag peek --latest
+safe-ag logs --latest
+safe-ag summary --latest
+safe-ag output --latest
+safe-ag diff --latest
 ```
 
-Shows all containers (running + stopped) with name, type, repo, auth, network, and status.
+Use:
+- `list` for all containers
+- `peek` for quick live output
+- `logs` for the session log
+- `summary` for a compact state snapshot
+- `output` for the last useful result
+- `diff` for the workspace diff
 
-## Attach
+## Attach and resume
 
 ```bash
 safe-ag attach api-refactor
 safe-ag attach --latest
 ```
 
-Reattaches to the agent's tmux session. If the container is stopped, it restarts first. Detach without stopping: `Ctrl-b d`.
+Behavior:
+- if the container is running, this attaches to tmux
+- if it is stopped, safe-agentic restarts it first
+- detach without stopping: `Ctrl-b d`
 
-## Peek
-
-```bash
-safe-ag peek api-refactor           # last 30 lines
-safe-ag peek --latest --lines 50    # more context
-```
-
-See what an agent is doing without attaching. Works on running tmux containers only.
-
-## Copy files out
+## Stop and remove
 
 ```bash
-safe-ag cp api-refactor /workspace/tmp/test.log ./test.log
-safe-ag cp --latest /workspace/dist ./dist
+safe-ag stop api-refactor
+safe-ag stop --latest
+safe-ag stop --all
 ```
 
-Extract files from a container without bind mounts.
-
-## Stop
-
-```bash
-safe-ag stop api-refactor      # one agent
-safe-ag stop --latest          # newest
-safe-ag stop --all             # everything
-```
-
-Removes the container, its network, and any DinD sidecar.
+`stop` removes:
+- the agent container
+- its managed Docker network
+- its DinD sidecar, if one exists
 
 ## Cleanup
 
 ```bash
-safe-ag cleanup          # stop all, keep auth volumes
-safe-ag cleanup --auth   # also remove auth volumes
+safe-ag cleanup
+safe-ag cleanup --auth
 ```
 
-## Export sessions
+Difference:
+- `cleanup`: remove containers, managed networks, and transient runtime state
+- `cleanup --auth`: also remove shared auth volumes
+
+## Copy files and export sessions
+
+Copy files out of a container:
+
+```bash
+safe-ag cp api-refactor /workspace/tmp/report.txt ./report.txt
+safe-ag cp --latest /workspace/dist ./dist
+```
+
+Export session history:
 
 ```bash
 safe-ag sessions api-refactor
-safe-ag sessions --latest ~/my-sessions/
+safe-ag sessions --latest ~/tmp/agent-sessions
 ```
-
-Copies conversation history from the container to host. Works on running and stopped containers.
 
 ## Container lifecycle
 
-```mermaid
-graph LR
-    spawn["safe-ag spawn"] --> running["Running"]
-    running -->|"agent exits"| stopped["Stopped"]
-    running -->|"safe-ag attach"| running
-    stopped -->|"safe-ag attach"| running
-    running -->|"safe-ag stop"| gone["Removed"]
-    stopped -->|"safe-ag stop"| gone
-
-    style spawn fill:#e3f2fd,stroke:#1565c0
-    style running fill:#dfd,stroke:#393
-    style stopped fill:#fff3e0,stroke:#e65100
-    style gone fill:#f5f5f5,stroke:#999
+```text
+spawn -> running -> stopped -> attach -> running
+spawn -> running -> stop -> removed
+stopped -> stop -> removed
 ```
 
-Containers persist after exit. Reattach to resume, or stop to remove.
+Containers are intentionally persistent until you stop or clean them up.
 
-## Interactive TUI
+## TUI and dashboard
 
 ```bash
 safe-ag tui
+safe-ag dashboard --bind localhost:8420
 ```
 
-k9s-style terminal dashboard with live stats (CPU, MEM, PIDs), activity detection, and keybindings for all operations:
+Use these when you want:
+- all agents in one view
+- live stats
+- keyboard-driven attach/stop/log/review flows
 
-| Key | Action | Key | Action |
-|-----|--------|-----|--------|
-| `a` | Attach | `f` | Diff |
-| `r` | Resume | `R` | Review |
-| `s` | Stop | `t` | Todos |
-| `l` | Logs | `x` | Checkpoint |
-| `d` | Describe | `g` | Create PR |
-| `n` | New agent | `$` | Cost |
-| `p` | Preview | `A` | Audit |
-| `e` | Export | `/` | Filter |
-| `c` | Copy | `q` | Quit |
+## Good operator habits
+
+- use `peek` before `attach` if you only need status
+- use `diff` and `output` before creating a PR
+- use `cleanup --auth` after high-risk work or shared-machine sessions

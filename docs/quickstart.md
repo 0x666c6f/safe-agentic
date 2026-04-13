@@ -1,61 +1,94 @@
 # Quickstart
 
-Get a sandboxed Claude Code or Codex session running in a few minutes.
+This gets you from zero to a working agent session with the fewest moving parts.
 
-## 1. Install
+## 1. Install prerequisites
 
 ```bash
 brew install orbstack
-brew tap 0x666c6f/tap && brew install safe-agentic
-safe-ag --version
+brew tap 0x666c6f/tap
+brew install safe-agentic
 ```
 
-From source:
+If you are working from source:
 
 ```bash
-brew install orbstack
 git clone git@github.com:0x666c6f/safe-agentic.git
 cd safe-agentic
 make build-all
 export PATH="$PWD/bin:$PATH"
 ```
 
-## 2. Build VM + image
+## 2. Build the VM and image
 
 ```bash
 safe-ag setup
+safe-ag diagnose
 ```
 
-This creates the OrbStack VM, reapplies hardening, and builds `safe-agentic:latest`.
+`safe-ag setup`:
+- creates the OrbStack VM if needed
+- reapplies VM hardening
+- builds the local Docker image
 
-## 3. Spawn an agent
+## 3. Spawn your first agent
+
+Public repo:
 
 ```bash
-# Public repo
 safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
-
-# Private repo
-safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
-
-# Codex
-safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:myorg/myrepo.git
 ```
 
-First run usually opens an OAuth flow. Containers persist after exit; reattach later with `safe-ag attach --latest`.
+Private repo:
 
-## 4. Inspect + clean up
+```bash
+safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+```
+
+With an immediate task:
+
+```bash
+safe-ag spawn claude \
+  --ssh \
+  --repo git@github.com:myorg/myrepo.git \
+  --prompt "Fix the failing CI tests"
+```
+
+## 4. Check what happened
 
 ```bash
 safe-ag list
 safe-ag peek --latest
+safe-ag attach --latest
+```
+
+Notes:
+- the first auth flow may open or print a device-code login
+- agents run in tmux inside the container
+- detach with `Ctrl-b d`
+- stopped containers can be reattached later
+
+## 5. Review the work
+
+```bash
 safe-ag diff --latest
-safe-ag stop --all
+safe-ag output --latest
+safe-ag review --latest
+```
+
+## 6. Clean up
+
+```bash
+safe-ag stop --latest
+safe-ag cleanup
 safe-ag cleanup --auth
 ```
 
-## Notes
+Use `--auth` only when you want to remove shared auth volumes too.
 
-- `safe-ag tui` launches the terminal dashboard.
-- `safe-ag diagnose` checks OrbStack, VM, Docker, image, auth, and defaults.
-- `safe-ag spawn ... --repo ... --repo ...` clones multiple repos into one container.
-- Defaults live in `~/.config/safe-agentic/defaults.sh`.
+## Good next steps
+
+- [Spawning Agents](guide/spawning.md)
+- [Managing Agents](guide/managing.md)
+- [Workflow](guide/workflow.md)
+- [Security](security.md)

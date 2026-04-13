@@ -1,85 +1,55 @@
 # Analytics
 
-Track costs and audit agent operations.
+safe-agentic exposes lightweight operational data about each session.
 
-## Summary — one-screen overview
+## Summary
 
 ```bash
-safe-ag summary api-refactor
 safe-ag summary --latest
+safe-ag summary api-refactor
 ```
 
-Prints a compact overview of a single agent:
+`summary` is the quickest "what is going on?" command. It includes:
+- agent type
+- repo
+- status and activity
+- elapsed time
+- cost estimate
+- last message
+- changed files
 
-- Agent type, container name, status
-- Repo URL and active branch
-- Elapsed time since spawn
-- Activity (Working / Idle / Stopped)
-- Cost estimate (same as `safe-ag cost`)
-- Last agent message (from session JSONL)
-- List of changed files (`git diff --name-only`)
-
-Useful as a quick pre-PR sanity check or to get context before reattaching.
-
-## Cost estimation
+## Cost
 
 ```bash
-safe-ag cost api-refactor
 safe-ag cost --latest
+safe-ag cost api-refactor
 ```
 
-Parses session JSONL files inside the container for token usage data. Outputs:
+`cost` parses token usage from session data and estimates spend by model.
 
-- Total tokens (input + output)
-- Per-model breakdown
-- Estimated cost based on approximate rates
-
-### Pricing used
-
-| Model | Input (per 1M) | Output (per 1M) |
-|-------|----------------|-----------------|
-| claude-opus-4-6 | $15.00 | $75.00 |
-| claude-sonnet-4-6 | $3.00 | $15.00 |
-| claude-haiku-4-5 | $0.80 | $4.00 |
-| default | $3.00 | $15.00 |
+Use it for:
+- long-running sessions
+- cost visibility before enabling larger fleets
+- rough usage reporting
 
 ## Audit log
 
 ```bash
-safe-ag audit               # last 50 entries
-safe-ag audit --lines 100   # more history
+safe-ag audit
+safe-ag audit --lines 100
 ```
 
-Every `safe-ag spawn`, `safe-ag stop`, and `safe-ag attach` is recorded in an append-only JSONL file at `~/.config/safe-agentic/audit.jsonl`.
+The audit log is append-only and records actions like:
+- spawn
+- attach
+- stop
+- cleanup
 
-### Log format
-
-```json
-{"timestamp":"2026-04-09T14:01:23Z","action":"spawn","container":"safe-ag spawn claude --repo-api-refactor","details":"type=claude ssh=true auth=shared"}
-{"timestamp":"2026-04-09T16:30:45Z","action":"stop","container":"safe-ag spawn claude --repo-api-refactor","details":""}
-```
-
-The audit log is never modified or truncated — it's append-only by design.
-
-## Examples
+## Session export
 
 ```bash
-# Check cost of a long-running agent
-safe-ag cost my-agent
-#   Total tokens: 1,234,567
-#     Input:  987,654
-#     Output: 246,913
-#
-#   claude-sonnet-4-6: 1,234,567 tokens (~$6.67)
-#
-#   Estimated total: ~$6.67
-
-# View recent operations
-safe-ag audit --lines 10
-#   2026-04-09T14:01  spawn       safe-ag spawn claude --repo-api-refactor       type=claude ssh=true auth=shared
-#   2026-04-09T14:30  attach      safe-ag spawn claude --repo-api-refactor
-#   2026-04-09T16:45  stop        safe-ag spawn claude --repo-api-refactor
-
-# Full audit history export
-safe-ag audit --lines 1000 > audit-export.jsonl
+safe-ag sessions --latest
+safe-ag sessions api-refactor ~/tmp/sessions
 ```
+
+Use this when you want the full conversation trail, not just the latest output or summary.

@@ -1,172 +1,71 @@
-# Terminal UI (TUI)
+# Terminal UI
 
-A k9s-style interactive dashboard for monitoring and managing all your agents.
+`safe-ag tui` is the fastest way to see all agents at once.
 
 ```bash
 safe-ag tui
 ```
 
-## Layout
+## What it shows
 
-The TUI has three zones stacked vertically:
+- header: VM context and running/total agents
+- table: agent list, state, resource usage, network/auth metadata
+- footer: key hints, filter bar, command bar, status messages
+- optional preview pane for the selected agent
 
-**Header** — app title, VM context, refresh interval (2s), running/total agent count
+## What you can do from the TUI
 
-**Table** — one row per agent, sortable by any column:
+| Key | Action |
+|---|---|
+| `Enter` / `a` | attach |
+| `r` | resume |
+| `s` | stop |
+| `l` | logs |
+| `d` | inspect |
+| `f` | diff |
+| `R` | review |
+| `t` | todos |
+| `x` | checkpoint |
+| `g` | create PR |
+| `e` | export sessions |
+| `c` | copy files |
+| `n` | spawn new agent |
+| `p` | toggle preview |
+| `/` | filter |
+| `:` | command bar |
+| `?` | help |
+| `q` | quit |
 
-| NAME | TYPE | REPO | SSH | STATUS | ACTIVITY | CPU | MEM |
-|------|------|------|-----|--------|----------|-----|-----|
-| **agent-claude-api-refactor** | claude | org/repo | on | Up 2h | Working | 12% | 1.2G |
-| agent-codex-lint-fix | codex | org/other | off | Up 30m | Idle | 8% | 800M |
-| agent-shell-debug | shell | — | off | Exited | Stopped | — | — |
+## Important behaviors
 
-**Footer** — shortcut hints, replaced by filter input, command bar, or confirmation prompts during those modes
+- stopped containers still appear
+- `attach` will restart a stopped container when needed
+- preview uses session/log fallbacks depending on what is available
+- filtering is case-insensitive
+- narrow terminals automatically hide lower-priority columns
 
-Three zones:
+## Dashboard
 
-- **Header** — app title, VM context, refresh interval, running/total agent count
-- **Table** — sortable columns, arrow keys to navigate, selected row highlighted
-- **Footer** — shortcut hints (replaced by filter/command/confirm during input modes)
+There is also a web dashboard:
 
-## Keybindings
+```bash
+safe-ag dashboard --bind localhost:8420
+```
 
-### Agent lifecycle
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `a` / `Enter` | Attach | Open the agent's tmux session (restarts stopped containers) |
-| `r` | Resume | Reconnect to agent, or restart with CLI resume command |
-| `s` | Stop | Confirm, then stop and remove the container |
-| `Ctrl-d` | Delete | Same as stop |
-| `Ctrl-k` | Kill all | Confirm, then stop all containers |
-| `n` | New | Open spawn form to create a new agent |
-
-### Observability
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `l` | Logs | Show `safe-ag logs` output in a scrollable overlay |
-| `d` | Describe | Show `docker inspect` in formatted overlay |
-| `y` | YAML | Show raw `docker inspect` JSON |
-| `p` | Preview | Toggle live preview; falls back to logs for stopped agents |
-| `f` | Diff | Show `safe-ag diff` output |
-| `R` | Review | Run `safe-ag review` |
-
-### Workflow
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `t` | Todos | Show `safe-ag todo list` output |
-| `x` | Checkpoint | Run `safe-ag checkpoint create` |
-| `g` | PR | Create a GitHub PR from agent's branch |
-
-### Analytics
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `$` | Cost | Estimate API spend from session token data |
-| `A` | Audit | Show the operation audit log |
-
-### Data
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `e` | Export | Export session history to host |
-| `c` | Copy | Open form to copy files to a VM path |
-| `m` | MCP login | Run MCP OAuth login interactively |
-
-### Navigation
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `j` / `↓` | Down | Move selection down |
-| `k` / `↑` | Up | Move selection up |
-| `1`-`9` | Sort | Sort by column N (toggles ascending/descending) |
-| `/` | Filter | Filter agents by substring match on any field |
-| `:` | Command | Open command bar |
-| `?` | Help | Toggle the full keybinding help overlay |
-| `Esc` | Back | Close overlay, filter, command, or modal |
-| `q` / `Ctrl-c` | Quit | Exit the TUI |
-
-## Help overlay
-
-Press `?` at any time to open a scrollable overlay listing every keybinding. Press `?` or `Esc` to close it.
-
-## Command bar
-
-Press `:` to open the command bar. Available commands:
-
-| Command | Description |
-|---------|-------------|
-| `:q` / `:quit` | Exit |
-| `:fleet <file>` | Spawn agents from a YAML manifest |
-| `:pipeline <file>` | Run a multi-step safe-ag pipeline |
-| `:audit` | Show the audit log |
-
-## Preview pane
-
-Press `p` to toggle a split view showing the last 30 lines of the selected agent's tmux output. Updates on each poll cycle (every 2 seconds). For stopped agents, preview falls back to recent logs.
+Use the TUI when you want keyboard-first local control. Use the dashboard when you want a browser view.
 
 ## Spawn form
 
-Press `n` to open the spawn form:
+Press `n` to open the spawn form. It lets you set:
+- type
+- repo URL
+- name
+- prompt
+- SSH
+- auth reuse
+- GitHub auth reuse
+- AWS profile
+- Docker access
+- git identity
 
-- **Type** — Claude or Codex
-- **Repo URL** — optional, auto-converts HTTPS GitHub URLs to SSH when SSH is enabled
-- **Name** — optional human-readable name
-- **Prompt** — optional initial task
-- **SSH** — enable SSH forwarding (default: on)
-- **Reuse auth** — persist OAuth tokens (default: on)
-- **Reuse GH auth** — persist GitHub CLI auth
-- **AWS profile** — inject AWS credentials
-- **Docker** — enable Docker-in-Docker
-- **Identity** — git author attribution
-
-The agent spawns in the background. Press `r` to connect once it's ready.
-
-## Activity detection
-
-The TUI probes each running agent's CPU usage by sampling `/proc/<pid>/stat` twice with a 1-second gap. This shows:
-
-- **Working** — agent process consumed CPU ticks (actively processing)
-- **Idle** — agent process is alive but not consuming CPU
-- **Stopped** — container is not running
-
-## Live stats
-
-Polled every 2 seconds via `docker stats`:
-
-- **CPU** — percentage of allocated CPUs
-- **MEM** — current memory usage / limit
-- **NET I/O** — network bytes in/out
-- **PIDs** — process count inside container
-
-## Columns
-
-The table shows up to 14 columns. When the terminal is too narrow, lowest-priority columns are hidden automatically (NET I/O, PIDs, Docker, GH-AUTH drop first).
-
-| Column | Description |
-|--------|-------------|
-| NAME | Container name |
-| TYPE | claude / codex / shell |
-| REPO | Repository display label |
-| SSH | on / off |
-| AUTH | shared / ephemeral |
-| GH-AUTH | shared / ephemeral |
-| DOCKER | off / dind / host-socket |
-| NETWORK | managed / custom / none |
-| STATUS | Docker status (Up 2h, Exited, etc.) |
-| ACTIVITY | Working / Idle / Stopped |
-| CPU | CPU usage percentage |
-| MEM | Memory usage |
-| NET I/O | Network bytes |
-| PIDS | Process count |
-
-## Building
-
-```bash
-make -C tui build     # build the binary
-make -C tui install   # build and copy to bin/
-```
-
-Requires Go 1.22+. No CGO. Single binary output.
+The spawned agent is launched in background mode; reconnect from the table when ready.
