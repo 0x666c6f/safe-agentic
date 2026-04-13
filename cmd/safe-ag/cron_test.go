@@ -64,7 +64,7 @@ func TestParseScheduleVariants(t *testing.T) {
 		{schedule: "*/5 * * * *", want: 5 * time.Minute},
 		{schedule: "0 */6 * * *", want: 6 * time.Hour},
 		{schedule: "0 0 * * *", want: 24 * time.Hour},
-		{schedule: "15 3 * * *", want: time.Hour},
+		{schedule: "15 3 * * *", want: 24 * time.Hour},
 		{schedule: "nonsense", wantErr: "unrecognized schedule format"},
 	}
 

@@ -1694,21 +1694,48 @@ func TestRepoTemplatesDir(t *testing.T) {
 }
 
 func TestTemplateList_FromSymlinkedBinary(t *testing.T) {
+	xdgDir, xdgCleanup := setXDGConfigHome(t)
+	defer xdgCleanup()
+	_ = xdgDir
+
 	tmp := t.TempDir()
-	binPath := filepath.Join(tmp, "safe-ag")
+	libexecDir := filepath.Join(tmp, "libexec")
+	binDir := filepath.Join(tmp, "bin")
+	workDir := filepath.Join(tmp, "work")
+	templatesDir := filepath.Join(tmp, "templates")
+	if err := os.MkdirAll(libexecDir, 0o755); err != nil {
+		t.Fatalf("mkdir libexec: %v", err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templatesDir, "security-audit.md"), []byte("Perform a security audit\n"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templatesDir, "code-review.md"), []byte("Perform a code review\n"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	binPath := filepath.Join(libexecDir, "safe-ag")
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Dir = "."
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build safe-ag failed: %v\n%s", err, out)
 	}
 
-	linkPath := filepath.Join(tmp, "agent")
+	linkPath := filepath.Join(binDir, "safe-ag")
 	if err := os.Symlink(binPath, linkPath); err != nil {
 		t.Fatalf("symlink safe-ag: %v", err)
 	}
 
 	listCmd := exec.Command(linkPath, "template", "list")
-	listCmd.Dir = filepath.Join("..", "..")
+	listCmd.Dir = workDir
 	listOut, err := listCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("template list via symlink failed: %v\n%s", err, listOut)
@@ -1718,7 +1745,7 @@ func TestTemplateList_FromSymlinkedBinary(t *testing.T) {
 	}
 
 	showCmd := exec.Command(linkPath, "template", "show", "security-audit")
-	showCmd.Dir = filepath.Join("..", "..")
+	showCmd.Dir = workDir
 	showOut, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("template show via symlink failed: %v\n%s", err, showOut)

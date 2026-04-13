@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const sshSocketPath = "/run/ssh-agent.sock"
 const sshRelaySocket = "/tmp/safe-agentic-ssh-agent.sock"
+
+var vmSocketPathPattern = regexp.MustCompile(`^/[\w./-]+$`)
 
 // AppendSSHMount sets up SSH agent forwarding from the VM into the container.
 // With userns-remap, the container's uid maps to an unprivileged VM uid that
@@ -26,14 +29,14 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 	if vmSocket == "" {
 		return fmt.Errorf("SSH_AUTH_SOCK not set in VM. Run 'ssh-add' on the host first")
 	}
+	if !vmSocketPathPattern.MatchString(vmSocket) {
+		return fmt.Errorf("SSH_AUTH_SOCK has unsafe value %q", vmSocket)
+	}
 
 	// Set up socat relay for userns-remap compatibility.
 	// Only start if not already running — multiple spawns share the same relay.
 	_, relayExists := exec.Run(ctx, "test", "-S", sshRelaySocket)
 	if relayExists != nil {
-		// sshRelaySocket is a package-level constant (/tmp/safe-agentic-ssh-agent.sock).
-		// vmSocket comes from the VM's $SSH_AUTH_SOCK (e.g. /run/orbstack/ssh-agent.sock).
-		// Both are VM-internal paths, not user-controlled input, so Sprintf is safe here.
 		relayScript := fmt.Sprintf(
 			"#!/bin/bash\nexec socat UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s\n",
 			sshRelaySocket, vmSocket)
