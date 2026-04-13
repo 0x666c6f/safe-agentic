@@ -28,8 +28,31 @@ func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 	t.Helper()
 	fake := orb.NewFake()
 	original := newExecutor
+	origFindBuildRoot := findBuildRoot
+	origSyncBuildContextToVM := syncBuildContextToVM
+	origCopyFileToVM := copyFileToVM
+	origVMExists := vmExists
+	origRunVMBootstrap := runVMBootstrap
+	origStartVM := startVM
+	origInstallVMSupportFiles := installVMSupportFiles
 	newExecutor = func() orb.Executor { return fake }
-	return fake, func() { newExecutor = original }
+	findBuildRoot = func() (string, error) { return t.TempDir(), nil }
+	syncBuildContextToVM = func(vmName, root string) error { return nil }
+	copyFileToVM = func(vmName, srcPath, destPath string) error { return nil }
+	vmExists = func(vmName string) bool { return true }
+	runVMBootstrap = func(vmName string) ([]byte, error) { return []byte("bootstrap ok\n"), nil }
+	startVM = func(vmName string) error { return nil }
+	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
+	return fake, func() {
+		newExecutor = original
+		findBuildRoot = origFindBuildRoot
+		syncBuildContextToVM = origSyncBuildContextToVM
+		copyFileToVM = origCopyFileToVM
+		vmExists = origVMExists
+		runVMBootstrap = origRunVMBootstrap
+		startVM = origStartVM
+		installVMSupportFiles = origInstallVMSupportFiles
+	}
 }
 
 // captureOutput redirects os.Stdout to a buffer for the duration of fn,
@@ -946,6 +969,10 @@ func TestUpdateCommand(t *testing.T) {
 	buildCmds := fake.CommandsMatching("docker build")
 	if len(buildCmds) == 0 {
 		t.Fatal("expected docker build command")
+	}
+	joined := strings.Join(buildCmds[0], " ")
+	if !strings.Contains(joined, "/tmp/build-context") {
+		t.Fatalf("expected VM build context path, got: %s", joined)
 	}
 	if !strings.Contains(output, "Image updated") {
 		t.Errorf("expected 'Image updated', got: %s", output)
@@ -2250,32 +2277,40 @@ func TestSetupCommand_DockerAvailable(t *testing.T) {
 
 	// Simulate docker info succeeding (Docker already running in VM)
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
-	// Simulate docker build failing (no build context) — that's fine for this test
-	fake.SetError("docker build", "no such file")
+	fake.SetResponse("docker build", "Successfully built abc123\n")
 
 	output := captureOutput(func() {
-		// runSetup calls exec.LookPath("orb") directly, which will succeed if orb is installed,
-		// or fail with a meaningful error. Either way is fine for coverage.
-		_ = runSetup(setupCmd, nil)
+		if err := runSetup(setupCmd, nil); err != nil {
+			t.Fatalf("runSetup() error = %v", err)
+		}
 	})
 
-	// We just want to exercise the code path; don't assert specific output
-	// since orb availability varies across environments.
-	_ = output
+	if !strings.Contains(output, "Bootstrapping VM") {
+		t.Fatalf("expected bootstrap output, got: %s", output)
+	}
+	buildCmds := fake.CommandsMatching("docker build")
+	if len(buildCmds) == 0 {
+		t.Fatal("expected docker build command")
+	}
 }
 
 func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
 
-	// Simulate docker info failing (Docker not yet running in VM)
-	fake.SetError("docker info", "Cannot connect to the Docker daemon")
+	// Docker is verified after bootstrap in the current flow.
+	fake.SetResponse("docker info", "Server Version: 24.0\n")
+	fake.SetResponse("docker build", "Successfully built abc123\n")
 
 	output := captureOutput(func() {
-		_ = runSetup(setupCmd, nil)
+		if err := runSetup(setupCmd, nil); err != nil {
+			t.Fatalf("runSetup() error = %v", err)
+		}
 	})
 
-	_ = output
+	if !strings.Contains(output, "Image updated") {
+		t.Fatalf("expected image update output, got: %s", output)
+	}
 }
 
 // ─── runVMSSH ─────────────────────────────────────────────────────────────────

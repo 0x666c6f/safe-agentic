@@ -1,11 +1,14 @@
 package main
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +21,243 @@ func configuredVMName() string {
 		return v
 	}
 	return "safe-agentic"
+}
+
+var (
+	copyFileToVM          = copyFileToVMImpl
+	syncBuildContextToVM  = syncBuildContextToVMImpl
+	findBuildRoot         = findBuildRootImpl
+	vmExists              = vmExistsImpl
+	runVMBootstrap        = runVMBootstrapImpl
+	startVM               = startVMImpl
+	installVMSupportFiles = installVMSupportFilesImpl
+)
+
+func vmExistsImpl(vmName string) bool {
+	out, err := exec.Command("orbctl", "list", "-q").Output()
+	if err != nil {
+		out, err = exec.Command("orb", "list", "-q").Output()
+		if err != nil {
+			return false
+		}
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == vmName {
+			return true
+		}
+	}
+	return false
+}
+
+func startVMImpl(vmName string) error {
+	start := exec.Command("orb", "start", vmName)
+	start.Stdout = os.Stdout
+	start.Stderr = os.Stderr
+	return start.Run()
+}
+
+func runVMBootstrapImpl(vmName string) ([]byte, error) {
+	return exec.Command("orb", "run", "-m", vmName, "bash", "/tmp/setup.sh").CombinedOutput()
+}
+
+func installVMSupportFilesImpl(vmName, buildRoot string) error {
+	seccompSrc := filepath.Join(buildRoot, "config", "seccomp.json")
+	if err := copyFileToVM(vmName, seccompSrc, "/tmp/seccomp.json"); err != nil {
+		return err
+	}
+	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
+		"sudo mkdir -p /etc/safe-agentic && sudo cp /tmp/seccomp.json /etc/safe-agentic/seccomp.json && sudo chmod 0644 /etc/safe-agentic/seccomp.json")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install VM support files: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func findBuildRootImpl() (string, error) {
+	var candidates []string
+	seen := map[string]bool{}
+
+	addCandidate := func(dir string) {
+		if dir == "" || seen[dir] {
+			return
+		}
+		seen[dir] = true
+		candidates = append(candidates, dir)
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; ; dir = filepath.Dir(dir) {
+			addCandidate(dir)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		addCandidate(filepath.Dir(exeDir))
+		addCandidate(filepath.Dir(filepath.Dir(exeDir)))
+	}
+
+	for _, dir := range candidates {
+		if fileExists(filepath.Join(dir, "Dockerfile")) &&
+			fileExists(filepath.Join(dir, "entrypoint.sh")) &&
+			fileExists(filepath.Join(dir, "vm", "setup.sh")) {
+			return dir, nil
+		}
+	}
+
+	return "", fmt.Errorf("build root not found (expected Dockerfile, entrypoint.sh, vm/setup.sh)")
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func copyFileToVMImpl(vmName, srcPath, destPath string) error {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", srcPath, err)
+	}
+
+	destDir := filepath.Dir(destPath)
+	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
+		fmt.Sprintf("mkdir -p %s && cat > %s && chmod +x %s",
+			shellQuote(destDir), shellQuote(destPath), shellQuote(destPath)))
+	cmd.Stdin = strings.NewReader(string(data))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("copy %s to %s: %w\n%s", srcPath, destPath, err, string(out))
+	}
+	return nil
+}
+
+func syncBuildContextToVMImpl(vmName, root string) error {
+	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
+		"rm -rf /tmp/build-context && mkdir -p /tmp/build-context && tar xf - -C /tmp/build-context")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start context sync: %w", err)
+	}
+
+	writeErrCh := make(chan error, 1)
+	go func() {
+		tw := tar.NewWriter(stdin)
+		writeErrCh <- writeBuildContextArchive(tw, root)
+		_ = stdin.Close()
+	}()
+
+	waitErr := cmd.Wait()
+	writeErr := <-writeErrCh
+	if writeErr != nil {
+		return writeErr
+	}
+	if waitErr != nil {
+		return fmt.Errorf("sync build context: %w", waitErr)
+	}
+	return nil
+}
+
+func writeBuildContextArchive(tw *tar.Writer, root string) error {
+	defer tw.Close()
+
+	files, err := buildContextFiles(root)
+	if err != nil {
+		return err
+	}
+
+	for _, rel := range files {
+		abs := filepath.Join(root, rel)
+		info, err := os.Lstat(abs)
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", abs, err)
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return fmt.Errorf("header %s: %w", abs, err)
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(abs)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", abs, err)
+			}
+			hdr.Linkname = target
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("write header %s: %w", rel, err)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		f, err := os.Open(abs)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", abs, err)
+		}
+		if _, err := io.Copy(tw, f); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("copy %s: %w", abs, err)
+		}
+		_ = f.Close()
+	}
+
+	return nil
+}
+
+func buildContextFiles(root string) ([]string, error) {
+	git := exec.Command("git", "-C", root, "ls-files", "-c", "-z")
+	out, err := git.Output()
+	if err == nil && len(out) > 0 {
+		var files []string
+		for _, rel := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
+			if rel == "" {
+				continue
+			}
+			if fileExists(filepath.Join(root, rel)) {
+				files = append(files, rel)
+			}
+		}
+		sort.Strings(files)
+		return files, nil
+	}
+
+	var files []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, "site") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // ─── setup ─────────────────────────────────────────────────────────────────
@@ -34,6 +274,10 @@ func init() {
 
 func runSetup(cmd *cobra.Command, args []string) error {
 	vmName := configuredVMName()
+	buildRoot, err := findBuildRoot()
+	if err != nil {
+		return err
+	}
 	// Step 1: Check if orb is installed.
 	if _, err := exec.LookPath("orb"); err != nil {
 		return fmt.Errorf("orb not found in PATH: install OrbStack from https://orbstack.dev")
@@ -43,16 +287,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Step 2: Check if VM exists (orb list gives a line per VM).
-	vmExists := false
-	orbExec := exec.Command("orb", "list")
-	if out, err := orbExec.Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, vmName) {
-				vmExists = true
-				break
-			}
-		}
-	}
+	vmExists := vmExists(vmName)
 
 	// Step 3: Create VM if needed.
 	if !vmExists {
@@ -73,36 +308,34 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	orbRunner := newExecutor()
 
-	// Step 4: Copy and run setup script.
-	fmt.Println()
-	fmt.Println("To complete setup, run the VM bootstrap script manually:")
-	fmt.Println()
-	fmt.Printf("  orb push -m %s vm/setup.sh /tmp/setup.sh\n", vmName)
-	fmt.Printf("  orb run -m %s bash /tmp/setup.sh\n", vmName)
-	fmt.Println()
+	// Step 4: Copy and run setup script automatically.
+	fmt.Println("Bootstrapping VM…")
+	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
+		return err
+	}
+	setupOut, err := runVMBootstrap(vmName)
+	if err != nil {
+		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
+	}
+	fmt.Print(string(setupOut))
+	if err := installVMSupportFiles(vmName, buildRoot); err != nil {
+		return err
+	}
+	fmt.Println("✓ VM support files installed")
 
-	// Attempt a quick check: is Docker already running in the VM?
-	if _, err := orbRunner.Run(ctx, "docker", "info"); err == nil {
-		fmt.Println("✓ Docker is already running in VM")
-
-		// Step 5: Build Docker image.
-		fmt.Println("Building safe-agentic Docker image…")
-		buildOut, buildErr := orbRunner.Run(ctx, "docker", "build", "-t", "safe-agentic:latest", "/tmp/build-context/")
-		if buildErr != nil {
-			fmt.Println("Could not build image automatically.")
-			fmt.Println("Copy build context first:")
-			fmt.Printf("  orb push -m %s . /tmp/build-context/\n", vmName)
-			fmt.Println("Then run: safe-ag update")
-		} else {
-			fmt.Print(string(buildOut))
-			fmt.Println("✓ Image built")
-		}
-	} else {
-		fmt.Println("Docker not yet available in VM — run the bootstrap script above, then:")
-		fmt.Printf("  orb push -m %s . /tmp/build-context/\n", vmName)
-		fmt.Println("  safe-ag update")
+	// Step 5: Verify Docker.
+	if _, err := orbRunner.Run(ctx, "docker", "info"); err != nil {
+		return fmt.Errorf("docker not available after bootstrap: %w", err)
 	}
 
+	// Step 6: Sync build context and build image.
+	if err := syncBuildContextToVM(vmName, buildRoot); err != nil {
+		return err
+	}
+	fmt.Println("✓ Build context synced")
+	if err := runDockerBuild(ctx, orbRunner); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -128,15 +361,30 @@ func init() {
 func runUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	orbRunner := newExecutor()
+	vmName := configuredVMName()
+	buildRoot, err := findBuildRoot()
+	if err != nil {
+		return err
+	}
 
-	buildArgs := []string{"docker", "build", "-t", "safe-agentic:latest", "."}
+	if err := syncBuildContextToVM(vmName, buildRoot); err != nil {
+		return err
+	}
+	fmt.Println("✓ Build context synced")
+	return runDockerBuild(ctx, orbRunner)
+}
+
+func runDockerBuild(ctx context.Context, orbRunner interface {
+	Run(context.Context, ...string) ([]byte, error)
+}) error {
+	buildArgs := []string{"docker", "build", "-t", "safe-agentic:latest", "/tmp/build-context"}
 
 	switch {
 	case updateFull:
-		buildArgs = []string{"docker", "build", "--no-cache", "-t", "safe-agentic:latest", "."}
+		buildArgs = []string{"docker", "build", "--no-cache", "-t", "safe-agentic:latest", "/tmp/build-context"}
 	case updateQuick:
 		cacheBust := fmt.Sprintf("%d", time.Now().Unix())
-		buildArgs = []string{"docker", "build", "--build-arg", "CACHEBUST=" + cacheBust, "-t", "safe-agentic:latest", "."}
+		buildArgs = []string{"docker", "build", "--build-arg", "CACHEBUST=" + cacheBust, "-t", "safe-agentic:latest", "/tmp/build-context"}
 	}
 
 	fmt.Println("Building safe-agentic:latest…")
@@ -188,15 +436,28 @@ func runVMSSH(cmd *cobra.Command, args []string) error {
 
 func runVMStart(cmd *cobra.Command, args []string) error {
 	vmName := configuredVMName()
+	buildRoot, err := findBuildRoot()
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Starting VM %s…\n", vmName)
-	start := exec.Command("orb", "start", vmName)
-	start.Stdout = cmd.OutOrStdout()
-	start.Stderr = cmd.ErrOrStderr()
-	if err := start.Run(); err != nil {
+	if err := startVM(vmName); err != nil {
 		return fmt.Errorf("orb start: %w", err)
 	}
 	fmt.Println("✓ VM started")
-	fmt.Printf("Tip: run setup script to re-harden: orb run -m %s bash /tmp/setup.sh\n", vmName)
+	fmt.Println("Re-applying VM hardening…")
+	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
+		return err
+	}
+	setupOut, err := runVMBootstrap(vmName)
+	if err != nil {
+		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
+	}
+	fmt.Print(string(setupOut))
+	if err := installVMSupportFiles(vmName, buildRoot); err != nil {
+		return err
+	}
+	fmt.Println("✓ VM support files installed")
 	return nil
 }
 
