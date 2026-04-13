@@ -1120,6 +1120,52 @@ func TestAgentConfigDir(t *testing.T) {
 	}
 }
 
+func TestRunAWSRefresh_WritesCredentialsAsAgentUser(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir aws dir: %v", err)
+	}
+	creds := "[test-profile]\naws_access_key_id = test\naws_secret_access_key = secret\n"
+	if err := os.WriteFile(filepath.Join(awsDir, "credentials"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("write host credentials: %v", err)
+	}
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	output := captureOutput(func() {
+		if err := runAWSRefresh(awsRefreshCmd, []string{containerName, "test-profile"}); err != nil {
+			t.Fatalf("runAWSRefresh() error = %v", err)
+		}
+	})
+
+	writeCmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(writeCmds) == 0 {
+		t.Fatal("expected docker exec write command")
+	}
+	joined := strings.Join(writeCmds[0], " ")
+	if !strings.Contains(joined, "umask 177; mkdir -p /home/agent/.aws") {
+		t.Fatalf("expected in-container aws write command, got: %s", joined)
+	}
+	if !strings.Contains(joined, "base64 -d > /home/agent/.aws/credentials") {
+		t.Fatalf("expected base64 decode write, got: %s", joined)
+	}
+	if got := len(fake.CommandsMatching("docker cp")); got != 0 {
+		t.Fatalf("did not expect docker cp, got %d command(s)", got)
+	}
+	if got := len(fake.CommandsMatching("chmod 600 /home/agent/.aws/credentials")); got != 0 {
+		t.Fatalf("did not expect standalone chmod, got %d command(s)", got)
+	}
+	if !strings.Contains(output, `AWS credentials for profile "test-profile" refreshed in `+containerName) {
+		t.Fatalf("expected success output, got: %s", output)
+	}
+}
+
 // ─── quoteValue ───────────────────────────────────────────────────────────────
 
 func TestQuoteValue(t *testing.T) {

@@ -435,7 +435,6 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 	}
 	fmt.Printf("Waiting for %d agent(s) to complete...\n", len(names))
 	done := make(map[string]bool)
-	var failed []string
 	for {
 		allDone := true
 		for _, name := range names {
@@ -462,9 +461,6 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 			}
 		}
 		if allDone {
-			if len(failed) > 0 {
-				return fmt.Errorf("containers failed: %s", strings.Join(failed, ", "))
-			}
 			return nil
 		}
 		select {

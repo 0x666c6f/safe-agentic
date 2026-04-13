@@ -612,29 +612,12 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("decode AWS credentials: %w", err)
 	}
-
-	tmpFile, err := os.CreateTemp("", "safe-agentic-aws-creds-*")
-	if err != nil {
-		return fmt.Errorf("create temp credentials file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmpFile.WriteString(credsContent); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("write temp credentials file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp credentials file: %w", err)
-	}
-
-	if _, err := orbRunner.Run(ctx, "docker", "exec", name, "mkdir", "-p", "/home/agent/.aws"); err != nil {
-		return fmt.Errorf("prepare AWS directory: %w", err)
-	}
-	if _, err := orbRunner.Run(ctx, "docker", "cp", tmpPath, name+":/home/agent/.aws/credentials"); err != nil {
-		return fmt.Errorf("copy credentials into container: %w", err)
-	}
-	if _, err := orbRunner.Run(ctx, "docker", "exec", name, "chmod", "600", "/home/agent/.aws/credentials"); err != nil {
-		return fmt.Errorf("chmod container credentials: %w", err)
+	writeCmd := fmt.Sprintf(
+		"umask 177; mkdir -p /home/agent/.aws && printf %%s %s | base64 -d > /home/agent/.aws/credentials",
+		shellQuote(inject.EncodeB64(credsContent)),
+	)
+	if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", writeCmd); err != nil {
+		return fmt.Errorf("write container credentials: %w", err)
 	}
 
 	// Set the profile env var via docker exec.
