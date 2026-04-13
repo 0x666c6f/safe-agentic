@@ -957,6 +957,8 @@ func runCostHistory(ctx context.Context, exec orb.Executor, period string) error
 // extractTokenUsage parses JSONL content looking for token usage fields.
 func extractTokenUsage(data []byte) []cost.TokenUsage {
 	var usages []cost.TokenUsage
+	var sessionModel string
+	var prevTotalIn, prevTotalOut int64
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -967,6 +969,69 @@ func extractTokenUsage(data []byte) []cost.TokenUsage {
 
 		// Look for usage/token fields at top level or nested in message
 		model := jsonString(obj, "model")
+		if model == "" {
+			model = sessionModel
+		}
+
+		if payloadRaw, ok := obj["payload"]; ok {
+			var payload struct {
+				ModelProvider string `json:"model_provider"`
+				Type          string `json:"type"`
+				Info          struct {
+					LastTokenUsage struct {
+						InputTokens       int64 `json:"input_tokens"`
+						CachedInputTokens int64 `json:"cached_input_tokens"`
+						OutputTokens      int64 `json:"output_tokens"`
+					} `json:"last_token_usage"`
+					TotalTokenUsage struct {
+						InputTokens       int64 `json:"input_tokens"`
+						CachedInputTokens int64 `json:"cached_input_tokens"`
+						OutputTokens      int64 `json:"output_tokens"`
+					} `json:"total_token_usage"`
+				} `json:"info"`
+			}
+			if err := json.Unmarshal(payloadRaw, &payload); err == nil {
+				if sessionModel == "" {
+					switch payload.ModelProvider {
+					case "openai":
+						sessionModel = "codex"
+					}
+				}
+				if model == "" {
+					model = sessionModel
+				}
+				if payload.Type == "token_count" {
+					in := payload.Info.LastTokenUsage.InputTokens + payload.Info.LastTokenUsage.CachedInputTokens
+					out := payload.Info.LastTokenUsage.OutputTokens
+					if in > 0 || out > 0 {
+						usages = append(usages, cost.TokenUsage{
+							Model:        model,
+							InputTokens:  in,
+							OutputTokens: out,
+						})
+						prevTotalIn = payload.Info.TotalTokenUsage.InputTokens + payload.Info.TotalTokenUsage.CachedInputTokens
+						prevTotalOut = payload.Info.TotalTokenUsage.OutputTokens
+						continue
+					}
+
+					totalIn := payload.Info.TotalTokenUsage.InputTokens + payload.Info.TotalTokenUsage.CachedInputTokens
+					totalOut := payload.Info.TotalTokenUsage.OutputTokens
+					deltaIn := totalIn - prevTotalIn
+					deltaOut := totalOut - prevTotalOut
+					if deltaIn > 0 || deltaOut > 0 {
+						usages = append(usages, cost.TokenUsage{
+							Model:        model,
+							InputTokens:  deltaIn,
+							OutputTokens: deltaOut,
+						})
+					}
+					if totalIn > 0 || totalOut > 0 {
+						prevTotalIn = totalIn
+						prevTotalOut = totalOut
+					}
+				}
+			}
+		}
 
 		// Try top-level usage field (OpenAI-style)
 		if usageRaw, ok := obj["usage"]; ok {

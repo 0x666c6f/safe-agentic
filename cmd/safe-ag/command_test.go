@@ -2437,7 +2437,10 @@ func TestRunCostForContainer_CodexType(t *testing.T) {
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
 	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.agent-type"}}`, "codex\n")
 	fake.SetResponse("docker exec "+containerName+" find", "/home/agent/.codex/sessions/a.jsonl\n")
-	fake.SetResponse("docker exec "+containerName+" cat", `{"message":{"model":"gpt-4","usage":{"input_tokens":10,"output_tokens":20}}}`+"\n")
+	fake.SetResponse("docker exec "+containerName+" cat", strings.Join([]string{
+		`{"type":"session_meta","payload":{"model_provider":"openai"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":5,"output_tokens":20},"total_token_usage":{"input_tokens":10,"cached_input_tokens":5,"output_tokens":20}}}}`,
+	}, "\n")+"\n")
 
 	output := captureOutput(func() {
 		ctx := context.Background()
@@ -2449,6 +2452,50 @@ func TestRunCostForContainer_CodexType(t *testing.T) {
 
 	if !strings.Contains(output, "Estimated cost") {
 		t.Errorf("expected 'Estimated cost' in output, got: %s", output)
+	}
+	if !strings.Contains(output, "Input tokens:  15") {
+		t.Errorf("expected codex token_count input tokens in output, got: %s", output)
+	}
+	if !strings.Contains(output, "Output tokens: 20") {
+		t.Errorf("expected codex token_count output tokens in output, got: %s", output)
+	}
+}
+
+func TestExtractTokenUsage_CodexTokenCountLastUsage(t *testing.T) {
+	data := []byte(strings.Join([]string{
+		`{"type":"session_meta","payload":{"model_provider":"openai"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":25,"output_tokens":40},"total_token_usage":{"input_tokens":100,"cached_input_tokens":25,"output_tokens":40}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":5,"output_tokens":2},"total_token_usage":{"input_tokens":110,"cached_input_tokens":30,"output_tokens":42}}}}`,
+	}, "\n"))
+
+	usages := extractTokenUsage(data)
+	if len(usages) != 2 {
+		t.Fatalf("len(usages) = %d, want 2", len(usages))
+	}
+	if usages[0].Model != "codex" || usages[0].InputTokens != 125 || usages[0].OutputTokens != 40 {
+		t.Fatalf("first usage = %+v, want model=codex in=125 out=40", usages[0])
+	}
+	if usages[1].Model != "codex" || usages[1].InputTokens != 15 || usages[1].OutputTokens != 2 {
+		t.Fatalf("second usage = %+v, want model=codex in=15 out=2", usages[1])
+	}
+}
+
+func TestExtractTokenUsage_CodexTokenCountTotalFallback(t *testing.T) {
+	data := []byte(strings.Join([]string{
+		`{"type":"session_meta","payload":{"model_provider":"openai"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":25,"output_tokens":40}}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":110,"cached_input_tokens":30,"output_tokens":42}}}}`,
+	}, "\n"))
+
+	usages := extractTokenUsage(data)
+	if len(usages) != 2 {
+		t.Fatalf("len(usages) = %d, want 2", len(usages))
+	}
+	if usages[0].InputTokens != 125 || usages[0].OutputTokens != 40 {
+		t.Fatalf("first usage = %+v, want in=125 out=40", usages[0])
+	}
+	if usages[1].InputTokens != 15 || usages[1].OutputTokens != 2 {
+		t.Fatalf("second usage = %+v, want in=15 out=2", usages[1])
 	}
 }
 
