@@ -16,7 +16,7 @@ brew tap 0x666c6f/tap && brew install safe-agentic
 
 This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
 
-**From source:** Clone the repo, run `make build`, and add `bin/` to your PATH. The binary is `safe-ag`.
+**From source:** Clone the repo, run `make build-all`, and add `bin/` to your PATH. The binaries are `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`.
 
 All documentation below uses `safe-ag` as the command name.
 
@@ -79,13 +79,13 @@ safe-ag spawn claude --ssh --template security-audit --repo git@github.com:org/r
 safe-ag spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
 safe-ag spawn claude --background --auto-trust --on-exit 'safe-ag output --latest --json > out.json' --repo ...
 
-# Quick start with smart defaults (auto-enables --ssh for SSH URLs, --reuse-auth)
+# Quick start with smart defaults
 safe-ag run git@github.com:org/repo.git "Fix the CI tests"
-safe-ag run https://github.com/org/repo.git "Add unit tests" --type codex
+safe-ag run https://github.com/org/repo.git "Add unit tests"
 
-# Quick aliases (auto-detect SSH from URL)
-safe-ag run git@github.com:org/repo.git
-safe-ag run https://github.com/org/repo.git
+# Agent-facing shortcuts (auto-detect SSH from URL)
+safe-ag-claude git@github.com:org/repo.git
+safe-ag-codex https://github.com/org/repo.git --dry-run
 
 # Management
 safe-ag list                     # shows running + stopped containers
@@ -97,7 +97,7 @@ safe-ag cleanup                  # removes containers + managed networks (keeps 
 
 # MCP OAuth login (token persists in auth volume)
 safe-ag mcp-login linear
-safe-ag mcp-login <container> notion
+safe-ag mcp-login notion <container>
 
 # Export session history
 safe-ag sessions <container>
@@ -260,6 +260,8 @@ Agent skills in `.claude/skills/` and `.codex/skills/`:
 - `agent-spawn` — spawn a sandboxed agent
 - `agent-manage` — list/attach/stop/cleanup
 - `agent-setup` — first-time setup, rebuild, troubleshooting
+- `agent-orchestrate` — supervise multi-agent safe-ag workflows
+- `agent-manifest-author` — author fleet and pipeline manifests
 
 ## Commit Style & Releases
 
