@@ -22,7 +22,7 @@ write_session_event() {
 }
 
 resuming=false
-if [ -f "$SESSION_STATE_FILE" ]; then
+if [ -f "$SESSION_STATE_FILE" ] && [ "${SAFE_AGENTIC_BACKGROUND:-}" != "1" ] && [ "${SAFE_AGENTIC_FLEET:-}" != "1" ]; then
   resuming=true
 fi
 touch "$SESSION_STATE_FILE"

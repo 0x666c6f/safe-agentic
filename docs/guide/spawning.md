@@ -8,6 +8,15 @@ Use `safe-ag spawn` when you want explicit control over the agent session.
 safe-ag spawn <claude|codex|shell> [flags]
 ```
 
+Agent-first shortcuts:
+
+```bash
+safe-ag-claude <repo-url> [repo-url...]
+safe-ag-codex <repo-url> [repo-url...]
+```
+
+`safe-ag-claude` and `safe-ag-codex` expand to `spawn ... --repo ...` and auto-enable `--ssh` for `git@` and `ssh://` remotes.
+
 ## Most common cases
 
 Public repo:

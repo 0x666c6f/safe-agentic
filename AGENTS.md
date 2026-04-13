@@ -187,6 +187,8 @@ Repo-local skills currently cover:
 - `agent-spawn`
 - `agent-manage`
 - `agent-setup`
+- `agent-orchestrate`
+- `agent-manifest-author`
 
 ## Known Limitations
 

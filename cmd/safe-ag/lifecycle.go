@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
@@ -178,6 +179,19 @@ func containerState(ctx context.Context, exec orb.Executor, name string) (string
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func containerExitCode(ctx context.Context, exec orb.Executor, name string) (int, error) {
+	out, err := exec.Run(ctx, "docker", "inspect",
+		"--format", "{{.State.ExitCode}}", name)
+	if err != nil {
+		return 0, err
+	}
+	code, convErr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if convErr != nil {
+		return 0, convErr
+	}
+	return code, nil
 }
 
 // ─── stop ──────────────────────────────────────────────────────────────────

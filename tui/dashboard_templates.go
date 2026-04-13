@@ -54,8 +54,8 @@ const dashboardHTML = `
   <td><a href="/agents/{{.Name}}">{{.Name}}</a></td>
   <td>{{.Type}}</td>
   <td>{{.Repo}}</td>
-  <td class="{{if .Running}}status-running{{else}}status-exited{{end}}">{{.Status}}</td>
-  <td class="{{if eq .Activity "Working"}}activity-working{{else if eq .Activity "Idle"}}activity-idle{{else}}activity-stopped{{end}}">{{.Activity}}</td>
+  <td class="{{if or .Running .Finished}}status-running{{else}}status-exited{{end}}">{{.Status}}</td>
+  <td class="{{if or (eq .Activity "Working") .Finished}}activity-working{{else if eq .Activity "Idle"}}activity-idle{{else}}activity-stopped{{end}}">{{.Activity}}</td>
   <td>{{.CPU}}</td>
   <td>{{.Memory}}</td>
   <td>{{.PIDs}}</td>
@@ -109,7 +109,7 @@ function stopAgent(name, btn) {
 <div class="meta">
   <div class="meta-item"><span class="meta-label">Type:</span> {{.Type}}</div>
   <div class="meta-item"><span class="meta-label">Repo:</span> {{.Repo}}</div>
-  <div class="meta-item"><span class="meta-label">Status:</span> <span class="{{if .Running}}status-running{{else}}status-exited{{end}}">{{.Status}}</span></div>
+  <div class="meta-item"><span class="meta-label">Status:</span> <span class="{{if or .Running .Finished}}status-running{{else}}status-exited{{end}}">{{.Status}}</span></div>
   <div class="meta-item"><span class="meta-label">CPU:</span> {{.CPU}}</div>
   <div class="meta-item"><span class="meta-label">Memory:</span> {{.Memory}}</div>
   <div class="meta-item"><span class="meta-label">SSH:</span> {{.SSH}}</div>

@@ -102,3 +102,37 @@ func TestBuildTableRowsNestedHierarchy(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildTableRowsPipelineStageHierarchy(t *testing.T) {
+	agents := []Agent{
+		{Name: "agent-claude-code-review-claude", Type: "claude", Fleet: "pipeline-1", Hierarchy: "double-review-reconcile/claude-reviews"},
+		{Name: "agent-codex-code-review-codex", Type: "codex", Fleet: "pipeline-1", Hierarchy: "double-review-reconcile/codex-reviews"},
+	}
+
+	rows := buildTableRows(agents)
+	got := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.isGroup {
+			got = append(got, row.prefix+"🔄 "+row.groupName)
+			continue
+		}
+		got = append(got, row.prefix+agents[row.agentIndex].Name)
+	}
+
+	want := []string{
+		" 🔄 double-review-reconcile",
+		" ├── 🔄 claude-reviews",
+		" │   └── agent-claude-code-review-claude",
+		" └── 🔄 codex-reviews",
+		"     └── agent-codex-code-review-codex",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("rows len = %d, want %d\nrows=%q", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("row %d = %q, want %q\nrows=%q", i, got[i], want[i], got)
+		}
+	}
+}

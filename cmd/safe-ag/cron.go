@@ -396,12 +396,8 @@ func parseSchedule(schedule string) (time.Duration, error) {
 				return time.Duration(hrs) * time.Hour, nil
 			}
 		}
-		// "0 0 * * *" → daily
-		if parts[0] == "0" && parts[1] == "0" {
-			return 24 * time.Hour, nil
-		}
-		// Default: hourly
-		return time.Hour, nil
+		// Any fixed-time daily cron expression → daily
+		return 24 * time.Hour, nil
 	}
 
 	return 0, fmt.Errorf("unrecognized schedule format: %q (use 'every Xh', 'daily HH:MM', or cron expression)", schedule)

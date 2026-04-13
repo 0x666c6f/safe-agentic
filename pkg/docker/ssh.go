@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -14,6 +15,8 @@ const sshRelayDir = "/tmp/safe-agentic-ssh-relay"
 const sshRelaySocket = sshRelayDir + "/agent.sock"
 const sshRelayLock = sshRelayDir + "/relay.lock"
 const sshRelayPIDFile = sshRelayDir + "/relay.pid"
+
+var vmSocketPathPattern = regexp.MustCompile(`^/[\w./-]+$`)
 
 // AppendSSHMount sets up SSH agent forwarding from the VM into the container.
 // With userns-remap, the container's uid maps to an unprivileged VM uid that
@@ -28,6 +31,9 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 	vmSocket := strings.TrimSpace(string(out))
 	if vmSocket == "" {
 		return fmt.Errorf("SSH_AUTH_SOCK not set in VM. Run 'ssh-add' on the host first")
+	}
+	if !vmSocketPathPattern.MatchString(vmSocket) {
+		return fmt.Errorf("SSH_AUTH_SOCK has unsafe value %q", vmSocket)
 	}
 
 	// Set up a locked relay for userns-remap compatibility.

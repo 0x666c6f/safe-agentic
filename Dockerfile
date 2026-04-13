@@ -69,23 +69,23 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN install -m 0755 -d /etc/apt/keyrings \
- && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list \
- && curl -fsSL https://apt.releases.hashicorp.com/gpg \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://apt.releases.hashicorp.com/gpg \
     | gpg --dearmor -o /usr/share/keyrings/hashicorp.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
     > /etc/apt/sources.list.d/hashicorp.list \
- && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key \
     | gpg --dearmor -o /usr/share/keyrings/kubernetes.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" \
     > /etc/apt/sources.list.d/kubernetes.list \
- && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | gpg --dearmor -o /usr/share/keyrings/githubcli.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
     > /etc/apt/sources.list.d/github-cli.list \
- && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/ubuntu/gpg \
     | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
     > /etc/apt/sources.list.d/docker.list \
@@ -111,7 +111,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) GO_ARCH=arm64; GO_SHA256="$GO_SHA256_ARM64" ;; \
       *) echo "Unsupported Go arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" \
  && echo "${GO_SHA256}  /tmp/go.tgz" | sha256sum -c - \
  && tar -C /usr/local -xzf /tmp/go.tgz \
  && rm -f /tmp/go.tgz \
@@ -124,7 +124,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) HELM_ARCH=arm64; HELM_SHA256="$HELM_SHA256_ARM64" ;; \
       *) echo "Unsupported Helm arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz" \
  && echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c - \
  && tar -C /tmp -xzf /tmp/helm.tgz \
  && install -m 0755 "/tmp/linux-${HELM_ARCH}/helm" /usr/local/bin/helm \
@@ -170,8 +170,8 @@ RUN export GNUPGHOME="$(mktemp -d)" \
       arm64) AWSCLI_ARCH=aarch64 ;; \
       *) echo "Unsupported AWS CLI arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${AWSCLI_ARCH}-${AWSCLI_VERSION}.zip" \
- && curl -fsSLo /tmp/awscliv2.sig "https://awscli.amazonaws.com/awscli-exe-linux-${AWSCLI_ARCH}-${AWSCLI_VERSION}.zip.sig" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${AWSCLI_ARCH}-${AWSCLI_VERSION}.zip" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/awscliv2.sig "https://awscli.amazonaws.com/awscli-exe-linux-${AWSCLI_ARCH}-${AWSCLI_VERSION}.zip.sig" \
  && gpg --batch --verify /tmp/awscliv2.sig /tmp/awscliv2.zip \
  && unzip -q /tmp/awscliv2.zip -d /tmp \
  && /tmp/aws/install \
@@ -183,7 +183,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) EZA_ARCH=aarch64; EZA_SHA256="$EZA_SHA256_ARM64" ;; \
       *) echo "Unsupported eza arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/eza.tgz "https://github.com/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/eza.tgz "https://github.com/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" \
  && echo "${EZA_SHA256}  /tmp/eza.tgz" | sha256sum -c - \
  && tar -C /tmp -xzf /tmp/eza.tgz ./eza \
  && install -m 0755 /tmp/eza /usr/local/bin/eza \
@@ -195,7 +195,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) ZOXIDE_DEB="zoxide_${ZOXIDE_VERSION}-1_arm64.deb"; ZOXIDE_SHA256="$ZOXIDE_SHA256_ARM64" ;; \
       *) echo "Unsupported zoxide arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/zoxide.deb "https://github.com/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/${ZOXIDE_DEB}" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/zoxide.deb "https://github.com/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/${ZOXIDE_DEB}" \
  && echo "${ZOXIDE_SHA256}  /tmp/zoxide.deb" | sha256sum -c - \
  && dpkg -i /tmp/zoxide.deb \
  && rm -f /tmp/zoxide.deb
@@ -206,7 +206,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) YQ_ARCH=arm64; YQ_SHA256="$YQ_SHA256_ARM64" ;; \
       *) echo "Unsupported yq arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${YQ_ARCH}" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${YQ_ARCH}" \
  && echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c - \
  && chmod +x /usr/local/bin/yq
 
@@ -216,7 +216,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) DELTA_DEB="git-delta_${DELTA_VERSION}_arm64.deb"; DELTA_SHA256="$DELTA_SHA256_ARM64" ;; \
       *) echo "Unsupported delta arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/delta.deb "https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/${DELTA_DEB}" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/delta.deb "https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/${DELTA_DEB}" \
  && echo "${DELTA_SHA256}  /tmp/delta.deb" | sha256sum -c - \
  && dpkg -i /tmp/delta.deb \
  && rm -f /tmp/delta.deb
@@ -227,7 +227,7 @@ RUN ARCH=$(dpkg --print-architecture) \
       arm64) BUN_ARCH=aarch64; BUN_SHA256="$BUN_SHA256_ARM64" ;; \
       *) echo "Unsupported Bun arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSLo /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BUN_ARCH}.zip" \
+ && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BUN_ARCH}.zip" \
  && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
  && unzip -q /tmp/bun.zip -d /tmp \
  && install -m 0755 "/tmp/bun-linux-${BUN_ARCH}/bun" /usr/local/bin/bun \
@@ -269,7 +269,7 @@ RUN test -n "$CLI_CACHE_BUST" \
  && npm ci --omit=dev \
  && npm cache clean --force
 
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION" \
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION" \
  && test -x /home/agent/.local/bin/claude \
  && /home/agent/.local/bin/claude --version | grep -F "$CLAUDE_CODE_VERSION"
 
@@ -310,7 +310,7 @@ RUN mkdir -p /home/agent/.ssh.baked && { \
 ENV GOPATH=/home/agent/go
 ENV GIT_CONFIG_GLOBAL=/home/agent/.config/git/config
 ENV TF_PLUGIN_CACHE_DIR=/home/agent/.terraform.d/plugin-cache
-ENV PATH="/opt/agent-cli/node_modules/.bin:/home/agent/go/bin:/home/agent/.local/bin:${PATH}"
+ENV PATH="/usr/local/go/bin:/opt/agent-cli/node_modules/.bin:/home/agent/go/bin:/home/agent/.local/bin:${PATH}"
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]

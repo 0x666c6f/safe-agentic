@@ -292,6 +292,65 @@ stages:
 	}
 }
 
+func TestParsePipeline_DoubleReviewReconcileExample(t *testing.T) {
+	m, err := ParsePipeline(filepath.Join("..", "..", "examples", "pipeline-double-review-reconcile.yaml"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Name != "double-review-reconcile" {
+		t.Fatalf("Name = %q, want double-review-reconcile", m.Name)
+	}
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages, got %d", len(m.Stages))
+	}
+
+	if got := m.Stages[0].Name; got != "claude-reviews" {
+		t.Fatalf("stage[0].Name = %q", got)
+	}
+	if got := m.Stages[1].Name; got != "codex-reviews" {
+		t.Fatalf("stage[1].Name = %q", got)
+	}
+	if got := m.Stages[2].Name; got != "reconcile-fix-pr" {
+		t.Fatalf("stage[2].Name = %q", got)
+	}
+
+	if len(m.Stages[0].Agents) != 5 {
+		t.Fatalf("stage[0] agent count = %d, want 5", len(m.Stages[0].Agents))
+	}
+	if len(m.Stages[1].Agents) != 5 {
+		t.Fatalf("stage[1] agent count = %d, want 5", len(m.Stages[1].Agents))
+	}
+	if len(m.Stages[2].Agents) != 1 {
+		t.Fatalf("stage[2] agent count = %d, want 1", len(m.Stages[2].Agents))
+	}
+
+	for i, agent := range m.Stages[0].Agents {
+		if agent.Type != "claude" {
+			t.Fatalf("stage[0].Agents[%d].Type = %q", i, agent.Type)
+		}
+	}
+	for i, agent := range m.Stages[1].Agents {
+		if agent.Type != "codex" {
+			t.Fatalf("stage[1].Agents[%d].Type = %q", i, agent.Type)
+		}
+	}
+	if got := m.Stages[2].Agents[0].Type; got != "codex" {
+		t.Fatalf("stage[2].Agents[0].Type = %q", got)
+	}
+
+	if deps := m.Stages[1].DependsOn; len(deps) != 0 {
+		t.Fatalf("stage[1].DependsOn = %v, want []", deps)
+	}
+	deps := m.Stages[2].DependsOn
+	if len(deps) != 2 {
+		t.Fatalf("stage[2].DependsOn = %v, want [claude-reviews codex-reviews]", deps)
+	}
+	depSet := map[string]bool{deps[0]: true, deps[1]: true}
+	if !depSet["claude-reviews"] || !depSet["codex-reviews"] {
+		t.Fatalf("unexpected stage[2] deps: %v", deps)
+	}
+}
+
 func TestParsePipeline_MissingFile(t *testing.T) {
 	_, err := ParsePipeline("/nonexistent/file.yaml")
 	if err == nil {

@@ -18,7 +18,7 @@ jobs:
     name: AI Code Review
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +46,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
           show_full_output: true
           prompt: |
             Review this PR against CLAUDE.md standards.
@@ -76,5 +77,10 @@ jobs:
 
             Severity levels: CRITICAL, HIGH, MEDIUM, LOW
 
+            Do not ask for approval or confirmation before posting comments. The workflow already grants the required GitHub token and allowed tools.
+            If you have no additional actionable inline comments, exit immediately.
             Do NOT post any summary comment. Only inline comments on specific lines.
-          claude_args: "--max-turns 200"
+          claude_args: >-
+            --max-turns 120
+            --allowedTools
+            Bash(gh api:*),Bash(git diff:*),Bash(git show:*),Bash(grep:*),Bash(rg:*),Bash(sed:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(nl:*),Bash(jq:*),Bash(find:*),Bash(fd:*)

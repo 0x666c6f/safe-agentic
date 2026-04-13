@@ -411,11 +411,17 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	if opts.AgentType == "claude" || opts.AgentType == "shell" {
 		envs, err := inject.ReadClaudeConfig(claudeDir)
 		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadClaudeOAuthToken()
+		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))
+		appendEnvMap(cmd, envs, err)
 		envs, err = inject.ReadClaudeSupportFiles(claudeDir)
 		appendEnvMap(cmd, envs, err)
 	}
 	if opts.AgentType == "codex" || opts.AgentType == "shell" {
 		envs, err := inject.ReadCodexConfig(codexHome)
+		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadCodexAuth(codexHome)
 		appendEnvMap(cmd, envs, err)
 	}
 }
