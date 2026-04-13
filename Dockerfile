@@ -310,7 +310,7 @@ RUN mkdir -p /home/agent/.ssh.baked && { \
 ENV GOPATH=/home/agent/go
 ENV GIT_CONFIG_GLOBAL=/home/agent/.config/git/config
 ENV TF_PLUGIN_CACHE_DIR=/home/agent/.terraform.d/plugin-cache
-ENV PATH="/opt/agent-cli/node_modules/.bin:/home/agent/go/bin:/home/agent/.local/bin:${PATH}"
+ENV PATH="/usr/local/go/bin:/opt/agent-cli/node_modules/.bin:/home/agent/go/bin:/home/agent/.local/bin:${PATH}"
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]
