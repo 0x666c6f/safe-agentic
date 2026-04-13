@@ -16,7 +16,7 @@ import (
 type CronJob struct {
 	Name     string `json:"name"`
 	Schedule string `json:"schedule"` // cron expression: "0 */6 * * *" or shorthand "every 6h"
-	Command  string `json:"command"`  // "pipeline review-pipeline.yaml" or "fleet agents.yaml" or "spawn claude ..."
+	Command  string `json:"command"`  // "pipeline pipeline.yaml" or "fleet agents.yaml" or "spawn claude ..."
 	Enabled  bool   `json:"enabled"`
 	LastRun  string `json:"last_run,omitempty"`
 	LastErr  string `json:"last_error,omitempty"`
@@ -45,12 +45,12 @@ Schedule formats:
   "0 */6 * * *"        Standard cron expression
 
 Command is any safe-ag command (without the 'safe-ag' prefix):
-  pipeline review-pipeline.yaml
+  pipeline pipeline.yaml
   fleet agents.yaml
   spawn claude --ssh --repo git@github.com:org/repo.git --prompt "Run tests"
 
 Examples:
-  safe-ag cron add nightly-review "daily 02:00" pipeline review-pipeline.yaml
+  safe-ag cron add nightly-review "daily 02:00" pipeline pipeline.yaml
   safe-ag cron add hourly-check "every 1h" spawn claude --repo ... --prompt "Check status"`,
 	Args: cobra.MinimumNArgs(3),
 	RunE: runCronAdd,

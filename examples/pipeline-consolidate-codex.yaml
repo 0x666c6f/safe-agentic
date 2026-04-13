@@ -5,8 +5,7 @@
 # This pipeline fetches those branches, consolidates, fixes, and creates a PR.
 #
 # Usage:
-#   agent pipeline examples/pipeline-consolidate-and-fix.yaml
-#   OR: agent orchestrate examples/fleet-review-and-fix.yaml examples/pipeline-consolidate-and-fix.yaml
+#   safe-ag pipeline examples/pipeline-consolidate-codex.yaml
 
 name: consolidate-and-fix-codex
 steps:
