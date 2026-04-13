@@ -17,8 +17,8 @@ Launch Claude Code or Codex inside an isolated, hardened Docker container.
 
 ```bash
 # Most common — auto-detects SSH from URL
-agent-claude <repo-url> [<repo-url>...]
-agent-codex <repo-url> [<repo-url>...]
+safe-ag-claude <repo-url> [<repo-url>...]
+safe-ag-codex <repo-url> [<repo-url>...]
 ```
 
 These auto-enable `--ssh` when the URL starts with `git@` or `ssh://`.
@@ -26,7 +26,7 @@ These auto-enable `--ssh` when the URL starts with `git@` or `ssh://`.
 ## Full command (when you need options)
 
 ```bash
-agent spawn <claude|codex> [options]
+safe-ag spawn <claude|codex> [options]
 ```
 
 ### Options
@@ -56,45 +56,45 @@ agent spawn <claude|codex> [options]
 
 ```bash
 # Public repo
-agent-claude https://github.com/myorg/myrepo.git
+safe-ag-claude https://github.com/myorg/myrepo.git
 
 # Private repo (SSH auto-detected)
-agent-claude git@github.com:myorg/myrepo.git
+safe-ag-claude git@github.com:myorg/myrepo.git
 
 # Named session with persistent auth
-agent spawn claude --ssh --reuse-auth --name api-work --repo git@github.com:myorg/api.git
+safe-ag spawn claude --ssh --reuse-auth --name api-work --repo git@github.com:myorg/api.git
 
 # With an initial prompt (agent starts working immediately)
-agent spawn codex --ssh --reuse-auth --name fix-ci --repo git@github.com:myorg/api.git \
+safe-ag spawn codex --ssh --reuse-auth --name fix-ci --repo git@github.com:myorg/api.git \
   --prompt 'Fix the failing CI tests'
 
 # Multiple repos
-agent-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
+safe-ag-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
 
 # Big repo with more resources
-agent spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monorepo.git
+safe-ag spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monorepo.git
 
 # With AWS credentials for infrastructure work
-agent spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
+safe-ag spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 
 # Untrusted code (no SSH, no internet)
-agent spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
+safe-ag spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
 ```
 
 ## Templates
 
 ```bash
 # List available templates
-agent template list
+safe-ag template list
 
 # Preview a template
-agent template show security-audit
+safe-ag template show security-audit
 
 # Use a template (no --prompt needed)
-agent spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+safe-ag spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
 
 # Combine template with extra instructions
-agent spawn claude --ssh --repo git@github.com:org/api.git \
+safe-ag spawn claude --ssh --repo git@github.com:org/api.git \
   --template code-review \
   --instructions "Focus on the auth module only."
 ```
@@ -105,10 +105,10 @@ Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependenc
 
 ```bash
 # Headless — spawn and return immediately
-agent spawn claude --background --auto-trust --ssh \
+safe-ag spawn claude --background --auto-trust --ssh \
   --repo git@github.com:org/api.git \
   --prompt "Fix the failing tests" \
-  --on-exit "agent output --latest --json > /tmp/result.json"
+  --on-exit "safe-ag output --latest --json > /tmp/result.json"
 ```
 
 For Codex, background mode only works after one interactive `--reuse-auth` run has created `/home/agent/.codex/auth.json` in `agent-codex-auth`.
@@ -128,8 +128,8 @@ If the agent needs MCP servers (Linear, Notion, etc.), authenticate first:
 
 ```bash
 # No container needed — uses default auth volume
-agent mcp-login linear
-agent mcp-login notion
+safe-ag mcp-login linear
+safe-ag mcp-login notion
 ```
 
 The token persists in the auth volume for all agents using `--reuse-auth`.
@@ -137,8 +137,8 @@ The token persists in the auth volume for all agents using `--reuse-auth`.
 ## Fleet — spawn multiple agents from manifest
 
 ```bash
-agent fleet fleet.yaml
-agent fleet fleet.yaml --dry-run
+safe-ag fleet fleet.yaml
+safe-ag fleet fleet.yaml --dry-run
 ```
 
 YAML manifest format:
@@ -160,8 +160,8 @@ Supported fields per agent: `name`, `type`, `repo`, `ssh`, `reuse_auth`, `reuse_
 ## Pipeline — multi-step agent workflows
 
 ```bash
-agent pipeline pipeline.yaml
-agent pipeline pipeline.yaml --dry-run
+safe-ag pipeline pipeline.yaml
+safe-ag pipeline pipeline.yaml --dry-run
 ```
 
 Pipeline format:
@@ -205,7 +205,7 @@ The `setup` script runs automatically after the repo is cloned inside the contai
 
 The agent opens interactively. On first run, an OAuth URL appears — the user opens it in their browser. After auth, the agent is ready to use.
 
-Containers persist after exit (stopped state). Use `agent attach <name>` to reattach, or `agent stop <name>` to remove. Use `--reuse-auth` to keep auth tokens and config across spawns.
+Containers persist after exit (stopped state). Use `safe-ag attach <name>` to reattach, or `safe-ag stop <name>` to remove. Use `--reuse-auth` to keep auth tokens and config across spawns.
 
 ## Host config injection
 

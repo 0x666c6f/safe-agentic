@@ -71,6 +71,19 @@ func TestAppendSSHMount_ExecError(t *testing.T) {
 	}
 }
 
+func TestAppendSSHMount_UnsafeSocketValue(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/tmp/unsafe'sock")
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	err := AppendSSHMount(context.Background(), fake, cmd)
+	if err == nil {
+		t.Fatal("expected error for unsafe SSH_AUTH_SOCK")
+	}
+	if !strings.Contains(err.Error(), "unsafe value") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAppendSSHMountDryRun(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	AppendSSHMountDryRun(cmd)

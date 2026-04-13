@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -44,6 +45,77 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	}
 	envs["SAFE_AGENTIC_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
+}
+
+func ReadClaudeAuth(homeDir string) (map[string]string, error) {
+	envs := make(map[string]string)
+	authPath := filepath.Join(homeDir, ".claude.json")
+	data, err := os.ReadFile(authPath)
+	if os.IsNotExist(err) {
+		return envs, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read claude auth: %w", err)
+	}
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write(data); err != nil {
+		return nil, fmt.Errorf("gzip claude auth: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("gzip claude auth close: %w", err)
+	}
+	envs["SAFE_AGENTIC_CLAUDE_AUTH_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	return envs, nil
+}
+
+func ReadClaudeOAuthToken() (map[string]string, error) {
+	envs := make(map[string]string)
+	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+		envs["CLAUDE_CODE_OAUTH_TOKEN"] = token
+		return envs, nil
+	}
+
+	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-g")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return envs, nil
+	}
+
+	var secretLine string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, `password: "`) {
+			secretLine = line
+			break
+		}
+	}
+	if secretLine == "" {
+		return envs, nil
+	}
+
+	secret := strings.TrimPrefix(secretLine, `password: "`)
+	secret = strings.TrimSuffix(secret, `"`)
+
+	accessToken := extractClaudeAccessToken(secret)
+	if accessToken == "" {
+		return envs, nil
+	}
+	envs["CLAUDE_CODE_OAUTH_TOKEN"] = accessToken
+	return envs, nil
+}
+
+func extractClaudeAccessToken(secret string) string {
+	const marker = `"accessToken":"`
+	start := strings.Index(secret, marker)
+	if start == -1 {
+		return ""
+	}
+	start += len(marker)
+	end := strings.Index(secret[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return secret[start : start+end]
 }
 
 // ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
@@ -162,6 +234,20 @@ func ReadCodexConfig(codexHome string) (map[string]string, error) {
 		return nil, fmt.Errorf("read codex config: %w", err)
 	}
 	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
+	return envs, nil
+}
+
+func ReadCodexAuth(codexHome string) (map[string]string, error) {
+	envs := make(map[string]string)
+	authPath := filepath.Join(codexHome, "auth.json")
+	data, err := os.ReadFile(authPath)
+	if os.IsNotExist(err) {
+		return envs, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read codex auth: %w", err)
+	}
+	envs["SAFE_AGENTIC_CODEX_AUTH_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 

@@ -111,6 +111,19 @@ func TestReadClaudeConfig_PermissionDenied(t *testing.T) {
 	}
 }
 
+func TestExtractClaudeAccessToken(t *testing.T) {
+	secret := `{"claudeAiOauth":{"accessToken":"token-123","refreshToken":"refresh-456"}}`
+	if got := extractClaudeAccessToken(secret); got != "token-123" {
+		t.Fatalf("extractClaudeAccessToken() = %q, want %q", got, "token-123")
+	}
+	if got := extractClaudeAccessToken(`{"claudeAiOauth":{}}`); got != "" {
+		t.Fatalf("extractClaudeAccessToken() = %q, want empty", got)
+	}
+	if got := extractClaudeAccessToken(`not-json`); got != "" {
+		t.Fatalf("extractClaudeAccessToken() = %q, want empty", got)
+	}
+}
+
 func TestEncodeFileB64Roundtrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "payload.txt")

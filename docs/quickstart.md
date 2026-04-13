@@ -2,6 +2,9 @@
 
 This gets you from zero to a working agent session with the fewest moving parts.
 
+Canonical CLI: `safe-ag`.
+Shortcuts also ship in `bin/`: `safe-ag-claude`, `safe-ag-codex`.
+
 ## 1. Install prerequisites
 
 ```bash

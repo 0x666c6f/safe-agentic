@@ -13,6 +13,8 @@ build-all: build build-tui
 install: build build-tui
 	cp bin/safe-ag /usr/local/bin/safe-ag
 	cp bin/safe-ag-tui /usr/local/bin/safe-ag-tui
+	cp bin/safe-ag-claude /usr/local/bin/safe-ag-claude
+	cp bin/safe-ag-codex /usr/local/bin/safe-ag-codex
 
 test:
 	go test ./...

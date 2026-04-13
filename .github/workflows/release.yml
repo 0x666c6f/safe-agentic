@@ -121,6 +121,7 @@ jobs:
           mkdir -p "$staging"/{bin,config,templates,vm}
 
           cp safe-ag safe-ag-tui "$staging/bin/"
+          cp bin/safe-ag-claude bin/safe-ag-codex "$staging/bin/"
           cp bin/agent-session.sh bin/repo-url.sh "$staging/bin/"
 
           cp config/* "$staging/config/"
@@ -176,6 +177,8 @@ jobs:
               libexec.install Dir["*"]
               bin.install_symlink libexec/"bin"/"safe-ag"
               bin.install_symlink libexec/"bin"/"safe-ag-tui"
+              bin.install_symlink libexec/"bin"/"safe-ag-claude"
+              bin.install_symlink libexec/"bin"/"safe-ag-codex"
             end
 
             test do

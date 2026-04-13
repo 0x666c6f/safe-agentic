@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,10 +16,28 @@ import (
 
 const defaultResumeCWD = "/workspace"
 const tmuxSessionName = "safe-agentic"
-const cliBinary = "safe-ag"
+const cliBinaryName = "safe-ag"
+
+var cliBinary = resolveCLIBinary()
 
 var newCLICmd = func(args ...string) *exec.Cmd {
 	return exec.Command(cliBinary, args...)
+}
+
+func resolveCLIBinary() string {
+	self, err := os.Executable()
+	if err != nil {
+		return cliBinaryName
+	}
+	return resolveCLIBinaryFrom(self)
+}
+
+func resolveCLIBinaryFrom(self string) string {
+	candidate := filepath.Join(filepath.Dir(self), cliBinaryName)
+	if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+		return candidate
+	}
+	return cliBinaryName
 }
 
 func mcpLoginArgs(server, container string) []string {
@@ -625,10 +644,10 @@ var fetchPlainLogsFunc = fetchPlainDockerLogs
 func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsState) {
 	ac.app.footer.ShowStatus("Loading...", false)
 	go func() {
-		data := ac.fetchDockerLogs(name, state.tailLines)
+		rendered := ac.loadLogsContent(name, state)
 		ac.app.tapp.QueueUpdateDraw(func() {
-			if len(data) > 0 {
-				tv.SetText(renderSessionLog(data))
+			if strings.TrimSpace(rendered) != "" {
+				tv.SetText(rendered)
 				tv.SetTitle(" " + ac.logsTitle(name, state) + " ")
 			}
 			ac.app.footer.Reset()

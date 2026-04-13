@@ -83,6 +83,38 @@ jobs:
           }
           EOF
 
+      - name: Enforce coverage non-regression
+        run: |
+          git fetch origin badges --depth=1 >/dev/null 2>&1 || true
+
+          current="$(python3 - <<'PY'
+import json
+with open('.badge-out/coverage.json') as f:
+    print(str(json.load(f)["message"]).rstrip('%'))
+PY
+)"
+
+          baseline="$(git show FETCH_HEAD:.github/badges/coverage.json 2>/dev/null | python3 - <<'PY'
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(0)
+print(str(json.loads(raw)["message"]).rstrip('%'))
+PY
+)"
+
+          if [ -z "$baseline" ]; then
+            echo "No published coverage baseline found on badges branch; skipping regression check."
+            exit 0
+          fi
+
+          echo "Coverage baseline: ${baseline}%"
+          echo "Coverage current:  ${current}%"
+          awk "BEGIN { exit !($current + 0.0001 >= $baseline) }" || {
+            echo "Coverage regression detected: ${current}% < ${baseline}%"
+            exit 1
+          }
+
       - name: Job summary
         run: |
           {

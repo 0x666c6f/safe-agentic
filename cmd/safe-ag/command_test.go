@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,8 +28,31 @@ func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 	t.Helper()
 	fake := orb.NewFake()
 	original := newExecutor
+	origFindBuildRoot := findBuildRoot
+	origSyncBuildContextToVM := syncBuildContextToVM
+	origCopyFileToVM := copyFileToVM
+	origVMExists := vmExists
+	origRunVMBootstrap := runVMBootstrap
+	origStartVM := startVM
+	origInstallVMSupportFiles := installVMSupportFiles
 	newExecutor = func() orb.Executor { return fake }
-	return fake, func() { newExecutor = original }
+	findBuildRoot = func() (string, error) { return t.TempDir(), nil }
+	syncBuildContextToVM = func(vmName, root string) error { return nil }
+	copyFileToVM = func(vmName, srcPath, destPath string) error { return nil }
+	vmExists = func(vmName string) bool { return true }
+	runVMBootstrap = func(vmName string) ([]byte, error) { return []byte("bootstrap ok\n"), nil }
+	startVM = func(vmName string) error { return nil }
+	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
+	return fake, func() {
+		newExecutor = original
+		findBuildRoot = origFindBuildRoot
+		syncBuildContextToVM = origSyncBuildContextToVM
+		copyFileToVM = origCopyFileToVM
+		vmExists = origVMExists
+		runVMBootstrap = origRunVMBootstrap
+		startVM = origStartVM
+		installVMSupportFiles = origInstallVMSupportFiles
+	}
 }
 
 // captureOutput redirects os.Stdout to a buffer for the duration of fn,
@@ -43,6 +67,16 @@ func captureOutput(fn func()) string {
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	return buf.String()
+}
+
+func installFakeOrbBinary(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orb")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake orb: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // ─── list ─────────────────────────────────────────────────────────────────────
@@ -946,6 +980,10 @@ func TestUpdateCommand(t *testing.T) {
 	if len(buildCmds) == 0 {
 		t.Fatal("expected docker build command")
 	}
+	joined := strings.Join(buildCmds[0], " ")
+	if !strings.Contains(joined, "/tmp/build-context") {
+		t.Fatalf("expected VM build context path, got: %s", joined)
+	}
 	if !strings.Contains(output, "Image updated") {
 		t.Errorf("expected 'Image updated', got: %s", output)
 	}
@@ -1643,12 +1681,77 @@ func TestUserTemplatesDir(t *testing.T) {
 }
 
 func TestRepoTemplatesDir(t *testing.T) {
-	// repoTemplatesDir walks up from the binary — it may or may not find a
-	// templates dir in test context. Just verify it returns a string (possibly empty).
 	got := repoTemplatesDir()
-	// Either empty (not found) or a valid path ending in templates
-	if got != "" && !strings.HasSuffix(got, "templates") {
+	if got == "" {
+		t.Fatal("repoTemplatesDir() = empty, want built-in templates dir")
+	}
+	if !strings.HasSuffix(got, "templates") {
 		t.Errorf("repoTemplatesDir() = %q, expected path ending in 'templates'", got)
+	}
+	if !looksLikeBuiltInTemplates(got) {
+		t.Errorf("repoTemplatesDir() = %q, want built-in templates", got)
+	}
+}
+
+func TestTemplateList_FromSymlinkedBinary(t *testing.T) {
+	xdgDir, xdgCleanup := setXDGConfigHome(t)
+	defer xdgCleanup()
+	_ = xdgDir
+
+	tmp := t.TempDir()
+	libexecDir := filepath.Join(tmp, "libexec")
+	binDir := filepath.Join(tmp, "bin")
+	workDir := filepath.Join(tmp, "work")
+	templatesDir := filepath.Join(tmp, "templates")
+	if err := os.MkdirAll(libexecDir, 0o755); err != nil {
+		t.Fatalf("mkdir libexec: %v", err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templatesDir, "security-audit.md"), []byte("Perform a security audit\n"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templatesDir, "code-review.md"), []byte("Perform a code review\n"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	binPath := filepath.Join(libexecDir, "safe-ag")
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = "."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build safe-ag failed: %v\n%s", err, out)
+	}
+
+	linkPath := filepath.Join(binDir, "safe-ag")
+	if err := os.Symlink(binPath, linkPath); err != nil {
+		t.Fatalf("symlink safe-ag: %v", err)
+	}
+
+	listCmd := exec.Command(linkPath, "template", "list")
+	listCmd.Dir = workDir
+	listOut, err := listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("template list via symlink failed: %v\n%s", err, listOut)
+	}
+	if !strings.Contains(string(listOut), "security-audit") {
+		t.Fatalf("template list missing built-ins:\n%s", listOut)
+	}
+
+	showCmd := exec.Command(linkPath, "template", "show", "security-audit")
+	showCmd.Dir = workDir
+	showOut, err := showCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("template show via symlink failed: %v\n%s", err, showOut)
+	}
+	if !strings.Contains(string(showOut), "Perform a security audit") {
+		t.Fatalf("template show returned unexpected content:\n%s", showOut)
 	}
 }
 
@@ -2208,35 +2311,45 @@ func TestDiagnoseCommand_DockerReady(t *testing.T) {
 func TestSetupCommand_DockerAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
+	installFakeOrbBinary(t)
 
 	// Simulate docker info succeeding (Docker already running in VM)
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
-	// Simulate docker build failing (no build context) — that's fine for this test
-	fake.SetError("docker build", "no such file")
+	fake.SetResponse("docker build", "Successfully built abc123\n")
 
 	output := captureOutput(func() {
-		// runSetup calls exec.LookPath("orb") directly, which will succeed if orb is installed,
-		// or fail with a meaningful error. Either way is fine for coverage.
-		_ = runSetup(setupCmd, nil)
+		if err := runSetup(setupCmd, nil); err != nil {
+			t.Fatalf("runSetup() error = %v", err)
+		}
 	})
 
-	// We just want to exercise the code path; don't assert specific output
-	// since orb availability varies across environments.
-	_ = output
+	if !strings.Contains(output, "Bootstrapping VM") {
+		t.Fatalf("expected bootstrap output, got: %s", output)
+	}
+	buildCmds := fake.CommandsMatching("docker build")
+	if len(buildCmds) == 0 {
+		t.Fatal("expected docker build command")
+	}
 }
 
 func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
+	installFakeOrbBinary(t)
 
-	// Simulate docker info failing (Docker not yet running in VM)
-	fake.SetError("docker info", "Cannot connect to the Docker daemon")
+	// Docker is verified after bootstrap in the current flow.
+	fake.SetResponse("docker info", "Server Version: 24.0\n")
+	fake.SetResponse("docker build", "Successfully built abc123\n")
 
 	output := captureOutput(func() {
-		_ = runSetup(setupCmd, nil)
+		if err := runSetup(setupCmd, nil); err != nil {
+			t.Fatalf("runSetup() error = %v", err)
+		}
 	})
 
-	_ = output
+	if !strings.Contains(output, "Image updated") {
+		t.Fatalf("expected image update output, got: %s", output)
+	}
 }
 
 // ─── runVMSSH ─────────────────────────────────────────────────────────────────

@@ -452,6 +452,9 @@ func statusColor(agent Agent) tcell.Color {
 	if agent.Deleting {
 		return colorDeleting
 	}
+	if agent.Finished {
+		return colorRunning
+	}
 	if agent.Running {
 		return colorRunning
 	}
@@ -462,6 +465,8 @@ func activityColor(agent Agent) tcell.Color {
 	switch {
 	case agent.Deleting:
 		return colorDeleting
+	case agent.Finished:
+		return colorRunning
 	case agent.Activity == "Working":
 		return colorRunning
 	case agent.Activity == "Idle":

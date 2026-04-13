@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"strings"
 	"time"
 
@@ -22,6 +23,10 @@ type App struct {
 	loaded    chan struct{} // closed after first successful poll
 	stopAnim  chan struct{}
 	execAfter []string // if set, syscall.Exec this command after tview exits
+	pendingMu     sync.Mutex
+	pendingAgents []Agent
+	pendingStale  bool
+	pendingUpdate bool
 }
 
 // NewApp creates and wires up the full TUI.
@@ -39,15 +44,12 @@ func NewApp() *App {
 	a.preview = NewPreviewPane()
 
 	a.poller = NewPoller(func(agents []Agent, stale bool) {
-		a.tapp.QueueUpdateDraw(func() {
-			a.table.Update(agents)
-			a.header.Update(a.table.RunningCount(), a.table.TotalCount(), stale)
-			if a.preview.Visible() {
-				if agent := a.table.SelectedAgent(); agent != nil {
-					a.updatePreview(agent)
-				}
-			}
-		})
+		a.pendingMu.Lock()
+		a.pendingAgents = make([]Agent, len(agents))
+		copy(a.pendingAgents, agents)
+		a.pendingStale = stale
+		a.pendingUpdate = true
+		a.pendingMu.Unlock()
 		// Signal first poll done
 		select {
 		case <-a.loaded:
@@ -85,7 +87,10 @@ func NewApp() *App {
 
 // Run starts the poller and the TUI event loop.
 func (a *App) Run() error {
-	a.poller.Start()
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		a.poller.Start()
+	}()
 	defer a.poller.Stop()
 	go a.spinAnimations()
 	err := a.tapp.SetRoot(a.pages, true).EnableMouse(false).Run()
@@ -125,6 +130,7 @@ func (a *App) spinAnimations() {
 		case <-ticker.C:
 			frame := spinnerFrames[i%len(spinnerFrames)]
 			a.tapp.QueueUpdateDraw(func() {
+				a.flushPendingUpdates()
 				select {
 				case <-a.loaded:
 				default:
@@ -133,6 +139,27 @@ func (a *App) spinAnimations() {
 				a.table.SetDeletingFrame(frame)
 			})
 			i++
+		}
+	}
+}
+
+func (a *App) flushPendingUpdates() {
+	a.pendingMu.Lock()
+	if !a.pendingUpdate {
+		a.pendingMu.Unlock()
+		return
+	}
+	agents := make([]Agent, len(a.pendingAgents))
+	copy(agents, a.pendingAgents)
+	stale := a.pendingStale
+	a.pendingUpdate = false
+	a.pendingMu.Unlock()
+
+	a.table.Update(agents)
+	a.header.Update(a.table.RunningCount(), a.table.TotalCount(), stale)
+	if a.preview.Visible() {
+		if agent := a.table.SelectedAgent(); agent != nil {
+			a.updatePreview(agent)
 		}
 	}
 }

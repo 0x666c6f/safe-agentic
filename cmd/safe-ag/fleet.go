@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -93,6 +96,11 @@ func runFleetStatus(cmd *cobra.Command, args []string) error {
 // ─── pipeline ────────────────────────────────────────────────────────────────
 
 var pipelineDryRun bool
+var pipelineBackground bool
+
+const pipelineDetachedEnv = "SAFE_AGENTIC_PIPELINE_DETACHED"
+
+var launchDetachedPipeline = launchDetachedPipelineImpl
 
 var pipelineCmd = &cobra.Command{
 	Use:   "pipeline <pipeline.yaml>",
@@ -115,6 +123,7 @@ Example manifest fields per step:
 
 func init() {
 	pipelineCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "Print execution plan without running")
+	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Run the pipeline in the background and return immediately")
 	rootCmd.AddCommand(pipelineCmd)
 }
 
@@ -139,10 +148,58 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if pipelineBackground && os.Getenv(pipelineDetachedEnv) != "1" {
+		return launchDetachedPipeline(args[0])
+	}
+
 	ctx := context.Background()
 	exec := newExecutor()
 	timestamp := time.Now().Format("20060102-150405")
 	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp, "", nil)
+}
+
+func launchDetachedPipelineImpl(manifestPath string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+
+	stateHome := os.Getenv("XDG_STATE_HOME")
+	if stateHome == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return fmt.Errorf("resolve home dir: %w", homeErr)
+		}
+		stateHome = filepath.Join(home, ".local", "state")
+	}
+
+	logDir := filepath.Join(stateHome, "safe-agentic", "pipelines")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return fmt.Errorf("create pipeline log dir: %w", err)
+	}
+
+	ts := time.Now().Format("20060102-150405")
+	logPath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", filepath.Base(manifestPath), ts))
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open pipeline log: %w", err)
+	}
+
+	childArgs := []string{"pipeline", manifestPath, "--background"}
+	cmd := exec.Command(self, childArgs...)
+	cmd.Env = append(os.Environ(), pipelineDetachedEnv+"=1")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return fmt.Errorf("start detached pipeline: %w", err)
+	}
+	_ = logFile.Close()
+
+	fmt.Printf("Pipeline detached: pid=%d log=%s\n", cmd.Process.Pid, logPath)
+	return nil
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
@@ -353,12 +410,16 @@ func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLab
 		return "", nil
 	}
 	opts := specToSpawnOpts(spec, rootLabel)
-	opts.Hierarchy = strings.Join(currentPath, "/")
+	opts.Hierarchy = pipelineStageHierarchy(currentPath, stage.Name)
 	opts.Background = true
 	if err := executeSpawn(opts); err != nil {
 		return "", fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
 	}
 	return resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos), nil
+}
+
+func pipelineStageHierarchy(currentPath []string, stageName string) string {
+	return strings.Join(append(append([]string{}, currentPath...), stageName), "/")
 }
 
 func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage) {
@@ -374,6 +435,7 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 	}
 	fmt.Printf("Waiting for %d agent(s) to complete...\n", len(names))
 	done := make(map[string]bool)
+	var failed []string
 	for {
 		allDone := true
 		for _, name := range names {
@@ -387,12 +449,26 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 			}
 			if state == "exited" || state == "dead" {
 				done[name] = true
-				fmt.Printf("  ✓ %s exited\n", name)
+				exitCode, codeErr := containerExitCode(ctx, exec, name)
+				if codeErr != nil {
+					fmt.Printf("  ✓ %s exited\n", name)
+					allDone = false
+					continue
+				}
+				if exitCode == 0 {
+					fmt.Printf("  ✓ %s exited\n", name)
+				} else {
+					fmt.Printf("  ✗ %s exited (%d)\n", name, exitCode)
+					failed = append(failed, fmt.Sprintf("%s (%d)", name, exitCode))
+				}
 			} else {
 				allDone = false
 			}
 		}
 		if allDone {
+			if len(failed) > 0 {
+				return fmt.Errorf("containers failed: %s", strings.Join(failed, ", "))
+			}
 			return nil
 		}
 		select {

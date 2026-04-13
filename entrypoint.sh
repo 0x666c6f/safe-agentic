@@ -49,6 +49,18 @@ trust_level = "trusted"
 EOF
 }
 
+ensure_codex_auth() {
+  local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+  local auth_path="$codex_dir/auth.json"
+
+  [ -n "${SAFE_AGENTIC_CODEX_AUTH_B64:-}" ] || return 0
+  mkdir -p "$codex_dir" 2>/dev/null || return 0
+  [ -w "$codex_dir" ] || return 0
+  [ -f "$auth_path" ] && return 0
+  echo "$SAFE_AGENTIC_CODEX_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
+  chmod 600 "$auth_path" 2>/dev/null || true
+}
+
 ensure_claude_config() {
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local claude_config="$claude_dir/settings.json"
@@ -80,6 +92,25 @@ ensure_claude_config() {
   }
 }
 EOF
+}
+
+ensure_claude_auth() {
+  local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  local auth_path="$claude_dir/.claude.json"
+  local tmp_auth=""
+
+  [ -n "${SAFE_AGENTIC_CLAUDE_AUTH_B64:-}" ] || return 0
+  mkdir -p "$claude_dir" 2>/dev/null || return 0
+  [ -w "$claude_dir" ] || return 0
+  [ -f "$auth_path" ] && return 0
+  tmp_auth=$(mktemp) || return 0
+  if echo "$SAFE_AGENTIC_CLAUDE_AUTH_B64" | base64 -d | gzip -d > "$tmp_auth" 2>/dev/null; then
+    mv "$tmp_auth" "$auth_path"
+  else
+    rm -f "$tmp_auth"
+    echo "$SAFE_AGENTIC_CLAUDE_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
+  fi
+  chmod 600 "$auth_path" 2>/dev/null || true
 }
 
 ensure_claude_support_files() {
@@ -139,9 +170,9 @@ inject_security_preamble() {
         # Skip if already injected (e.g., reuse-auth volume from previous run)
         grep -q "$marker" "$claude_md" 2>/dev/null && return 0
         # Append to existing user CLAUDE.md
-        printf '\n%s\n' "$preamble" >> "$claude_md"
+        printf '\n%s\n' "$preamble" >> "$claude_md" 2>/dev/null || true
       else
-        printf '%s\n' "$preamble" > "$claude_md"
+        printf '%s\n' "$preamble" > "$claude_md" 2>/dev/null || true
       fi
       ;;
     codex)
@@ -150,9 +181,9 @@ inject_security_preamble() {
       mkdir -p "$codex_dir" 2>/dev/null || return 0
       if [ -f "$agents_md" ]; then
         grep -q "$marker" "$agents_md" 2>/dev/null && return 0
-        printf '\n%s\n' "$preamble" >> "$agents_md"
+        printf '\n%s\n' "$preamble" >> "$agents_md" 2>/dev/null || true
       else
-        printf '%s\n' "$preamble" > "$agents_md"
+        printf '%s\n' "$preamble" > "$agents_md" 2>/dev/null || true
       fi
       ;;
     *)
@@ -229,9 +260,9 @@ git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
 case "${AGENT_TYPE:-}" in
-  claude) ensure_claude_support_files; ensure_claude_config ;;
-  codex)  ensure_codex_config ;;
-  *)      ensure_codex_config; ensure_claude_support_files; ensure_claude_config ;;
+  claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  codex)  ensure_codex_auth; ensure_codex_config ;;
+  *)      ensure_codex_auth; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
 esac
 
 # Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+safe_ag="$script_dir/safe-ag"
+
+if [ ! -x "$safe_ag" ]; then
+  safe_ag="$(command -v safe-ag || true)"
+fi
+
+if [ -z "$safe_ag" ]; then
+  echo "safe-ag not found; build it with 'make build-all' or install safe-agentic first." >&2
+  exit 1
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: safe-ag-claude <repo-url> [repo-url...] [flags]" >&2
+  exit 2
+fi
+
+ssh_flag=0
+args=(spawn claude)
+raw_mode=0
+for repo in "$@"; do
+  if [ "$raw_mode" -eq 1 ]; then
+    args+=("$repo")
+    continue
+  fi
+  case "$repo" in
+    -*)
+      raw_mode=1
+      args+=("$repo")
+      ;;
+    git@*|ssh://*)
+      ssh_flag=1
+      args+=(--repo "$repo")
+      ;;
+    *)
+      args+=(--repo "$repo")
+      ;;
+  esac
+done
+
+if [ "$ssh_flag" -eq 1 ]; then
+  args=(spawn claude --ssh "${args[@]:2}")
+fi
+
+exec "$safe_ag" "${args[@]}"

@@ -91,7 +91,14 @@ func (p *Poller) Restart() {
 
 func (p *Poller) loop() {
 	defer close(p.stopped)
-	p.poll() // initial fetch
+	// Delay the initial poll slightly so TUI callers have time to start the
+	// tview event loop before onUpdate triggers QueueUpdateDraw.
+	select {
+	case <-p.stopCh:
+		return
+	case <-time.After(100 * time.Millisecond):
+	}
+	p.poll()
 	ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
 	defer ticker.Stop()
 	for {
@@ -250,7 +257,7 @@ func parsePSOutput(data []byte) []Agent {
 		if len(parts) < 11 {
 			continue
 		}
-		running := strings.HasPrefix(parts[10], "Up")
+		status, running, finished := normalizeContainerStatus(parts[10])
 		agents = append(agents, Agent{
 			Name:        parts[0],
 			Type:        parts[1],
@@ -262,11 +269,28 @@ func parsePSOutput(data []byte) []Agent {
 			NetworkMode: parts[7],
 			Fleet:       parts[8],
 			Hierarchy:   parts[9],
-			Status:      parts[10],
+			Status:      status,
 			Running:     running,
+			Finished:    finished,
 		})
 	}
 	return agents
+}
+
+func normalizeContainerStatus(raw string) (status string, running, finished bool) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(raw, "Up"):
+		return raw, true, false
+	case strings.HasPrefix(raw, "Exited (0)"):
+		suffix := strings.TrimSpace(strings.TrimPrefix(raw, "Exited (0)"))
+		if suffix == "" {
+			return "Finished", false, true
+		}
+		return "Finished " + suffix, false, true
+	default:
+		return raw, false, false
+	}
 }
 
 func mergeStats(agents []Agent, data []byte) {
