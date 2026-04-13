@@ -97,6 +97,7 @@ Pipeline-only fields:
 ```bash
 safe-ag fleet examples/fleet-review-and-fix.yaml
 safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
 safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
 ```
 

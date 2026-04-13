@@ -34,6 +34,18 @@ safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 safe-ag fleet examples/fleet-self-review.yaml
 ```
 
+## Double review -> reconciliation
+
+```bash
+safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
+```
+
+This:
+1. Runs the same self-review intent through both Claude and Codex
+2. Pushes each model's findings to its own `review/self-*` branch
+3. Runs a final reconciliation pass that fetches both reports
+4. Produces `REVIEW-RECONCILED.md` on `review/self-reconciled`
+
 ## Standalone pipeline
 
 ```bash
