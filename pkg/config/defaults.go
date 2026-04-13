@@ -38,8 +38,8 @@ func Defaults() Config {
 		CPUs:        "4",
 		Memory:      "8g",
 		PIDsLimit:   "512",
-		ReuseAuth:   "true",
-		ReuseGHAuth: "true",
+		ReuseAuth:   "false",
+		ReuseGHAuth: "false",
 	}
 }
 

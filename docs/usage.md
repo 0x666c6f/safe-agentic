@@ -58,7 +58,6 @@ safe-ag stop --latest
 safe-ag stop --all
 safe-ag cleanup
 safe-ag cleanup --auth
-safe-ag cp <name> <container-path> <host-path>
 safe-ag sessions <name> [dest]
 ```
 

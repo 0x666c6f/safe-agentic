@@ -119,6 +119,16 @@ func TestAddTmpfs_NoSize(t *testing.T) {
 	}
 }
 
+func TestAddFlag_RejectsUnsafeFlags(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for unsafe flag")
+		}
+	}()
+	cmd.AddFlag("--privileged")
+}
+
 func TestAppendRuntimeHardening(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{

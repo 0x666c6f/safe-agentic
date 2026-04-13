@@ -14,9 +14,9 @@ An isolated environment for running AI coding agents (Claude Code, Codex) inside
 brew tap 0x666c6f/tap && brew install safe-agentic
 ```
 
-This installs the CLI as `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`. Check the installed version with `safe-ag --version`.
+This installs the CLI as `safe-ag`. Check the installed version with `safe-ag --version`.
 
-**From source:** Clone the repo, run `make build`, and add `bin/` to your PATH. The binary is `safe-ag`.
+**From source:** Clone the repo, run `make build-all`, and add `bin/` to your PATH. The binary is `safe-ag`.
 
 All documentation below uses `safe-ag` as the command name.
 
@@ -58,7 +58,7 @@ Full diagrams in `docs/architecture.md`.
 ### Container-side (runs inside Docker)
 
 - **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack, installs Docker CE with `userns-remap`, installs socat for SSH relay.
-- **`Dockerfile`** — All binary downloads pinned with SHA256 checksums (or GPG for AWS CLI). Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Non-root `agent` user, no sudo.
+- **`Dockerfile`** — Pinned Codex/npm install plus checksum or GPG verification for several direct downloads. Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Non-root `agent` user, no sudo.
 - **`entrypoint.sh`** — Container init: SSH config, git config, host config injection, security preamble, repo cloning, agent launch.
 - **`bin/agent-session.sh`** — Agent session wrapper inside tmux. Handles Claude/Codex/shell modes.
 - **`config/bashrc`** — Shell environment inside containers.
@@ -79,9 +79,9 @@ safe-ag spawn claude --ssh --template security-audit --repo git@github.com:org/r
 safe-ag spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
 safe-ag spawn claude --background --auto-trust --on-exit 'safe-ag output --latest --json > out.json' --repo ...
 
-# Quick start with smart defaults (auto-enables --ssh for SSH URLs, --reuse-auth)
+# Quick start with smart defaults (auto-enables `--ssh` for SSH URLs)
 safe-ag run git@github.com:org/repo.git "Fix the CI tests"
-safe-ag run https://github.com/org/repo.git "Add unit tests" --type codex
+safe-ag run https://github.com/org/repo.git "Add unit tests"
 
 # Quick aliases (auto-detect SSH from URL)
 safe-ag run git@github.com:org/repo.git
@@ -95,7 +95,7 @@ safe-ag attach <name>            # reattach (restarts stopped containers)
 safe-ag stop <name|--all>        # stop + remove
 safe-ag cleanup                  # removes containers + managed networks (keeps auth)
 
-# MCP OAuth login (token persists in auth volume)
+# MCP OAuth login
 safe-ag mcp-login linear
 safe-ag mcp-login <container> notion
 
@@ -142,7 +142,6 @@ safe-ag diff <name>|--latest [--stat]       # show git diff from agent working t
 safe-ag checkpoint create <name> [label]     # snapshot working tree
 safe-ag checkpoint list <name>               # list snapshots
 safe-ag checkpoint revert <name> <ref>       # revert to snapshot
-safe-ag checkpoint fork <name> <new-name> [label]  # fork from checkpoint snapshot
 safe-ag todo add <name> "text"               # add merge requirement
 safe-ag todo list <name>                     # show todos
 safe-ag todo check <name> <index>            # mark done
@@ -185,7 +184,7 @@ safe-ag audit [--lines N]                    # show operation log
 | Default | Override |
 |---------|----------|
 | SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
-| Shared auth volume (default) | `--ephemeral-auth` for one-off sessions |
+| Per-container auth volume | `--reuse-auth` to opt into shared Claude/Codex auth |
 | AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `safe-ag aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
 | Security preamble injected into CLAUDE.md / AGENTS.md | — |
@@ -203,17 +202,14 @@ Unsafe Docker flags (`--privileged`, `host` network, `--` passthrough) are block
 ## Testing
 
 ```bash
-# Run Go tests (13 packages, 156+ tests)
-make test
+# Build binaries
+make build-all
 
-# Run all tests (Go + legacy bash)
-make test && bash tests/run-all.sh
+# Run the Go test suite
+go test ./...
 
 # Run a single Go package
 go test ./pkg/docker/ -v
-
-# Run a single bash suite
-bash tests/test-docker-cmd.sh
 ```
 
 Go test packages in `pkg/` and `cmd/safe-ag/`:
@@ -230,11 +226,7 @@ Go test packages in `pkg/` and `cmd/safe-ag/`:
 - `pkg/fleet` — YAML manifest parsing
 - `cmd/safe-ag` — spawn parity, container name resolution, retry reconstruction
 
-Legacy bash tests in `tests/` (for entrypoint, Dockerfile, VM setup — things that still run in bash):
-- `test-dockerfile.sh` — checksums, no curl|bash, non-root user
-- `test-entrypoint.sh` — git config, clone validation, agent launch
-- `test-vm-setup.sh` — mount blocking, userns-remap, fstab
-- `test-live-integration.sh` — real VM/Docker smoke tests (optional)
+Shell runtime verification lives in focused smoke or integration tests rather than a standalone `tests/` bash suite.
 
 ## Conventions
 

@@ -52,6 +52,7 @@ type SpawnOpts struct {
 	Notify           string
 	FleetVolume      string
 	Hierarchy        string
+	AllowSetupScripts bool
 	DryRun           bool
 }
 
@@ -93,6 +94,7 @@ func init() {
 	f.StringVar(&spawnOpts.AWSProfile, "aws", "", "AWS profile for credential injection")
 	f.BoolVar(&spawnOpts.AutoTrust, "auto-trust", false, "Skip trust prompt")
 	f.BoolVar(&spawnOpts.Background, "background", false, "Run in background (no tmux attach)")
+	f.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
 	f.StringVar(&spawnOpts.OnExit, "on-exit", "", "Command to run on exit")
 	f.StringVar(&spawnOpts.OnComplete, "on-complete", "", "Command to run on success")
 	f.StringVar(&spawnOpts.OnFail, "on-fail", "", "Command to run on failure")
@@ -110,6 +112,7 @@ func init() {
 	rf.StringVar(&spawnOpts.Template, "template", "", "Prompt template")
 	rf.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
 	rf.BoolVar(&spawnOpts.Background, "background", false, "Background mode")
+	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Dry run")
 
 	rootCmd.AddCommand(spawnCmd, runCmd)
@@ -146,7 +149,6 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	opts.Repos = repos
 	opts.Prompt = prompt
 	opts.SSH = ssh
-	opts.ReuseAuth = true
 	opts.Identity = identity
 	return executeSpawn(opts)
 }
@@ -161,6 +163,9 @@ func executeSpawn(opts SpawnOpts) error {
 
 	resolved, err := prepareSpawnResolved(opts)
 	if err != nil {
+		return err
+	}
+	if err := validateResolvedSpawn(resolved); err != nil {
 		return err
 	}
 	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
@@ -222,12 +227,39 @@ func validateSpawnOpts(opts SpawnOpts) error {
 			return err
 		}
 	}
+	if opts.ReuseAuth && opts.EphemeralAuth {
+		return fmt.Errorf("--reuse-auth and --ephemeral-auth are mutually exclusive")
+	}
+	if opts.DockerAccess && opts.DockerSocket {
+		return fmt.Errorf("--docker and --docker-socket are mutually exclusive")
+	}
+	if err := validate.MemoryLimit(opts.Memory); err != nil {
+		return err
+	}
+	if err := validate.CPUs(opts.CPUs); err != nil {
+		return err
+	}
 	if opts.PIDsLimit > 0 {
 		if err := validate.PIDsLimit(opts.PIDsLimit); err != nil {
 			return err
 		}
 	}
 	return docker.EnsureSSHForRepos(opts.SSH, opts.Repos)
+}
+
+func validateResolvedSpawn(resolved spawnResolved) error {
+	if err := validate.MemoryLimit(resolved.Memory); err != nil {
+		return err
+	}
+	if err := validate.CPUs(resolved.CPUs); err != nil {
+		return err
+	}
+	if resolved.PIDsLimit > 0 {
+		if err := validate.PIDsLimit(resolved.PIDsLimit); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
@@ -245,9 +277,11 @@ func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
 		ImageName:     "safe-agentic:latest",
 	}
 	if resolved.PIDsLimit == 0 && cfg.PIDsLimit != "" {
-		if v, err := strconv.Atoi(cfg.PIDsLimit); err == nil {
-			resolved.PIDsLimit = v
+		v, err := strconv.Atoi(cfg.PIDsLimit)
+		if err != nil {
+			return spawnResolved{}, fmt.Errorf("parse configured PIDs limit %q: %w", cfg.PIDsLimit, err)
 		}
+		resolved.PIDsLimit = v
 	}
 
 	identity := opts.Identity
@@ -304,6 +338,9 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	if opts.AutoTrust {
 		cmd.AddEnv("SAFE_AGENTIC_AUTO_TRUST", "1")
 	}
+	if opts.AllowSetupScripts {
+		cmd.AddEnv("SAFE_AGENTIC_ALLOW_SETUP_SCRIPTS", "1")
+	}
 	return cmd
 }
 
@@ -328,7 +365,7 @@ func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnR
 }
 
 func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) {
-	if opts.FleetVolume != "" && !opts.EphemeralAuth {
+	if opts.FleetVolume != "" && opts.ReuseAuth {
 		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
 		perContainerVol := resolved.ContainerName + "-auth"
 		if !opts.DryRun {
@@ -343,13 +380,13 @@ func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.Docke
 		cmd.AddNamedVolume(perContainerVol, authDestination(opts.AgentType))
 		return
 	}
-	if opts.EphemeralAuth {
-		cmd.AddLabel(labels.AuthType, "ephemeral")
-		cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, true, resolved.ContainerName), authDestination(opts.AgentType))
+	if opts.ReuseAuth {
+		cmd.AddLabel(labels.AuthType, "shared")
+		cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, false, ""), authDestination(opts.AgentType))
 		return
 	}
-	cmd.AddLabel(labels.AuthType, "shared")
-	cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, false, ""), authDestination(opts.AgentType))
+	cmd.AddLabel(labels.AuthType, "ephemeral")
+	cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, true, resolved.ContainerName), authDestination(opts.AgentType))
 }
 
 func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {
@@ -410,6 +447,30 @@ func appendAWSConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 }
 
 func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
+	templateContent := ""
+	if opts.Template != "" {
+		path, err := findTemplate(opts.Template)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read template: %w", err)
+		}
+		templateContent = strings.TrimSpace(string(data))
+	}
+
+	instructions := opts.Instructions
+	if templateContent != "" {
+		if instructions == "" && opts.InstructionsFile == "" && opts.Prompt == "" {
+			opts.Prompt = templateContent
+		} else if instructions == "" {
+			instructions = templateContent
+		} else {
+			instructions = templateContent + "\n\n" + instructions
+		}
+	}
+
 	if opts.Prompt != "" {
 		if opts.AgentType == "codex" {
 			cmd.AddCmdArgs(opts.Prompt)
@@ -418,8 +479,8 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 		}
 		cmd.AddLabel(labels.Prompt, truncate(opts.Prompt, 100))
 	}
-	if opts.Instructions != "" {
-		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(opts.Instructions))
+	if instructions != "" {
+		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(instructions))
 		cmd.AddLabel(labels.Instructions, "1")
 	}
 	if opts.InstructionsFile != "" {
@@ -427,7 +488,11 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 		if err != nil {
 			return fmt.Errorf("read instructions file: %w", err)
 		}
-		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(string(data)))
+		fileInstructions := string(data)
+		if templateContent != "" {
+			fileInstructions = templateContent + "\n\n" + fileInstructions
+		}
+		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(fileInstructions))
 		cmd.AddLabel(labels.Instructions, "1")
 	}
 	if opts.Template != "" {

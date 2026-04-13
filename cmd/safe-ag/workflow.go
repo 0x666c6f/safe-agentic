@@ -30,6 +30,16 @@ func workspaceExec(containerName string, gitCmd string) []string {
 	}
 }
 
+func workspaceExecCommand(containerName string, args ...string) []string {
+	cmd := []string{
+		"docker", "exec", containerName,
+		"bash", "-lc",
+		fmt.Sprintf("%s && exec \"$@\"", workspaceFindCmd()),
+		"bash",
+	}
+	return append(cmd, args...)
+}
+
 // ─── diff ──────────────────────────────────────────────────────────────────
 
 var diffStat bool
@@ -477,13 +487,12 @@ func runPR(cmd *cobra.Command, args []string) error {
 		fmt.Println(s)
 	}
 
-	// Build gh pr create command
-	ghArgs := fmt.Sprintf("gh pr create --base %s --fill", prBase)
+	ghArgs := []string{"gh", "pr", "create", "--base", prBase, "--fill"}
 	if prTitle != "" {
-		ghArgs = fmt.Sprintf("gh pr create --title %q --base %s --fill", prTitle, prBase)
+		ghArgs = []string{"gh", "pr", "create", "--title", prTitle, "--base", prBase, "--fill"}
 	}
 
-	out, err := exec.Run(ctx, workspaceExec(name, ghArgs)...)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, ghArgs...)...)
 	if err != nil {
 		return fmt.Errorf("gh pr create: %w", err)
 	}

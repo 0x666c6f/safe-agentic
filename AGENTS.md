@@ -25,21 +25,21 @@ Isolation boundaries:
 2. VM <-> container
 3. container <-> container
 
-See [docs/architecture.md](/Users/florian/perso/safe-agentic/docs/architecture.md).
+See `docs/architecture.md`.
 
 ## Key Files
 
-- [bin/safe-ag](/Users/florian/perso/safe-agentic/bin/safe-ag): compiled Go CLI.
-- [bin/safe-ag-tui](/Users/florian/perso/safe-agentic/bin/safe-ag-tui): compiled Go TUI.
-- [bin/agent-session.sh](/Users/florian/perso/safe-agentic/bin/agent-session.sh): tmux session wrapper inside the container.
-- [bin/repo-url.sh](/Users/florian/perso/safe-agentic/bin/repo-url.sh): repo URL parsing and clone-path validation.
-- [vm/setup.sh](/Users/florian/perso/safe-agentic/vm/setup.sh): idempotent VM bootstrap + hardening; re-run on `safe-ag vm start`.
-- [Dockerfile](/Users/florian/perso/safe-agentic/Dockerfile): pinned downloads, checksum verification, non-root `agent` user, no sudo.
-- [entrypoint.sh](/Users/florian/perso/safe-agentic/entrypoint.sh): container init, git config injection, optional auth/config seeding, repo clone validation, agent launch.
-- [config/bashrc](/Users/florian/perso/safe-agentic/config/bashrc): shell defaults inside containers.
-- [package.json](/Users/florian/perso/safe-agentic/package.json): Codex CLI pin for reproducible `npm ci`.
-- [package-lock.json](/Users/florian/perso/safe-agentic/package-lock.json): lockfile for Codex CLI install.
-- [op-env.sh](/Users/florian/perso/safe-agentic/op-env.sh): optional 1Password secret injection template.
+- `bin/safe-ag`: compiled Go CLI.
+- `bin/safe-ag-tui`: compiled Go TUI.
+- `bin/agent-session.sh`: tmux session wrapper inside the container.
+- `bin/repo-url.sh`: repo URL parsing and clone-path validation.
+- `vm/setup.sh`: idempotent VM bootstrap + hardening; re-run on `safe-ag vm start`.
+- `Dockerfile`: pinned downloads, checksum verification, non-root `agent` user, no sudo.
+- `entrypoint.sh`: container init, git config injection, optional auth/config seeding, repo clone validation, agent launch.
+- `config/bashrc`: shell defaults inside containers.
+- `package.json`: Codex CLI pin for reproducible `npm ci`.
+- `package-lock.json`: lockfile for Codex CLI install.
+- `op-env.sh`: optional 1Password secret injection template.
 
 ## Project Structure
 
@@ -103,7 +103,7 @@ Minimum bar for changes:
 - if touching live integration harness, prefer:
   - `SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag`
   - `SAFE_AGENTIC_DEEP_INTEGRATION=1 SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag -run <focused-case>`
-- prefer smoke tests for touched flows: `safe-ag setup`, `safe-ag spawn`, `safe-ag shell`, cleanup path
+- prefer smoke tests for touched flows: `safe-ag setup`, `safe-ag spawn shell`, cleanup path
 - validate touched repo-local skills
 - update docs when behavior/flags/security posture changes
 
@@ -163,17 +163,17 @@ Unsafe Docker modes like `--privileged`, host networking, or raw passthrough rem
 
 When changing auth, network, mounts, isolation, or host-sharing behavior:
 
-- update [README.md](/Users/florian/perso/safe-agentic/README.md)
+- update `README.md`
 - call out security impact in commit/PR notes
 - do not broaden SSH forwarding, auth volume sharing, or Docker privileges casually
 
 ## Documentation
 
-- [README.md](/Users/florian/perso/safe-agentic/README.md): operational overview
-- [docs/architecture.md](/Users/florian/perso/safe-agentic/docs/architecture.md): diagrams, isolation boundaries, flow sequences
-- [docs/quickstart.md](/Users/florian/perso/safe-agentic/docs/quickstart.md): getting started
-- [docs/usage.md](/Users/florian/perso/safe-agentic/docs/usage.md): command reference
-- [docs/security.md](/Users/florian/perso/safe-agentic/docs/security.md): threat model, supply chain, filesystem layout
+- `README.md`: operational overview
+- `docs/architecture.md`: diagrams, isolation boundaries, flow sequences
+- `docs/quickstart.md`: getting started
+- `docs/usage.md`: command reference
+- `docs/security.md`: threat model, supply chain, filesystem layout
 
 ## Skills
 

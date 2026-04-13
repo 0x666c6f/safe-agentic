@@ -1753,30 +1753,6 @@ func TestTemplateShow_Existing(t *testing.T) {
 	}
 }
 
-// ─── mustReadFile ─────────────────────────────────────────────────────────────
-
-func TestMustReadFile_Existing(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "mustread-*.txt")
-	if err != nil {
-		t.Fatalf("create temp: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.WriteString("hello world")
-	tmpFile.Close()
-
-	data := mustReadFile(tmpFile.Name())
-	if string(data) != "hello world" {
-		t.Errorf("mustReadFile() = %q, want %q", string(data), "hello world")
-	}
-}
-
-func TestMustReadFile_NotExisting(t *testing.T) {
-	data := mustReadFile("/nonexistent/path/file.txt")
-	if data != nil {
-		t.Errorf("mustReadFile() for missing file should return nil, got %v", data)
-	}
-}
-
 // ─── runSpawn ─────────────────────────────────────────────────────────────────
 
 func TestRunSpawn_InvalidType(t *testing.T) {
@@ -2617,6 +2593,16 @@ func TestSpawnWithTemplate(t *testing.T) {
 	_, cleanup := testSetup(t)
 	defer cleanup()
 
+	xdgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	templateDir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("mkdir template dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "security-audit.md"), []byte("Audit this repository."), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
 	opts := SpawnOpts{
 		AgentType: "claude",
 		Repos:     []string{"https://github.com/org/repo.git"},
@@ -2631,6 +2617,38 @@ func TestSpawnWithTemplate(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestExecuteSpawn_DefaultsToEphemeralAuth(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType: "claude",
+			DryRun:    true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "safe-agentic.auth=ephemeral") {
+		t.Fatalf("expected ephemeral auth in dry-run output, got: %s", output)
+	}
+	if strings.Contains(output, "safe-agentic.auth=shared") {
+		t.Fatalf("did not expect shared auth in dry-run output, got: %s", output)
+	}
+}
+
+func TestValidateSpawnOpts_RejectsConflictingAuthModes(t *testing.T) {
+	err := validateSpawnOpts(SpawnOpts{
+		AgentType:     "claude",
+		ReuseAuth:     true,
+		EphemeralAuth: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive auth error, got %v", err)
 	}
 }
 

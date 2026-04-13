@@ -19,8 +19,8 @@ Format:
 ```bash
 SAFE_AGENTIC_DEFAULT_MEMORY=16g
 SAFE_AGENTIC_DEFAULT_CPUS=8
-SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
-SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=true
+SAFE_AGENTIC_DEFAULT_REUSE_AUTH=false
+SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=false
 SAFE_AGENTIC_DEFAULT_SSH=false
 SAFE_AGENTIC_DEFAULT_NETWORK=my-net
 SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
@@ -32,11 +32,10 @@ This is parsed as `KEY=value`, not sourced as a shell script.
 
 ```bash
 safe-ag config show
-safe-ag config get memory
-safe-ag config set memory 16g
-safe-ag config set identity "Your Name <you@example.com>"
-safe-ag config reset memory
-safe-ag config reset --all
+safe-ag config get SAFE_AGENTIC_DEFAULT_MEMORY
+safe-ag config set SAFE_AGENTIC_DEFAULT_MEMORY 16g
+safe-ag config set SAFE_AGENTIC_DEFAULT_IDENTITY "Your Name <you@example.com>"
+safe-ag config reset SAFE_AGENTIC_DEFAULT_MEMORY
 ```
 
 ## Templates

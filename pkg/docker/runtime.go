@@ -33,7 +33,23 @@ func NewRunCmd(name, image string) *DockerRunCmd {
 
 func (d *DockerRunCmd) AddLabel(key, value string) { d.labels[key] = value }
 func (d *DockerRunCmd) AddEnv(key, value string)   { d.envs = append(d.envs, envEntry{key, value}) }
-func (d *DockerRunCmd) AddFlag(flags ...string)    { d.flags = append(d.flags, flags...) }
+func (d *DockerRunCmd) AddFlag(flags ...string) {
+	for _, flag := range flags {
+		switch {
+		case flag == "--privileged",
+			flag == "--cap-add=ALL",
+			strings.HasPrefix(flag, "--cap-add="),
+			flag == "--pid=host",
+			flag == "--ipc=host",
+			flag == "--uts=host",
+			flag == "--userns=host",
+			flag == "--network=host",
+			flag == "--security-opt=seccomp=unconfined":
+			panic("unsafe docker run flag rejected: " + flag)
+		}
+	}
+	d.flags = append(d.flags, flags...)
+}
 func (d *DockerRunCmd) AddCmdArgs(args ...string)  { d.cmdArgs = append(d.cmdArgs, args...) }
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))

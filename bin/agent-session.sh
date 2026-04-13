@@ -14,7 +14,11 @@ write_session_event() {
   local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   mkdir -p "$SESSION_EVENTS_DIR"
-  printf '{"ts":"%s","type":"%s","data":%s}\n' "$ts" "$event_type" "$data" >> "$SESSION_EVENTS_FILE"
+  jq -cn \
+    --arg ts "$ts" \
+    --arg type "$event_type" \
+    --argjson data "$data" \
+    '{ts: $ts, type: $type, data: $data}' >> "$SESSION_EVENTS_FILE"
 }
 
 resuming=false
@@ -93,27 +97,28 @@ trust_workspace() {
   mkdir -p "$claude_dir" 2>/dev/null || return 0
   mkdir -p "$codex_dir" 2>/dev/null || return 0
 
-  python3 -c "
-import json, sys, os, glob
+  python3 - "$settings_local" "$cwd" <<'PY' 2>/dev/null || true
+import glob
+import json
+import os
+import sys
 
-path = '$settings_local'
-cwd = '$cwd'
+path = sys.argv[1]
+cwd = sys.argv[2]
 
 try:
     with open(path) as f:
         data = json.load(f)
-except:
+except Exception:
     data = {}
 
 trusted = data.get('trustedDirectories', [])
 changed = False
 
-# Trust the current directory
 if cwd not in trusted:
     trusted.append(cwd)
     changed = True
 
-# Trust /workspace and all immediate subdirectories (cloned repos)
 for d in ['/workspace'] + glob.glob('/workspace/*/*'):
     if os.path.isdir(d) and d not in trusted:
         trusted.append(d)
@@ -123,7 +128,7 @@ if changed:
     data['trustedDirectories'] = trusted
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
-" 2>/dev/null || true
+PY
 
   if [ -d "$codex_dir" ] && [ -w "$codex_dir" ]; then
     touch "$codex_config" 2>/dev/null || true

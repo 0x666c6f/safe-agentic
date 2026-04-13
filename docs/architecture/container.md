@@ -19,7 +19,7 @@ At a high level:
 1. container starts
 2. entrypoint prepares runtime config
 3. repos clone into `/workspace`
-4. optional `safe-agentic.json` setup hook runs
+4. optional repo setup hook runs only when explicitly allowed
 5. agent starts inside tmux
 
 ## Runtime traits

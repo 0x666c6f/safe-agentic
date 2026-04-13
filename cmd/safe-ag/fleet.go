@@ -367,7 +367,7 @@ func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage)
 	}
 }
 
-// waitForContainers polls docker inspect until all containers exit.
+// waitForContainers polls docker inspect until all containers exit successfully.
 func waitForContainers(ctx context.Context, exec orb.Executor, names []string) error {
 	if len(names) == 0 {
 		return nil
@@ -386,6 +386,13 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 				continue
 			}
 			if state == "exited" || state == "dead" {
+				exitCode, err := containerExitCode(ctx, exec, name)
+				if err != nil {
+					return fmt.Errorf("inspect exit code for %s: %w", name, err)
+				}
+				if exitCode != 0 {
+					return fmt.Errorf("container %s exited with status %d", name, exitCode)
+				}
 				done[name] = true
 				fmt.Printf("  ✓ %s exited\n", name)
 			} else {
@@ -401,6 +408,18 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+func containerExitCode(ctx context.Context, exec orb.Executor, name string) (int, error) {
+	out, err := exec.Run(ctx, "docker", "inspect", "--format", "{{.State.ExitCode}}", name)
+	if err != nil {
+		return 0, err
+	}
+	var exitCode int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &exitCode); err != nil {
+		return 0, fmt.Errorf("parse exit code %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return exitCode, nil
 }
 
 // ─── helper ──────────────────────────────────────────────────────────────────

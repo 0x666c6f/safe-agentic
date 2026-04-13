@@ -100,6 +100,7 @@ Flags:
 | `--auto-trust` | bool | skip the trust prompt |
 | `--aws` | string | AWS profile for credential injection |
 | `--background` | bool | run detached instead of attaching |
+| `--allow-setup-scripts` | bool | allow repo-provided `safe-agentic.json` setup hooks |
 | `--cpus` | string | CPU limit |
 | `--docker` | bool | enable Docker-in-Docker |
 | `--docker-socket` | bool | mount the VM Docker socket directly |
@@ -139,6 +140,7 @@ Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
+| `--allow-setup-scripts` | bool | allow repo-provided `safe-agentic.json` setup hooks |
 | `--background` | bool | run detached |
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | dry run |
