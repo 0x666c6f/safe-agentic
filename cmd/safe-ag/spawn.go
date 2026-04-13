@@ -485,20 +485,19 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 		}
 		cmd.AddLabel(labels.Prompt, truncate(opts.Prompt, 100))
 	}
-	if instructions != "" {
-		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(instructions))
-		cmd.AddLabel(labels.Instructions, "1")
-	}
 	if opts.InstructionsFile != "" {
 		data, err := os.ReadFile(opts.InstructionsFile)
 		if err != nil {
 			return fmt.Errorf("read instructions file: %w", err)
 		}
 		fileInstructions := string(data)
-		if templateContent != "" {
-			fileInstructions = templateContent + "\n\n" + fileInstructions
+		if instructions != "" {
+			fileInstructions = instructions + "\n\n" + fileInstructions
 		}
-		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(fileInstructions))
+		instructions = fileInstructions
+	}
+	if instructions != "" {
+		cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", inject.EncodeB64(instructions))
 		cmd.AddLabel(labels.Instructions, "1")
 	}
 	if opts.Template != "" {

@@ -17,6 +17,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
@@ -2853,6 +2854,38 @@ func TestSpawnWithInstructionsFile(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestSpawnWithInstructionsAndInstructionsFile(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	f := filepath.Join(t.TempDir(), "instructions.md")
+	if err := os.WriteFile(f, []byte("File instructions"), 0o644); err != nil {
+		t.Fatalf("write instructions file: %v", err)
+	}
+
+	opts := SpawnOpts{
+		AgentType:        "claude",
+		Repos:            []string{"https://github.com/org/repo.git"},
+		Instructions:     "Inline instructions",
+		InstructionsFile: f,
+		DryRun:           true,
+	}
+	output := captureOutput(func() {
+		err := executeSpawn(opts)
+		if err != nil {
+			t.Fatalf("executeSpawn with instructions + file error = %v", err)
+		}
+	})
+
+	want := inject.EncodeB64("Inline instructions\n\nFile instructions")
+	if !strings.Contains(output, "SAFE_AGENTIC_INSTRUCTIONS_B64="+want) {
+		t.Fatalf("expected merged instructions env in dry-run output, got: %s", output)
+	}
+	if strings.Count(output, "SAFE_AGENTIC_INSTRUCTIONS_B64=") != 1 {
+		t.Fatalf("expected one instructions env entry, got: %s", output)
 	}
 }
 
