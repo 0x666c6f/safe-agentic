@@ -410,12 +410,16 @@ func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLab
 		return "", nil
 	}
 	opts := specToSpawnOpts(spec, rootLabel)
-	opts.Hierarchy = strings.Join(currentPath, "/")
+	opts.Hierarchy = pipelineStageHierarchy(currentPath, stage.Name)
 	opts.Background = true
 	if err := executeSpawn(opts); err != nil {
 		return "", fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
 	}
 	return resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos), nil
+}
+
+func pipelineStageHierarchy(currentPath []string, stageName string) string {
+	return strings.Join(append(append([]string{}, currentPath...), stageName), "/")
 }
 
 func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage) {

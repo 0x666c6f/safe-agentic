@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 )
 
 func TestRunPipeline_DryRunNestedExample(t *testing.T) {
@@ -61,5 +63,32 @@ func TestRunPipeline_BackgroundDelegatesToLauncher(t *testing.T) {
 	}
 	if output != "" {
 		t.Fatalf("expected no direct pipeline output, got:\n%s", output)
+	}
+}
+
+func TestSpawnPipelineAgentIncludesStageInHierarchy(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	stage := fleet.PipelineStage{Name: "claude-reviews"}
+	spec := fleet.AgentSpec{
+		Name:   "code-review-claude",
+		Type:   "claude",
+		Repo:   "https://github.com/org/repo.git",
+		Prompt: "review",
+	}
+
+	output := captureOutput(func() {
+		opts := specToSpawnOpts(spec, "pipeline-123")
+		opts.Hierarchy = pipelineStageHierarchy([]string{"double-review-reconcile"}, stage.Name)
+		opts.DryRun = true
+		err := executeSpawn(opts)
+		if err != nil {
+			t.Fatalf("executeSpawn error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "safe-agentic.hierarchy=double-review-reconcile/claude-reviews") {
+		t.Fatalf("dry-run missing stage hierarchy label:\n%s", output)
 	}
 }
