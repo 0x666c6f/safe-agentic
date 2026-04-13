@@ -2,6 +2,10 @@
 
 This page answers: "Which command do I run for the job in front of me?"
 
+If you want the raw reference pages instead:
+- [CLI Reference](reference/cli.md)
+- [TUI Reference](reference/tui.md)
+
 ## Setup and maintenance
 
 ```bash

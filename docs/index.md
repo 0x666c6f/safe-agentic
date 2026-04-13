@@ -91,3 +91,5 @@ safe-ag pipeline pipeline.yaml
 - [Workflow](guide/workflow.md): review, retry, PR flow
 - [Fleet and Pipelines](guide/fleet.md): manifests and staged runs
 - [Configuration](guide/configuration.md): defaults, templates, image rebuilds
+- [CLI Reference](reference/cli.md): top-level command inventory
+- [TUI Reference](reference/tui.md): keybindings, modes, and dashboard entrypoints

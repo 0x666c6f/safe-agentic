@@ -44,6 +44,8 @@ nav:
     - Analytics: guide/analytics.md
     - Configuration: guide/configuration.md
   - Reference:
+    - CLI Reference: reference/cli.md
+    - TUI Reference: reference/tui.md
     - Architecture: architecture.md
     - Security: security.md
     - Isolation Boundaries: architecture/isolation.md
