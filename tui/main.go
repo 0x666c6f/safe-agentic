@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -8,13 +9,22 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
-	vmName          = "safe-agentic"
 	containerPrefix = "agent"
 	pollInterval    = 2
 )
+
+var vmName = configuredVMName()
+
+func configuredVMName() string {
+	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+		return v
+	}
+	return "safe-agentic"
+}
 
 func main() {
 	if handleDashboardMode() {
@@ -121,12 +131,29 @@ func preflight() error {
 	if _, err := exec.LookPath("orb"); err != nil {
 		return fmt.Errorf("'orb' not found in PATH. Install OrbStack first")
 	}
-	out, err := exec.Command("orb", "list").Output()
+
+	if orbctl, err := exec.LookPath("orbctl"); err == nil {
+		statusOut, statusErr := exec.Command(orbctl, "status").Output()
+		if len(statusOut) > 0 && strings.Contains(string(statusOut), "Stopped") {
+			return fmt.Errorf("OrbStack is stopped. Start OrbStack and run 'safe-ag vm start'")
+		}
+		if statusErr == nil && len(statusOut) > 0 && strings.Contains(string(statusOut), "Running") {
+			// Good enough; continue to VM existence check.
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "orb", "list", "-q").Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("timed out listing VMs. Check OrbStack and run 'safe-ag vm start'")
+	}
 	if err != nil {
 		return fmt.Errorf("failed to list VMs: %w", err)
 	}
-	if !strings.Contains(string(out), vmName) {
-		return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", vmName)
+	if !strings.Contains(string(out), configuredVMName()) {
+		return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", configuredVMName())
 	}
 	return nil
 }
