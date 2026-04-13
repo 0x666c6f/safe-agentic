@@ -34,8 +34,6 @@ stages:
         prompt: "Review type, API, and design boundaries. Focus on structs/interfaces/types, validation boundaries, illegal states, weak abstractions, brittle coupling, and confusing public surfaces. Write findings to REVIEW-DESIGN-TYPES-CLAUDE.md with severity labels and concrete fixes. Then publish to the shared branch with: git fetch origin review/design-types-review || true; git checkout -B review/design-types-review --track origin/review/design-types-review 2>/dev/null || git checkout -b review/design-types-review; git add REVIEW-DESIGN-TYPES-CLAUDE.md; git commit -m 'review(design-types): claude findings'; git push -u origin review/design-types-review."
 
   - name: codex-reviews
-    depends_on:
-      - claude-reviews
     agents:
       - name: code-review-codex
         type: codex
@@ -55,6 +53,7 @@ stages:
 
   - name: reconcile-fix-pr
     depends_on:
+      - claude-reviews
       - codex-reviews
     agents:
       - name: reconciler

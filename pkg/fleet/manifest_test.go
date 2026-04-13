@@ -314,11 +314,16 @@ func TestParsePipeline_DoubleReviewReconcileExample(t *testing.T) {
 		t.Fatalf("stage[2].Agents[0].Type = %q", got)
 	}
 
-	if deps := m.Stages[1].DependsOn; len(deps) != 1 || deps[0] != "claude-reviews" {
-		t.Fatalf("stage[1].DependsOn = %v, want [claude-reviews]", deps)
+	if deps := m.Stages[1].DependsOn; len(deps) != 0 {
+		t.Fatalf("stage[1].DependsOn = %v, want []", deps)
 	}
-	if deps := m.Stages[2].DependsOn; len(deps) != 1 || deps[0] != "codex-reviews" {
-		t.Fatalf("stage[2].DependsOn = %v, want [codex-reviews]", deps)
+	deps := m.Stages[2].DependsOn
+	if len(deps) != 2 {
+		t.Fatalf("stage[2].DependsOn = %v, want [claude-reviews codex-reviews]", deps)
+	}
+	depSet := map[string]bool{deps[0]: true, deps[1]: true}
+	if !depSet["claude-reviews"] || !depSet["codex-reviews"] {
+		t.Fatalf("unexpected stage[2] deps: %v", deps)
 	}
 }
 

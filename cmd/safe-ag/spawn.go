@@ -374,6 +374,8 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	if opts.AgentType == "claude" || opts.AgentType == "shell" {
 		envs, err := inject.ReadClaudeConfig(claudeDir)
 		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadClaudeOAuthToken()
+		appendEnvMap(cmd, envs, err)
 		envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))
 		appendEnvMap(cmd, envs, err)
 		envs, err = inject.ReadClaudeSupportFiles(claudeDir)
