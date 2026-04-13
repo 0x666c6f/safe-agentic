@@ -69,6 +69,16 @@ func captureOutput(fn func()) string {
 	return buf.String()
 }
 
+func installFakeOrbBinary(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orb")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake orb: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // ─── list ─────────────────────────────────────────────────────────────────────
 
 func TestListCommand(t *testing.T) {
@@ -2274,6 +2284,7 @@ func TestDiagnoseCommand_DockerReady(t *testing.T) {
 func TestSetupCommand_DockerAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
+	installFakeOrbBinary(t)
 
 	// Simulate docker info succeeding (Docker already running in VM)
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
@@ -2297,6 +2308,7 @@ func TestSetupCommand_DockerAvailable(t *testing.T) {
 func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
+	installFakeOrbBinary(t)
 
 	// Docker is verified after bootstrap in the current flow.
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
