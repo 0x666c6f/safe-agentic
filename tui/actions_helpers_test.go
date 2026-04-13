@@ -42,7 +42,7 @@ func TestParseSessionMetaErrorsAndLogsTitle(t *testing.T) {
 
 	ac := NewActions(NewApp())
 	title := ac.logsTitle("agent-beta", &logsState{autoRefresh: true, tailLines: "0"})
-	if title != "Logs: agent-beta | [r]efresh:3s [5]00/[2]000/[a]ll:all | Esc close" {
+	if title != "Logs: agent-beta | mode:session [r]efresh:3s [5]00/[2]000/[a]ll:all | Esc close" {
 		t.Fatalf("logsTitle() = %q", title)
 	}
 }

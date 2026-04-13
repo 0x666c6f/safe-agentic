@@ -34,6 +34,11 @@ func TestNewAppLoadingAndExecAfterArgs(t *testing.T) {
 
 func TestAppUpdatePreviewHandleCommandAndOverlayHelpers(t *testing.T) {
 	installFakeOrb(t)
+	oldLogs := previewLogsFunc
+	previewLogsFunc = func(name string, lines int) (string, error) {
+		return "logs:" + name, nil
+	}
+	defer func() { previewLogsFunc = oldLogs }()
 
 	a := NewApp()
 	agents := testAgents()
@@ -47,7 +52,7 @@ func TestAppUpdatePreviewHandleCommandAndOverlayHelpers(t *testing.T) {
 	}
 
 	a.updatePreview(&agents[1])
-	if got := a.preview.textView.GetText(false); got != "Agent not running" {
+	if got := a.preview.textView.GetText(false); got != "logs:agent-alpha" {
 		t.Fatalf("stopped preview text = %q", got)
 	}
 

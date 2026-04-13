@@ -20,9 +20,8 @@ cmd="$*"
 case "$cmd" in
   *"docker ps -a"*)
     cat <<'EOF'
-{"Names":"agent-beta","Status":"Up 2 minutes","Labels":"safe-agentic.agent-type=codex, safe-agentic.repo-display=org/private-api, safe-agentic.ssh=yes, safe-agentic.auth=session, safe-agentic.gh-auth=app, safe-agentic.docker=sandbox, safe-agentic.network-mode=bridge"}
-{"Names":"agent-alpha","Status":"Exited (0) 1 minute ago","Labels":"safe-agentic.agent-type=claude, safe-agentic.repo-display=org/docs, safe-agentic.ssh=no"}
-not-json
+agent-beta	codex	org/private-api	yes	session	app	sandbox	bridge			Up 2 minutes
+agent-alpha	claude	org/docs	no							Exited (0) 1 minute ago
 EOF
     ;;
   *"docker stats --no-stream"*)
@@ -59,16 +58,18 @@ esac
 }
 
 func TestParsePSOutputAndHelpers(t *testing.T) {
-	psData := []byte(`{"Names":"agent-beta","Status":"Up 1 second","Labels":"safe-agentic.agent-type=codex, safe-agentic.repo-display=org/private-api, safe-agentic.ssh=yes"}
-{"Names":"agent-alpha","Status":"Exited (0) 1 second ago","Labels":"safe-agentic.agent-type=claude"}
-not-json
-`)
+	psData := []byte("agent-beta\tcodex\torg/private-api\tyes\tsession\tapp\tsandbox\tbridge\t\t\tUp 1 second\n" +
+		"agent-alpha\tclaude\torg/docs\tno\t\t\t\t\t\t\tExited (0) 1 second ago\n" +
+		"short\trow\n")
 	agents := parsePSOutput(psData)
 	if len(agents) != 2 {
 		t.Fatalf("len(parsePSOutput) = %d, want 2", len(agents))
 	}
 	if !agents[0].Running || agents[1].Running {
 		t.Fatalf("running flags = %#v", agents)
+	}
+	if agents[0].Repo != "org/private-api" || agents[0].NetworkMode != "bridge" {
+		t.Fatalf("parsed agent = %#v", agents[0])
 	}
 
 	labels := parseLabels("a=1, b = 2, malformed")
@@ -153,6 +154,7 @@ func TestPollerPollGetAgentsAndErrorStale(t *testing.T) {
 	t.Setenv("PATH", emptyDir)
 	calls = 0
 	gotStale = false
+	gotAgents = nil
 	p = NewPoller(func(agents []Agent, stale bool) {
 		gotAgents = append([]Agent(nil), agents...)
 		gotStale = stale
