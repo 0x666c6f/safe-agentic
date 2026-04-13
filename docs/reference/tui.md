@@ -172,7 +172,6 @@ Current overlay/modal types:
 | help overlay | keybinding help |
 | logs overlay | session/log output |
 | describe overlay | formatted container inspect |
-| YAML/raw inspect overlay | raw Docker inspect output |
 | copy form | copy files from container to VM path |
 | spawn form | spawn a new agent |
 

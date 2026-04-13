@@ -804,20 +804,6 @@ func (ac *Actions) Describe() {
 	ShowOverlay(ac.app, "describe", fmt.Sprintf("Describe: %s", agent.Name), pretty.String())
 }
 
-// YAMLView shows raw docker inspect JSON in an overlay.
-func (ac *Actions) YAMLView() {
-	agent := ac.selectedOrWarn()
-	if agent == nil {
-		return
-	}
-	data, err := execOrb("docker", "inspect", agent.Name)
-	if err != nil {
-		ac.app.footer.ShowStatus("Failed to inspect container", true)
-		return
-	}
-	ShowOverlay(ac.app, "yaml", fmt.Sprintf("JSON: %s", agent.Name), string(data))
-}
-
 // ExportSessions runs agent sessions export in the background.
 func (ac *Actions) ExportSessions() {
 	agent := ac.selectedOrWarn()

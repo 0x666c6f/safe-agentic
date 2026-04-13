@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -12,17 +12,17 @@ import (
 
 // App is the top-level TUI application.
 type App struct {
-	tapp      *tview.Application
-	pages     *tview.Pages
-	header    *Header
-	table     *AgentTable
-	footer    *Footer
-	preview   *PreviewPane
-	poller    *Poller
-	actions   *Actions
-	loaded    chan struct{} // closed after first successful poll
-	stopAnim  chan struct{}
-	execAfter []string // if set, syscall.Exec this command after tview exits
+	tapp          *tview.Application
+	pages         *tview.Pages
+	header        *Header
+	table         *AgentTable
+	footer        *Footer
+	preview       *PreviewPane
+	poller        *Poller
+	actions       *Actions
+	loaded        chan struct{} // closed after first successful poll
+	stopAnim      chan struct{}
+	execAfter     []string // if set, syscall.Exec this command after tview exits
 	pendingMu     sync.Mutex
 	pendingAgents []Agent
 	pendingStale  bool
@@ -271,7 +271,6 @@ func (a *App) simpleRuneActions() map[rune]func() {
 		's': a.actions.StopAgent,
 		'l': a.actions.Logs,
 		'd': a.actions.Describe,
-		'y': a.actions.YAMLView,
 		'e': a.actions.ExportSessions,
 		'c': a.actions.CopyFiles,
 		'n': a.actions.SpawnNew,
@@ -397,7 +396,6 @@ Inspect
   p                   Toggle preview pane (last output)
   l                   Logs (safe-ag logs)
   d                   Describe container (docker inspect)
-  y                   Raw inspect JSON
   f                   Diff (safe-ag diff)
   x                   Checkpoint create
   t                   Todo list

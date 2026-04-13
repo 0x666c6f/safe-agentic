@@ -68,7 +68,6 @@ var allShortcuts = []shortcut{
 	{"g", "PR"},
 	{"$", "Cost"},
 	{"A", "Audit"},
-	{"y", "YAML"},
 	{"n", "New"},
 	{"p", "Preview"},
 	{"e", "Export"},
