@@ -269,9 +269,24 @@ RUN test -n "$CLI_CACHE_BUST" \
  && npm ci --omit=dev \
  && npm cache clean --force
 
-RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION" \
- && test -x /home/agent/.local/bin/claude \
- && /home/agent/.local/bin/claude --version | grep -F "$CLAUDE_CODE_VERSION"
+RUN attempt=1 \
+ && while true; do \
+      if curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/claude-install.sh https://claude.ai/install.sh \
+        && bash -s -- "$CLAUDE_CODE_VERSION" < /tmp/claude-install.sh \
+        && test -x /home/agent/.local/bin/claude \
+        && /home/agent/.local/bin/claude --version | grep -F "$CLAUDE_CODE_VERSION"; then \
+        rm -f /tmp/claude-install.sh; \
+        break; \
+      fi; \
+      rm -f /tmp/claude-install.sh; \
+      if [ "$attempt" -ge 5 ]; then \
+        echo "Claude install failed after $attempt attempts" >&2; \
+        exit 1; \
+      fi; \
+      echo "Claude install attempt $attempt failed; retrying..." >&2; \
+      attempt=$((attempt + 1)); \
+      sleep 10; \
+    done
 
 # Remove build-essential (gcc, make, etc.) now that native npm modules are compiled.
 # Reduces attack surface — agents work with interpreted languages and pre-compiled Go binaries.
