@@ -5,10 +5,10 @@
 #   2. Run the pipeline to consolidate findings, fix issues, and create a PR
 #
 # Usage:
-#   agent fleet examples/fleet-review-and-fix.yaml
-#   # Wait for agents to finish (monitor with: agent tui)
+#   safe-ag fleet examples/fleet-review-and-fix.yaml
+#   # Wait for agents to finish (monitor with: safe-ag tui)
 #   # Then run the consolidation pipeline:
-#   agent pipeline examples/pipeline-consolidate-and-fix.yaml
+#   safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 
 agents:
   - name: review-code

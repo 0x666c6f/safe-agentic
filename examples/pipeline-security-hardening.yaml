@@ -1,5 +1,5 @@
 # Pipeline: security audit → fix findings → verify fixes
-# Usage: agent pipeline examples/pipeline-security-hardening.yaml
+# Usage: safe-ag pipeline examples/pipeline-security-hardening.yaml
 
 name: security-hardening
 steps:

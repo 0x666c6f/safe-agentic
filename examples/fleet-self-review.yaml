@@ -1,5 +1,5 @@
 # Fleet manifest: comprehensive review of the safe-agentic repo itself
-# Usage: agent fleet examples/fleet-self-review.yaml
+# Usage: safe-ag fleet examples/fleet-self-review.yaml
 
 agents:
   - name: code-review

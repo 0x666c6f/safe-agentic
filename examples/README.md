@@ -1,41 +1,43 @@
 # Example Manifests
 
-## Full orchestrated review → fix → PR
+## Review → Fix → PR
 
-One command to run parallel reviews, wait for completion, consolidate findings, fix issues, and create a PR:
+Use the fleet manifest first, then run the consolidation pipeline:
 
 ```bash
-agent orchestrate examples/fleet-review-and-fix.yaml examples/pipeline-consolidate-and-fix.yaml
+safe-ag fleet examples/fleet-review-and-fix.yaml
+safe-ag tui
+safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
 
 This:
 1. Spawns 4 parallel review agents (code, security, tests, docs)
 2. Each agent pushes findings to a `review/*` branch
-3. Waits for all agents to finish (polls every 30s)
-4. Runs a 3-step pipeline: consolidate → fix critical/high → create PR
+3. Lets you monitor progress in the TUI
+4. Runs the follow-up pipeline: consolidate → fix critical/high → create PR
 5. Cleans up review branches
 
 ## Manual two-phase workflow
 
 ```bash
 # Phase 1: spawn reviewers
-agent fleet examples/fleet-review-and-fix.yaml
-agent tui  # monitor
+safe-ag fleet examples/fleet-review-and-fix.yaml
+safe-ag tui  # monitor
 
 # Phase 2: after all finish
-agent pipeline examples/pipeline-consolidate-and-fix.yaml
+safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
 
 ## Standalone fleet (no follow-up)
 
 ```bash
-agent fleet examples/fleet-self-review.yaml
+safe-ag fleet examples/fleet-self-review.yaml
 ```
 
 ## Standalone pipeline
 
 ```bash
-agent pipeline examples/pipeline-security-hardening.yaml
+safe-ag pipeline examples/pipeline-security-hardening.yaml
 ```
 
 ## Minimal nested pipeline for display checks
@@ -43,7 +45,7 @@ agent pipeline examples/pipeline-security-hardening.yaml
 Use this when you only want to validate pipeline tree rendering.
 
 ```bash
-agent pipeline examples/pipeline-display-nested.yaml --dry-run
+safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
 ```
 
 If you run it without `--dry-run`, each nesting level spawns exactly one tiny leaf agent with prompt `Reply OK.` and `auto_trust: true`, so the run can progress without waiting at the Codex trust prompt.

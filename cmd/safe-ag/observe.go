@@ -77,7 +77,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find the session JSONL that matches this container.
-	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
 	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
 	searchDirs := sessionSearchDirs(configDir, repoLabel)
 	running, _ := docker.IsRunning(ctx, exec, name)
@@ -92,7 +91,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 			"find %s -name '*.jsonl' -not -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-",
 			searchDirs[0])
 	}
-	_ = createdAt // used for future per-container matching refinement
 
 	out, err := readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, logsLines*3, running)
 	if err != nil {
