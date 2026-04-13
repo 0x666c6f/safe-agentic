@@ -268,6 +268,48 @@ stages:
 	}
 }
 
+func TestParsePipeline_DoubleReviewReconcileExample(t *testing.T) {
+	m, err := ParsePipeline(filepath.Join("..", "..", "examples", "pipeline-double-review-reconcile.yaml"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Name != "double-review-reconcile" {
+		t.Fatalf("Name = %q, want double-review-reconcile", m.Name)
+	}
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages after model expansion, got %d", len(m.Stages))
+	}
+
+	if got := m.Stages[0].Name; got != "self-review-claude" {
+		t.Fatalf("stage[0].Name = %q", got)
+	}
+	if got := m.Stages[1].Name; got != "self-review-codex" {
+		t.Fatalf("stage[1].Name = %q", got)
+	}
+	if got := m.Stages[2].Name; got != "reconcile" {
+		t.Fatalf("stage[2].Name = %q", got)
+	}
+
+	if got := m.Stages[0].Agents[0].Type; got != "claude" {
+		t.Fatalf("stage[0].Agents[0].Type = %q", got)
+	}
+	if got := m.Stages[1].Agents[0].Type; got != "codex" {
+		t.Fatalf("stage[1].Agents[0].Type = %q", got)
+	}
+	if got := m.Stages[2].Agents[0].Type; got != "claude" {
+		t.Fatalf("stage[2].Agents[0].Type = %q", got)
+	}
+
+	deps := m.Stages[2].DependsOn
+	if len(deps) != 2 {
+		t.Fatalf("want 2 rewritten deps, got %v", deps)
+	}
+	depSet := map[string]bool{deps[0]: true, deps[1]: true}
+	if !depSet["self-review-claude"] || !depSet["self-review-codex"] {
+		t.Fatalf("unexpected rewritten deps: %v", deps)
+	}
+}
+
 func TestParsePipeline_MissingFile(t *testing.T) {
 	_, err := ParsePipeline("/nonexistent/file.yaml")
 	if err == nil {
