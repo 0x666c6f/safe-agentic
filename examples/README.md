@@ -44,8 +44,9 @@ This:
 1. Runs five review categories: code, security, docs, tests, design/types
 2. Has both Claude and Codex review each category
 3. Publishes both model reports onto the same review branch per category
-4. Runs a Codex reconciliation pass that synthesizes findings, applies fixes, and opens a PR
+4. Runs a Codex reconciliation pass that synthesizes findings, applies fixes, and opens a PR whose description includes the reconciled report
 5. Cleans up the intermediate review branches after the PR is created
+6. Keeps `REVIEW-RECONCILED.md` as scratch only and does not commit it to the fix branch
 
 ## Standalone pipeline
 

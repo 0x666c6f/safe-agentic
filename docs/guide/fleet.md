@@ -118,3 +118,4 @@ The `examples/pipeline-double-review-reconcile.yaml` example shows a richer vers
 - category-specific review branches
 - both Claude and Codex contributing reports to the same branch per category
 - a final Codex reconciliation/fix/PR stage
+- the reconciled report goes into the PR description, not a committed `REVIEW-RECONCILED.md` file
