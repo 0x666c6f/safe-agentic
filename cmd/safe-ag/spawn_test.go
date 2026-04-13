@@ -1,9 +1,14 @@
 package main
 
 import (
-	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
 func TestResolveContainerName(t *testing.T) {
@@ -101,6 +106,47 @@ func TestAuthDestination(t *testing.T) {
 		if got != tt.want {
 			t.Fatalf("authDestination(%q) = %q, want %q", tt.agentType, got, tt.want)
 		}
+	}
+}
+
+func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
+	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
+
+	appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+		AgentType: "claude",
+	}, spawnResolved{
+		ContainerName: "agent-claude-test",
+	})
+
+	joined := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(joined, "--tmpfs /home/agent/.claude:rw,noexec,nosuid,size=8m,uid=1000,gid=1000") {
+		t.Fatalf("expected ephemeral auth tmpfs in docker command, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "src=agent-claude-test-auth,dst=/home/agent/.claude") {
+		t.Fatalf("did not expect named auth volume in docker command, got:\n%s", joined)
+	}
+}
+
+func TestAppendAWSConfig_UsesNosuidTmpfs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir aws dir: %v", err)
+	}
+	creds := []byte("[test]\naws_access_key_id = key\naws_secret_access_key = secret\n")
+	if err := os.WriteFile(filepath.Join(awsDir, "credentials"), creds, 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	cmd := docker.NewRunCmd("agent-shell-test", "safe-agentic:latest")
+	if err := appendAWSConfig(cmd, SpawnOpts{AWSProfile: "test"}); err != nil {
+		t.Fatalf("appendAWSConfig() error = %v", err)
+	}
+
+	joined := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(joined, "--tmpfs /home/agent/.aws:rw,noexec,nosuid,size=1m") {
+		t.Fatalf("expected nosuid aws tmpfs in docker command, got:\n%s", joined)
 	}
 }
 

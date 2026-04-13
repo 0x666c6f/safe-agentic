@@ -109,6 +109,30 @@ func TestParseFleet_EmptyAgents(t *testing.T) {
 	}
 }
 
+func TestParseFleet_ExplicitFalseOverridesDefaultTrue(t *testing.T) {
+	p := writeTemp(t, `
+defaults:
+  reuse_auth: true
+  ssh: true
+agents:
+  - name: worker-a
+    type: claude
+    repo: https://github.com/org/api.git
+    reuse_auth: false
+    ssh: false
+`)
+	m, err := ParseFleet(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Agents[0].ReuseAuth; got {
+		t.Fatalf("ReuseAuth = %v, want false", got)
+	}
+	if got := m.Agents[0].SSH; got {
+		t.Fatalf("SSH = %v, want false", got)
+	}
+}
+
 func TestParseFleet_MissingFile(t *testing.T) {
 	_, err := ParseFleet("/nonexistent/file.yaml")
 	if err == nil {

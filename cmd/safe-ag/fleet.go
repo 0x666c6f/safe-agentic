@@ -428,14 +428,13 @@ func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage)
 	}
 }
 
-// waitForContainers polls docker inspect until all containers exit.
+// waitForContainers polls docker inspect until all containers exit successfully.
 func waitForContainers(ctx context.Context, exec orb.Executor, names []string) error {
 	if len(names) == 0 {
 		return nil
 	}
 	fmt.Printf("Waiting for %d agent(s) to complete...\n", len(names))
 	done := make(map[string]bool)
-	var failed []string
 	for {
 		allDone := true
 		for _, name := range names {
@@ -448,27 +447,20 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 				continue
 			}
 			if state == "exited" || state == "dead" {
+				exitCode, err := containerExitCode(ctx, exec, name)
+				if err != nil {
+					return fmt.Errorf("inspect exit code for %s: %w", name, err)
+				}
+				if exitCode != 0 {
+					return fmt.Errorf("container %s exited with status %d", name, exitCode)
+				}
 				done[name] = true
-				exitCode, codeErr := containerExitCode(ctx, exec, name)
-				if codeErr != nil {
-					fmt.Printf("  ✓ %s exited\n", name)
-					allDone = false
-					continue
-				}
-				if exitCode == 0 {
-					fmt.Printf("  ✓ %s exited\n", name)
-				} else {
-					fmt.Printf("  ✗ %s exited (%d)\n", name, exitCode)
-					failed = append(failed, fmt.Sprintf("%s (%d)", name, exitCode))
-				}
+				fmt.Printf("  ✓ %s exited\n", name)
 			} else {
 				allDone = false
 			}
 		}
 		if allDone {
-			if len(failed) > 0 {
-				return fmt.Errorf("containers failed: %s", strings.Join(failed, ", "))
-			}
 			return nil
 		}
 		select {

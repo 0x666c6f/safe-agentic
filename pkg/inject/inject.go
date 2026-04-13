@@ -132,13 +132,13 @@ func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 
 	for _, name := range []string{"CLAUDE.md", "statusline-command.sh"} {
 		p := filepath.Join(configDir, name)
-		if _, err := os.Stat(p); err == nil {
+		if info, err := os.Lstat(p); err == nil && info.Mode().IsRegular() {
 			entries = append(entries, entry{name, false})
 		}
 	}
 	for _, name := range []string{"hooks", "commands"} {
 		p := filepath.Join(configDir, name)
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
+		if info, err := os.Lstat(p); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			entries = append(entries, entry{name, true})
 		}
 	}
@@ -175,6 +175,16 @@ func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 }
 
 func tarFile(tw *tar.Writer, fullPath, name string) error {
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to include symlink %s", name)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to include non-regular file %s", name)
+	}
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return err
@@ -196,6 +206,9 @@ func tarDir(tw *tar.Writer, baseDir, dirName string) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
 		}
 		rel, _ := filepath.Rel(baseDir, path)
 		if info.IsDir() {
@@ -256,12 +269,12 @@ func ReadAWSCredentials(credPath, profile string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read AWS credentials: %w", err)
 	}
-	content := string(data)
-	if !strings.Contains(content, "["+profile+"]") {
+	content, err := extractAWSProfile(string(data), profile)
+	if err != nil {
 		return nil, fmt.Errorf("AWS profile %q not found in %s", profile, credPath)
 	}
 	envs := map[string]string{
-		"SAFE_AGENTIC_AWS_CREDS_B64": base64.StdEncoding.EncodeToString(data),
+		"SAFE_AGENTIC_AWS_CREDS_B64": base64.StdEncoding.EncodeToString([]byte(content)),
 		"AWS_PROFILE":                profile,
 	}
 	if r := os.Getenv("AWS_DEFAULT_REGION"); r != "" {
@@ -271,4 +284,29 @@ func ReadAWSCredentials(credPath, profile string) (map[string]string, error) {
 		envs["AWS_REGION"] = r
 	}
 	return envs, nil
+}
+
+func extractAWSProfile(content, profile string) (string, error) {
+	lines := strings.Split(content, "\n")
+	var current string
+	var builder strings.Builder
+	found := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			current = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+		}
+		if current != profile {
+			continue
+		}
+		builder.WriteString(line)
+		builder.WriteString("\n")
+		found = true
+	}
+
+	if !found {
+		return "", fmt.Errorf("profile not found")
+	}
+	return builder.String(), nil
 }

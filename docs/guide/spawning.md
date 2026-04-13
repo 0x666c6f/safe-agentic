@@ -77,8 +77,11 @@ Auth-related flags:
 | Flag | Effect |
 |---|---|
 | `--ssh` | forward your SSH agent into the container |
-| `--reuse-auth` | persist Claude/Codex auth |
+| `--reuse-auth` | opt into shared Claude/Codex auth |
 | `--reuse-gh-auth` | persist GitHub CLI auth |
+| `--allow-setup-scripts` | allow repo-provided `safe-agentic.json` setup hooks to run |
+
+By default, Claude/Codex auth stays in a per-container volume. Use `--reuse-auth` only when you intentionally want shared state across sessions.
 
 ## Prompt, instructions, template
 
@@ -144,7 +147,7 @@ Meaning:
 2. it creates or joins the Docker network
 3. it starts the container with the hardened runtime flags
 4. it clones repos into `/workspace`
-5. it runs `safe-agentic.json` setup hooks if present
+5. if `--allow-setup-scripts` is set, it runs `safe-agentic.json` setup hooks
 6. it launches the agent inside tmux
 7. it attaches unless you used `--background`
 

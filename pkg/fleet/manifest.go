@@ -36,6 +36,85 @@ type AgentSpec struct {
 	Retry     int    `yaml:"retry"`
 	When      string `yaml:"when"`
 	Outputs   string `yaml:"outputs"`
+
+	hasSSH         bool `yaml:"-"`
+	hasReuseAuth   bool `yaml:"-"`
+	hasReuseGHAuth bool `yaml:"-"`
+	hasAutoTrust   bool `yaml:"-"`
+	hasBackground  bool `yaml:"-"`
+	hasDocker      bool `yaml:"-"`
+}
+
+type rawAgentSpec struct {
+	Name        string   `yaml:"name"`
+	Type        string   `yaml:"type"`
+	Repo        string   `yaml:"repo"`
+	Repos       []string `yaml:"repos"`
+	Prompt      string   `yaml:"prompt"`
+	SSH         *bool    `yaml:"ssh"`
+	ReuseAuth   *bool    `yaml:"reuse_auth"`
+	ReuseGHAuth *bool    `yaml:"reuse_gh_auth"`
+	AutoTrust   *bool    `yaml:"auto_trust"`
+	Background  *bool    `yaml:"background"`
+	Docker      *bool    `yaml:"docker"`
+	Network     string   `yaml:"network"`
+	Memory      string   `yaml:"memory"`
+	CPUs        string   `yaml:"cpus"`
+	AWS         string   `yaml:"aws"`
+	DependsOn   string   `yaml:"depends_on"`
+	OnFailure   string   `yaml:"on_failure"`
+	Retry       int      `yaml:"retry"`
+	When        string   `yaml:"when"`
+	Outputs     string   `yaml:"outputs"`
+}
+
+func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
+	var raw rawAgentSpec
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*a = AgentSpec{
+		Name:      raw.Name,
+		Type:      raw.Type,
+		Repo:      raw.Repo,
+		Repos:     raw.Repos,
+		Prompt:    raw.Prompt,
+		Network:   raw.Network,
+		Memory:    raw.Memory,
+		CPUs:      raw.CPUs,
+		AWS:       raw.AWS,
+		DependsOn: raw.DependsOn,
+		OnFailure: raw.OnFailure,
+		Retry:     raw.Retry,
+		When:      raw.When,
+		Outputs:   raw.Outputs,
+	}
+	if raw.SSH != nil {
+		a.SSH = *raw.SSH
+		a.hasSSH = true
+	}
+	if raw.ReuseAuth != nil {
+		a.ReuseAuth = *raw.ReuseAuth
+		a.hasReuseAuth = true
+	}
+	if raw.ReuseGHAuth != nil {
+		a.ReuseGHAuth = *raw.ReuseGHAuth
+		a.hasReuseGHAuth = true
+	}
+	if raw.AutoTrust != nil {
+		a.AutoTrust = *raw.AutoTrust
+		a.hasAutoTrust = true
+	}
+	if raw.Background != nil {
+		a.Background = *raw.Background
+		a.hasBackground = true
+	}
+	if raw.Docker != nil {
+		a.Docker = *raw.Docker
+		a.hasDocker = true
+	}
+	return nil
 }
 
 // FleetManifest is the top-level structure for `agent fleet <manifest.yaml>`.
@@ -124,17 +203,23 @@ func ParsePipeline(path string) (*PipelineManifest, error) {
 func mergeDefaults(defaults, agent AgentSpec) AgentSpec {
 	agent.Repo = mergeStringDefault(agent.Repo, defaults.Repo)
 	agent.Repos = mergeSliceDefault(agent.Repos, defaults.Repos)
-	agent.SSH = mergeBoolDefault(agent.SSH, defaults.SSH)
-	agent.ReuseAuth = mergeBoolDefault(agent.ReuseAuth, defaults.ReuseAuth)
-	agent.ReuseGHAuth = mergeBoolDefault(agent.ReuseGHAuth, defaults.ReuseGHAuth)
-	agent.AutoTrust = mergeBoolDefault(agent.AutoTrust, defaults.AutoTrust)
-	agent.Background = mergeBoolDefault(agent.Background, defaults.Background)
-	agent.Docker = mergeBoolDefault(agent.Docker, defaults.Docker)
+	agent.SSH = mergeBoolDefault(agent.SSH, agent.hasSSH, defaults.SSH)
+	agent.ReuseAuth = mergeBoolDefault(agent.ReuseAuth, agent.hasReuseAuth, defaults.ReuseAuth)
+	agent.ReuseGHAuth = mergeBoolDefault(agent.ReuseGHAuth, agent.hasReuseGHAuth, defaults.ReuseGHAuth)
+	agent.AutoTrust = mergeBoolDefault(agent.AutoTrust, agent.hasAutoTrust, defaults.AutoTrust)
+	agent.Background = mergeBoolDefault(agent.Background, agent.hasBackground, defaults.Background)
+	agent.Docker = mergeBoolDefault(agent.Docker, agent.hasDocker, defaults.Docker)
 	agent.Network = mergeStringDefault(agent.Network, defaults.Network)
 	agent.Memory = mergeStringDefault(agent.Memory, defaults.Memory)
 	agent.CPUs = mergeStringDefault(agent.CPUs, defaults.CPUs)
 	agent.AWS = mergeStringDefault(agent.AWS, defaults.AWS)
 	agent.Type = mergeStringDefault(agent.Type, defaults.Type)
+	agent.hasSSH = agent.hasSSH || defaults.hasSSH
+	agent.hasReuseAuth = agent.hasReuseAuth || defaults.hasReuseAuth
+	agent.hasReuseGHAuth = agent.hasReuseGHAuth || defaults.hasReuseGHAuth
+	agent.hasAutoTrust = agent.hasAutoTrust || defaults.hasAutoTrust
+	agent.hasBackground = agent.hasBackground || defaults.hasBackground
+	agent.hasDocker = agent.hasDocker || defaults.hasDocker
 	return agent
 }
 
@@ -269,8 +354,11 @@ func mergeSliceDefault(value, fallback []string) []string {
 	return fallback
 }
 
-func mergeBoolDefault(value, fallback bool) bool {
-	return value || fallback
+func mergeBoolDefault(value, valueSet, fallback bool) bool {
+	if valueSet {
+		return value
+	}
+	return fallback
 }
 
 // interpolateVars replaces ${key} in a string with values from vars map.

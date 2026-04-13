@@ -443,7 +443,14 @@ func applyReconstructedDockerMode(opts *SpawnOpts, dockerMode string) {
 
 func applyReconstructedEnvs(opts *SpawnOpts, getEnv func(string) string) {
 	if reposEnv := getEnv("REPOS"); reposEnv != "" {
-		opts.Repos = strings.Fields(reposEnv)
+		parts := strings.Split(reposEnv, ",")
+		opts.Repos = opts.Repos[:0]
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				opts.Repos = append(opts.Repos, part)
+			}
+		}
 	}
 	opts.Prompt = decodeB64Value(getEnv("SAFE_AGENTIC_PROMPT_B64"))
 	opts.Instructions = decodeB64Value(getEnv("SAFE_AGENTIC_INSTRUCTIONS_B64"))

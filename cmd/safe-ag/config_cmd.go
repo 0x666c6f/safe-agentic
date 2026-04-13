@@ -13,6 +13,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
+	"github.com/0x666c6f/safe-agentic/pkg/validate"
 
 	"github.com/spf13/cobra"
 )
@@ -437,6 +438,10 @@ func runTemplateShow(cmd *cobra.Command, args []string) error {
 
 // findTemplate searches user then built-in dirs for a template by name.
 func findTemplate(name string) (string, error) {
+	if err := validate.NameComponent(name, "template name"); err != nil {
+		return "", err
+	}
+
 	candidates := []string{}
 
 	// User dir takes precedence.
@@ -603,31 +608,26 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read AWS credentials: %w", err)
 	}
-
-	credsContent := string(mustReadFile(credPath))
-
-	// Use the orb executor to pipe the credentials in safely.
-	_, execErr := orbRunner.Run(ctx,
-		"docker", "exec", name,
-		"bash", "-c",
-		"mkdir -p ~/.aws && cat > ~/.aws/credentials <<'__CREDS__'\n"+credsContent+"\n__CREDS__",
+	credsContent, err := inject.DecodeB64(envs["SAFE_AGENTIC_AWS_CREDS_B64"])
+	if err != nil {
+		return fmt.Errorf("decode AWS credentials: %w", err)
+	}
+	writeCmd := fmt.Sprintf(
+		"umask 177; mkdir -p /home/agent/.aws && printf %%s %s | base64 -d > /home/agent/.aws/credentials",
+		shellQuote(inject.EncodeB64(credsContent)),
 	)
-	if execErr != nil {
-		return fmt.Errorf("write credentials to container: %w", execErr)
+	if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", writeCmd); err != nil {
+		return fmt.Errorf("write container credentials: %w", err)
 	}
 
 	// Set the profile env var via docker exec.
 	if p, ok := envs["AWS_PROFILE"]; ok {
-		orbRunner.Run(ctx, "docker", "exec", name,
-			"bash", "-c", "echo 'export AWS_PROFILE="+p+"' >> ~/.bashrc")
+		exportCmd := fmt.Sprintf("printf '\\nexport AWS_PROFILE=%q\\n' %q >> ~/.bashrc", p, p)
+		if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", exportCmd); err != nil {
+			return fmt.Errorf("persist AWS profile: %w", err)
+		}
 	}
 
 	fmt.Printf("AWS credentials for profile %q refreshed in %s\n", profile, name)
 	return nil
-}
-
-// mustReadFile reads a file and returns its bytes, returning nil on error.
-func mustReadFile(path string) []byte {
-	data, _ := os.ReadFile(path)
-	return data
 }

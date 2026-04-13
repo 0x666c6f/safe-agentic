@@ -163,7 +163,7 @@ If you only need a public repo and a prompt, do not add flags you do not need.
 - [Quickstart](docs/quickstart.md): install, setup, first session
 - [Usage guide](docs/usage.md): command map by job
 - [Spawning](docs/guide/spawning.md): repo/auth/network/runtime options
-- [Managing](docs/guide/managing.md): attach, logs, copy, cleanup
+- [Managing](docs/guide/managing.md): attach, logs, sessions, cleanup
 - [Workflow](docs/guide/workflow.md): diff, retry, review, PRs
 - [Fleet and pipelines](docs/guide/fleet.md): manifests and orchestration
 - [Configuration](docs/guide/configuration.md): defaults, templates, VM/image maintenance

@@ -151,15 +151,13 @@ inject_security_preamble() {
 
   local resources="${SAFE_AGENTIC_RESOURCES:-memory=8g,cpus=4,pids=512}"
 
-  # Substitute placeholders
   local preamble
-  preamble=$(sed \
-    -e "s|{{SSH_STATUS}}|$ssh_status|g" \
-    -e "s|{{AWS_STATUS}}|$aws_status|g" \
-    -e "s|{{NETWORK_STATUS}}|$network_status|g" \
-    -e "s|{{DOCKER_STATUS}}|$docker_status|g" \
-    -e "s|{{RESOURCES}}|$resources|g" \
-    "$template")
+  preamble=$(cat "$template")
+  preamble=${preamble//'{{SSH_STATUS}}'/$ssh_status}
+  preamble=${preamble//'{{AWS_STATUS}}'/$aws_status}
+  preamble=${preamble//'{{NETWORK_STATUS}}'/$network_status}
+  preamble=${preamble//'{{DOCKER_STATUS}}'/$docker_status}
+  preamble=${preamble//'{{RESOURCES}}'/$resources}
 
   # Inject into the appropriate user-level config file
   case "$agent_type" in
@@ -168,7 +166,7 @@ inject_security_preamble() {
       mkdir -p "$(dirname "$claude_md")" 2>/dev/null || return 0
       if [ -f "$claude_md" ]; then
         # Skip if already injected (e.g., reuse-auth volume from previous run)
-        grep -q "$marker" "$claude_md" 2>/dev/null && return 0
+        grep -Fq "$marker" "$claude_md" 2>/dev/null && return 0
         # Append to existing user CLAUDE.md
         printf '\n%s\n' "$preamble" >> "$claude_md" 2>/dev/null || true
       else
@@ -180,7 +178,7 @@ inject_security_preamble() {
       local agents_md="$codex_dir/AGENTS.md"
       mkdir -p "$codex_dir" 2>/dev/null || return 0
       if [ -f "$agents_md" ]; then
-        grep -q "$marker" "$agents_md" 2>/dev/null && return 0
+        grep -Fq "$marker" "$agents_md" 2>/dev/null && return 0
         printf '\n%s\n' "$preamble" >> "$agents_md" 2>/dev/null || true
       else
         printf '%s\n' "$preamble" > "$agents_md" 2>/dev/null || true
@@ -193,7 +191,7 @@ inject_security_preamble() {
       for target in "$claude_md" "$agents_md"; do
         mkdir -p "$(dirname "$target")" 2>/dev/null || continue
         if [ -f "$target" ]; then
-          grep -q "$marker" "$target" 2>/dev/null && continue
+          grep -Fq "$marker" "$target" 2>/dev/null && continue
           printf '\n%s\n' "$preamble" >> "$target" 2>/dev/null || true
         else
           printf '%s\n' "$preamble" > "$target" 2>/dev/null || true
@@ -289,7 +287,8 @@ if [ -n "${REPOS:-}" ]; then
   repos_normalized="${REPOS//,/ }"
   IFS=' ' read -ra REPO_LIST <<< "$repos_normalized"
   for repo_url in "${REPO_LIST[@]}"; do
-    repo_url=$(echo "$repo_url" | xargs)  # trim whitespace
+    repo_url="${repo_url#"${repo_url%%[![:space:]]*}"}"
+    repo_url="${repo_url%"${repo_url##*[![:space:]]}"}"
     clone_path=$(repo_clone_path "$repo_url") || {
       echo "[entrypoint] Refusing repo URL with unsafe clone path: $repo_url" >&2
       exit 1
@@ -321,13 +320,10 @@ run_lifecycle_script() {
   local script_name="$1"
   local config_file=""
 
+  [ "${SAFE_AGENTIC_ALLOW_SETUP_SCRIPTS:-}" = "1" ] || return 0
+
   # Find safe-agentic.json in any cloned repo
-  for dir in /workspace/*/; do
-    if [ -f "${dir}safe-agentic.json" ]; then
-      config_file="${dir}safe-agentic.json"
-      break
-    fi
-  done
+  config_file=$(find /workspace -mindepth 1 -maxdepth 3 -type f -name safe-agentic.json 2>/dev/null | sort | head -1 || true)
 
   [ -n "$config_file" ] || return 0
 
@@ -365,6 +361,20 @@ if [ -n "${SAFE_AGENTIC_INSTRUCTIONS_B64:-}" ]; then
     echo "[entrypoint] WARNING: /workspace not writable, cannot write AGENT-INSTRUCTIONS.md" >&2
   fi
 fi
+
+run_on_exit_callback() {
+  local on_exit_cmd=""
+  if [ -n "${SAFE_AGENTIC_ON_EXIT_B64:-}" ]; then
+    on_exit_cmd=$(printf '%s' "$SAFE_AGENTIC_ON_EXIT_B64" | base64 -d 2>/dev/null || true)
+  fi
+  if [ -n "$on_exit_cmd" ]; then
+    echo "[entrypoint] Running on-exit callback..."
+    bash -c "$on_exit_cmd" || {
+      echo "[entrypoint] WARNING: on-exit callback exited with status $?" >&2
+    }
+  fi
+}
+trap run_on_exit_callback EXIT
 
 # ---------------------------------------------------------------------------
 # Launch agent or interactive shell
@@ -466,16 +476,3 @@ case "$AGENT_TYPE" in
     fi
     ;;
 esac
-
-# ---------------------------------------------------------------------------
-# On-exit callback (runs after agent exits; not for interactive shell which exec'd)
-# ---------------------------------------------------------------------------
-if [ -n "${SAFE_AGENTIC_ON_EXIT_B64:-}" ]; then
-  on_exit_cmd=$(printf '%s' "$SAFE_AGENTIC_ON_EXIT_B64" | base64 -d 2>/dev/null || true)
-  if [ -n "$on_exit_cmd" ]; then
-    echo "[entrypoint] Running on-exit callback..."
-    bash -c "$on_exit_cmd" || {
-      echo "[entrypoint] WARNING: on-exit callback exited with status $?" >&2
-    }
-  fi
-fi

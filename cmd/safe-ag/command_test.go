@@ -17,6 +17,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
@@ -1120,6 +1121,52 @@ func TestAgentConfigDir(t *testing.T) {
 	}
 }
 
+func TestRunAWSRefresh_WritesCredentialsAsAgentUser(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir aws dir: %v", err)
+	}
+	creds := "[test-profile]\naws_access_key_id = test\naws_secret_access_key = secret\n"
+	if err := os.WriteFile(filepath.Join(awsDir, "credentials"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("write host credentials: %v", err)
+	}
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	output := captureOutput(func() {
+		if err := runAWSRefresh(awsRefreshCmd, []string{containerName, "test-profile"}); err != nil {
+			t.Fatalf("runAWSRefresh() error = %v", err)
+		}
+	})
+
+	writeCmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(writeCmds) == 0 {
+		t.Fatal("expected docker exec write command")
+	}
+	joined := strings.Join(writeCmds[0], " ")
+	if !strings.Contains(joined, "umask 177; mkdir -p /home/agent/.aws") {
+		t.Fatalf("expected in-container aws write command, got: %s", joined)
+	}
+	if !strings.Contains(joined, "base64 -d > /home/agent/.aws/credentials") {
+		t.Fatalf("expected base64 decode write, got: %s", joined)
+	}
+	if got := len(fake.CommandsMatching("docker cp")); got != 0 {
+		t.Fatalf("did not expect docker cp, got %d command(s)", got)
+	}
+	if got := len(fake.CommandsMatching("chmod 600 /home/agent/.aws/credentials")); got != 0 {
+		t.Fatalf("did not expect standalone chmod, got %d command(s)", got)
+	}
+	if !strings.Contains(output, `AWS credentials for profile "test-profile" refreshed in `+containerName) {
+		t.Fatalf("expected success output, got: %s", output)
+	}
+}
+
 // ─── quoteValue ───────────────────────────────────────────────────────────────
 
 func TestQuoteValue(t *testing.T) {
@@ -1853,30 +1900,6 @@ func TestTemplateShow_Existing(t *testing.T) {
 
 	if !strings.Contains(output, "Template content here") {
 		t.Errorf("expected template content in output, got: %s", output)
-	}
-}
-
-// ─── mustReadFile ─────────────────────────────────────────────────────────────
-
-func TestMustReadFile_Existing(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "mustread-*.txt")
-	if err != nil {
-		t.Fatalf("create temp: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.WriteString("hello world")
-	tmpFile.Close()
-
-	data := mustReadFile(tmpFile.Name())
-	if string(data) != "hello world" {
-		t.Errorf("mustReadFile() = %q, want %q", string(data), "hello world")
-	}
-}
-
-func TestMustReadFile_NotExisting(t *testing.T) {
-	data := mustReadFile("/nonexistent/path/file.txt")
-	if data != nil {
-		t.Errorf("mustReadFile() for missing file should return nil, got %v", data)
 	}
 }
 
@@ -2777,6 +2800,16 @@ func TestSpawnWithTemplate(t *testing.T) {
 	_, cleanup := testSetup(t)
 	defer cleanup()
 
+	xdgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	templateDir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("mkdir template dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "security-audit.md"), []byte("Audit this repository."), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
 	opts := SpawnOpts{
 		AgentType: "claude",
 		Repos:     []string{"https://github.com/org/repo.git"},
@@ -2791,6 +2824,38 @@ func TestSpawnWithTemplate(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestExecuteSpawn_DefaultsToEphemeralAuth(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType: "claude",
+			DryRun:    true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "safe-agentic.auth=ephemeral") {
+		t.Fatalf("expected ephemeral auth in dry-run output, got: %s", output)
+	}
+	if strings.Contains(output, "safe-agentic.auth=shared") {
+		t.Fatalf("did not expect shared auth in dry-run output, got: %s", output)
+	}
+}
+
+func TestValidateSpawnOpts_RejectsConflictingAuthModes(t *testing.T) {
+	err := validateSpawnOpts(SpawnOpts{
+		AgentType:     "claude",
+		ReuseAuth:     true,
+		EphemeralAuth: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive auth error, got %v", err)
 	}
 }
 
@@ -2836,6 +2901,38 @@ func TestSpawnWithInstructionsFile(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestSpawnWithInstructionsAndInstructionsFile(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	f := filepath.Join(t.TempDir(), "instructions.md")
+	if err := os.WriteFile(f, []byte("File instructions"), 0o644); err != nil {
+		t.Fatalf("write instructions file: %v", err)
+	}
+
+	opts := SpawnOpts{
+		AgentType:        "claude",
+		Repos:            []string{"https://github.com/org/repo.git"},
+		Instructions:     "Inline instructions",
+		InstructionsFile: f,
+		DryRun:           true,
+	}
+	output := captureOutput(func() {
+		err := executeSpawn(opts)
+		if err != nil {
+			t.Fatalf("executeSpawn with instructions + file error = %v", err)
+		}
+	})
+
+	want := inject.EncodeB64("Inline instructions\n\nFile instructions")
+	if !strings.Contains(output, "SAFE_AGENTIC_INSTRUCTIONS_B64="+want) {
+		t.Fatalf("expected merged instructions env in dry-run output, got: %s", output)
+	}
+	if strings.Count(output, "SAFE_AGENTIC_INSTRUCTIONS_B64=") != 1 {
+		t.Fatalf("expected one instructions env entry, got: %s", output)
 	}
 }
 

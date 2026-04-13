@@ -57,14 +57,7 @@ Difference:
 - `cleanup`: remove containers, managed networks, and transient runtime state
 - `cleanup --auth`: also remove shared auth volumes
 
-## Copy files and export sessions
-
-Copy files out of a container:
-
-```bash
-safe-ag cp api-refactor /workspace/tmp/report.txt ./report.txt
-safe-ag cp --latest /workspace/dist ./dist
-```
+## Export sessions
 
 Export session history:
 

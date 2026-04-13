@@ -11,7 +11,10 @@ import (
 )
 
 const sshSocketPath = "/run/ssh-agent.sock"
-const sshRelaySocket = "/tmp/safe-agentic-ssh-agent.sock"
+const sshRelayDir = "/tmp/safe-agentic-ssh-relay"
+const sshRelaySocket = sshRelayDir + "/agent.sock"
+const sshRelayLock = sshRelayDir + "/relay.lock"
+const sshRelayPIDFile = sshRelayDir + "/relay.pid"
 
 var vmSocketPathPattern = regexp.MustCompile(`^/[\w./-]+$`)
 
@@ -33,27 +36,36 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 		return fmt.Errorf("SSH_AUTH_SOCK has unsafe value %q", vmSocket)
 	}
 
-	// Set up socat relay for userns-remap compatibility.
-	// Only start if not already running — multiple spawns share the same relay.
+	// Set up a locked relay for userns-remap compatibility.
+	// The socket stays in a private 0700 directory to avoid exposing a global
+	// world-traversable relay path inside the VM.
 	_, relayExists := exec.Run(ctx, "test", "-S", sshRelaySocket)
 	if relayExists != nil {
-		relayScript := fmt.Sprintf(
-			"#!/bin/bash\nexec socat UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s\n",
-			sshRelaySocket, vmSocket)
-
+		lockedScript := fmt.Sprintf(
+			"if [ -S %s ]; then exit 0; fi; rm -f %s %s; "+
+				"start-stop-daemon --start --background --make-pidfile --pidfile %s "+
+				"--exec \"$(command -v socat)\" -- "+
+				"UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s",
+			shellQuote(sshRelaySocket),
+			shellQuote(sshRelaySocket),
+			shellQuote(sshRelayPIDFile),
+			shellQuote(sshRelayPIDFile),
+			shellQuote(sshRelaySocket),
+			shellQuote(vmSocket),
+		)
 		setupCmd := fmt.Sprintf(
-			"pkill -f 'socat.*safe-agentic-ssh-agent' 2>/dev/null || true; "+
-				"sudo rm -rf %s; "+
-				"printf '%%s' '%s' > /tmp/safe-agentic-ssh-relay.sh; "+
-				"chmod +x /tmp/safe-agentic-ssh-relay.sh",
-			sshRelaySocket, relayScript)
+			"set -e; install -d -m 700 %s; flock %s bash -lc %s",
+			shellQuote(sshRelayDir),
+			shellQuote(sshRelayLock),
+			shellQuote(lockedScript),
+		)
 
-		exec.Run(ctx, "bash", "-c", setupCmd)
-		exec.Run(ctx, "bash", "-lc",
-			"nohup /tmp/safe-agentic-ssh-relay.sh >/tmp/safe-agentic-ssh-relay.log 2>&1 &")
+		if _, err := exec.Run(ctx, "bash", "-lc", setupCmd); err != nil {
+			return fmt.Errorf("start SSH relay: %w", err)
+		}
 	}
 
-	// Wait for relay socket to appear (up to 2s)
+	// Wait for relay socket to appear.
 	relayOK := false
 	for i := 0; i < 10; i++ {
 		_, err := exec.Run(ctx, "test", "-S", sshRelaySocket)
@@ -78,6 +90,10 @@ func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) e
 func AppendSSHMountDryRun(cmd *DockerRunCmd) {
 	cmd.AddEnv("SSH_AUTH_SOCK", sshSocketPath)
 	cmd.AddFlag("-v", "<SSH_SOCKET>:"+sshSocketPath)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func EnsureSSHForRepos(sshEnabled bool, repos []string) error {

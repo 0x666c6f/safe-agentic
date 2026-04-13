@@ -1,7 +1,11 @@
 package inject
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,8 +246,9 @@ func TestReadAWSCredentialsProfileFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode AWS creds b64: %v", err)
 	}
-	if string(decoded) != content {
-		t.Errorf("decoded AWS creds = %q, want %q", string(decoded), content)
+	expected := "[my-profile]\naws_access_key_id = AKIAI44QH8DHBEXAMPLE\naws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY\n\n"
+	if string(decoded) != expected {
+		t.Errorf("decoded AWS creds = %q, want %q", string(decoded), expected)
 	}
 }
 
@@ -289,4 +294,71 @@ func TestReadAWSCredentialsPropagatesRegionEnv(t *testing.T) {
 	if envs["AWS_REGION"] != "eu-central-1" {
 		t.Errorf("AWS_REGION = %q, want %q", envs["AWS_REGION"], "eu-central-1")
 	}
+}
+
+func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("host instructions"), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "pre-commit.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(dir, "hooks", "leak")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	envs, err := ReadClaudeSupportFiles(dir)
+	if err != nil {
+		t.Fatalf("ReadClaudeSupportFiles error: %v", err)
+	}
+	archiveB64 := envs["SAFE_AGENTIC_CLAUDE_SUPPORT_B64"]
+	if archiveB64 == "" {
+		t.Fatal("expected SAFE_AGENTIC_CLAUDE_SUPPORT_B64")
+	}
+
+	archiveBytes, err := base64.StdEncoding.DecodeString(archiveB64)
+	if err != nil {
+		t.Fatalf("decode archive: %v", err)
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+
+	var names []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read tar entry: %v", err)
+		}
+		names = append(names, hdr.Name)
+	}
+
+	if !contains(names, "CLAUDE.md") {
+		t.Fatalf("expected CLAUDE.md in archive, got %v", names)
+	}
+	if !contains(names, "hooks/pre-commit.sh") {
+		t.Fatalf("expected hook file in archive, got %v", names)
+	}
+	if contains(names, "hooks/leak") {
+		t.Fatalf("did not expect symlink target in archive, got %v", names)
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
