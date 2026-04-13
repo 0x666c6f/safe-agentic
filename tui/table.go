@@ -308,7 +308,6 @@ func (at *AgentTable) rebuildAllAgents() {
 }
 
 func (at *AgentTable) refresh() {
-	// Save current selection by name
 	if sel := at.SelectedAgent(); sel != nil {
 		at.selectedName = sel.Name
 	}
@@ -317,38 +316,9 @@ func (at *AgentTable) refresh() {
 	SortAgents(at.agents, at.sortCol, at.sortAsc)
 
 	at.table.Clear()
-
-	_, _, width, _ := at.table.GetInnerRect()
-	if width == 0 {
-		width = 160 // default before first draw
-	}
-	visibleCols := VisibleColumns(width)
-
-	// Header row
-	for ci, colIdx := range visibleCols {
-		title := columns[colIdx].Title
-		if colIdx == at.sortCol {
-			arrow := "▲"
-			if !at.sortAsc {
-				arrow = "▼"
-			}
-			title = title + arrow
-		}
-		cell := tview.NewTableCell(title).
-			SetTextColor(colorHeader).
-			SetAttributes(tcell.AttrBold).
-			SetSelectable(false).
-			SetExpansion(1)
-		at.table.SetCell(0, ci, cell)
-	}
-
-	// Empty state
-	if len(at.agents) == 0 {
-		cell := tview.NewTableCell("  No agents found. Press 'n' to spawn one.").
-			SetTextColor(colorStopped).
-			SetSelectable(false).
-			SetExpansion(1)
-		at.table.SetCell(1, 0, cell)
+	visibleCols := at.visibleColumns()
+	at.renderHeaderRow(visibleCols)
+	if at.renderEmptyState() {
 		return
 	}
 
@@ -356,80 +326,151 @@ func (at *AgentTable) refresh() {
 	at.rowToAgent = make(map[int]int)
 	for _, displayRow := range buildTableRows(at.agents) {
 		if displayRow.isGroup {
-			cell := tview.NewTableCell(displayRow.prefix + "🔄 " + displayRow.groupName).
-				SetTextColor(tcell.ColorGreen).
-				SetAttributes(tcell.AttrBold).
-				SetSelectable(false).
-				SetExpansion(1)
-			at.table.SetCell(row, 0, cell)
-			for ci := 1; ci < len(visibleCols); ci++ {
-				at.table.SetCell(row, ci, tview.NewTableCell("").SetSelectable(false))
-			}
+			at.renderGroupRow(row, visibleCols, displayRow)
 			row++
 			continue
 		}
-
-		agentIdx := displayRow.agentIndex
-		agent := at.agents[agentIdx]
-		for ci, colIdx := range visibleCols {
-			value := fieldByColumn(agent, colIdx)
-
-			// Add tree connector + type icon to name column.
-			if colIdx == 0 {
-				typeIcon := ""
-				switch agent.Type {
-				case "claude":
-					typeIcon = "🟠 "
-				case "codex":
-					typeIcon = "🔵 "
-				}
-				value = displayRow.prefix + typeIcon + value
-			}
-
-			cell := tview.NewTableCell(padRight(value, columns[colIdx].Width)).
-				SetExpansion(1)
-
-			// Color status column
-			if colIdx == 8 {
-				if agent.Deleting {
-					cell.SetTextColor(colorDeleting)
-				} else if agent.Running {
-					cell.SetTextColor(colorRunning)
-				} else {
-					cell.SetTextColor(colorExited)
-				}
-			}
-			// Color activity column
-			if colIdx == 9 {
-				switch {
-				case agent.Deleting:
-					cell.SetTextColor(colorDeleting)
-				case agent.Activity == "Working":
-					cell.SetTextColor(colorRunning)
-				case agent.Activity == "Idle":
-					cell.SetTextColor(colorStopped)
-				case agent.Activity == "Stopped":
-					cell.SetTextColor(colorExited)
-				}
-			}
-			// Color type column.
-			if colIdx == 1 {
-				switch agent.Type {
-				case "claude":
-					cell.SetTextColor(tcell.ColorOrange)
-				case "codex":
-					cell.SetTextColor(tcell.ColorDodgerBlue)
-				}
-			}
-
-			at.table.SetCell(row, ci, cell)
-		}
-		at.rowToAgent[row] = agentIdx
+		at.renderAgentRow(row, visibleCols, displayRow)
 		row++
 	}
-
-	// Restore selection by name
 	at.restoreSelection()
+}
+
+func (at *AgentTable) visibleColumns() []int {
+	_, _, width, _ := at.table.GetInnerRect()
+	if width == 0 {
+		width = 160
+	}
+	return VisibleColumns(width)
+}
+
+func (at *AgentTable) renderHeaderRow(visibleCols []int) {
+	for ci, colIdx := range visibleCols {
+		at.table.SetCell(0, ci, headerCell(at.headerTitle(colIdx)))
+	}
+}
+
+func (at *AgentTable) headerTitle(colIdx int) string {
+	title := columns[colIdx].Title
+	if colIdx != at.sortCol {
+		return title
+	}
+	if at.sortAsc {
+		return title + "▲"
+	}
+	return title + "▼"
+}
+
+func headerCell(title string) *tview.TableCell {
+	return tview.NewTableCell(title).
+		SetTextColor(colorHeader).
+		SetAttributes(tcell.AttrBold).
+		SetSelectable(false).
+		SetExpansion(1)
+}
+
+func (at *AgentTable) renderEmptyState() bool {
+	if len(at.agents) > 0 {
+		return false
+	}
+	cell := tview.NewTableCell("  No agents found. Press 'n' to spawn one.").
+		SetTextColor(colorStopped).
+		SetSelectable(false).
+		SetExpansion(1)
+	at.table.SetCell(1, 0, cell)
+	return true
+}
+
+func (at *AgentTable) renderGroupRow(row int, visibleCols []int, displayRow tableRow) {
+	cell := tview.NewTableCell(displayRow.prefix + "🔄 " + displayRow.groupName).
+		SetTextColor(tcell.ColorGreen).
+		SetAttributes(tcell.AttrBold).
+		SetSelectable(false).
+		SetExpansion(1)
+	at.table.SetCell(row, 0, cell)
+	for ci := 1; ci < len(visibleCols); ci++ {
+		at.table.SetCell(row, ci, tview.NewTableCell("").SetSelectable(false))
+	}
+}
+
+func (at *AgentTable) renderAgentRow(row int, visibleCols []int, displayRow tableRow) {
+	agentIdx := displayRow.agentIndex
+	agent := at.agents[agentIdx]
+	for ci, colIdx := range visibleCols {
+		at.table.SetCell(row, ci, at.renderAgentCell(agent, colIdx, displayRow.prefix))
+	}
+	at.rowToAgent[row] = agentIdx
+}
+
+func (at *AgentTable) renderAgentCell(agent Agent, colIdx int, prefix string) *tview.TableCell {
+	value := agentCellValue(agent, colIdx, prefix)
+	cell := tview.NewTableCell(padRight(value, columns[colIdx].Width)).SetExpansion(1)
+	colorAgentCell(cell, agent, colIdx)
+	return cell
+}
+
+func agentCellValue(agent Agent, colIdx int, prefix string) string {
+	value := fieldByColumn(agent, colIdx)
+	if colIdx != 0 {
+		return value
+	}
+	return prefix + typeIcon(agent.Type) + value
+}
+
+func typeIcon(agentType string) string {
+	switch agentType {
+	case "claude":
+		return "🟠 "
+	case "codex":
+		return "🔵 "
+	default:
+		return ""
+	}
+}
+
+func colorAgentCell(cell *tview.TableCell, agent Agent, colIdx int) {
+	switch colIdx {
+	case 1:
+		colorTypeCell(cell, agent.Type)
+	case 8:
+		cell.SetTextColor(statusColor(agent))
+	case 9:
+		cell.SetTextColor(activityColor(agent))
+	}
+}
+
+func colorTypeCell(cell *tview.TableCell, agentType string) {
+	switch agentType {
+	case "claude":
+		cell.SetTextColor(tcell.ColorOrange)
+	case "codex":
+		cell.SetTextColor(tcell.ColorDodgerBlue)
+	}
+}
+
+func statusColor(agent Agent) tcell.Color {
+	if agent.Deleting {
+		return colorDeleting
+	}
+	if agent.Running {
+		return colorRunning
+	}
+	return colorExited
+}
+
+func activityColor(agent Agent) tcell.Color {
+	switch {
+	case agent.Deleting:
+		return colorDeleting
+	case agent.Activity == "Working":
+		return colorRunning
+	case agent.Activity == "Idle":
+		return colorStopped
+	case agent.Activity == "Stopped":
+		return colorExited
+	default:
+		return tcell.ColorDefault
+	}
 }
 
 func cloneAgents(agents []Agent) []Agent {
@@ -444,7 +485,7 @@ func cloneAgents(agents []Agent) []Agent {
 func (at *AgentTable) restoreSelection() {
 	if at.selectedName == "" {
 		// Select first data row
-		for row, _ := range at.rowToAgent {
+		for row := range at.rowToAgent {
 			at.table.Select(row, 0)
 			return
 		}
@@ -457,7 +498,7 @@ func (at *AgentTable) restoreSelection() {
 		}
 	}
 	// Name not found — select first data row
-	for row, _ := range at.rowToAgent {
+	for row := range at.rowToAgent {
 		at.table.Select(row, 0)
 		return
 	}

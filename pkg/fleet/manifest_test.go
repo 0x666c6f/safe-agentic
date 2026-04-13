@@ -229,6 +229,45 @@ steps:
 	}
 }
 
+func TestParsePipeline_ModelExpansionRewritesDependencies(t *testing.T) {
+	p := writeTemp(t, `
+stages:
+  - name: review
+    models: [claude, codex]
+    agents:
+      - name: checker
+        prompt: Review with ${model}
+  - name: followup
+    depends_on:
+      - review
+    agents:
+      - name: fixer
+        type: claude
+        prompt: Fix it
+`)
+	m, err := ParsePipeline(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages after model expansion, got %d", len(m.Stages))
+	}
+	if m.Stages[0].Name != "review-claude" || m.Stages[1].Name != "review-codex" {
+		t.Fatalf("unexpected expanded stage names: %q, %q", m.Stages[0].Name, m.Stages[1].Name)
+	}
+	if got := m.Stages[0].Agents[0].Prompt; got != "Review with claude" {
+		t.Fatalf("expanded prompt = %q", got)
+	}
+	deps := m.Stages[2].DependsOn
+	if len(deps) != 2 {
+		t.Fatalf("want 2 rewritten deps, got %v", deps)
+	}
+	depSet := map[string]bool{deps[0]: true, deps[1]: true}
+	if !depSet["review-claude"] || !depSet["review-codex"] {
+		t.Fatalf("unexpected rewritten deps: %v", deps)
+	}
+}
+
 func TestParsePipeline_MissingFile(t *testing.T) {
 	_, err := ParsePipeline("/nonexistent/file.yaml")
 	if err == nil {

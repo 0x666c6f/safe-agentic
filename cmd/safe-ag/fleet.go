@@ -45,86 +45,20 @@ func runFleet(cmd *cobra.Command, args []string) error {
 	fleetVolume := "fleet-" + timestamp
 
 	if fleetDryRun {
-		fmt.Printf("Fleet manifest: %s\n", args[0])
-		if m.Name != "" {
-			fmt.Printf("Fleet name: %s\n", m.Name)
-		}
-		fmt.Printf("Agents: %d\n\n", len(m.Agents))
-		for _, spec := range m.Agents {
-			if spec.Type == "" {
-				fmt.Printf("  [skip] %q — missing type\n", spec.Name)
-				continue
-			}
-			opts := specToSpawnOpts(spec, "fleet-dry-run")
-			fmt.Printf("  Would spawn: safe-ag spawn %s", opts.AgentType)
-			if opts.Name != "" {
-				fmt.Printf(" --name %s", opts.Name)
-			}
-			for _, r := range opts.Repos {
-				fmt.Printf(" --repo %s", r)
-			}
-			if opts.SSH {
-				fmt.Print(" --ssh")
-			}
-			if opts.ReuseAuth {
-				fmt.Print(" --reuse-auth")
-			}
-			if opts.ReuseGHAuth {
-				fmt.Print(" --reuse-gh-auth")
-			}
-			if opts.AutoTrust {
-				fmt.Print(" --auto-trust")
-			}
-			if opts.Background {
-				fmt.Print(" --background")
-			}
-			if opts.DockerAccess {
-				fmt.Print(" --docker")
-			}
-			if opts.Network != "" {
-				fmt.Printf(" --network %s", opts.Network)
-			}
-			if opts.Memory != "" {
-				fmt.Printf(" --memory %s", opts.Memory)
-			}
-			if opts.CPUs != "" {
-				fmt.Printf(" --cpus %s", opts.CPUs)
-			}
-			if opts.AWSProfile != "" {
-				fmt.Printf(" --aws %s", opts.AWSProfile)
-			}
-			if opts.Prompt != "" {
-				fmt.Printf(" --prompt %q", opts.Prompt)
-			}
-			fmt.Println()
-		}
+		printFleetDryRun(args[0], m)
 		return nil
 	}
 
 	ctx := context.Background()
 	exec := newExecutor()
 
-	// Create shared fleet volume
-	if _, err := exec.Run(ctx, "docker", "volume", "create",
-		"--label", "app=safe-agentic",
-		"--label", "safe-agentic.type=fleet",
-		fleetVolume,
-	); err != nil {
-		return fmt.Errorf("create fleet volume: %w", err)
+	if err := createFleetVolume(ctx, exec, fleetVolume); err != nil {
+		return err
 	}
 	fmt.Printf("Fleet volume: %s\n", fleetVolume)
-
-	var spawned int
-	for _, spec := range m.Agents {
-		if spec.Type == "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "[fleet] skipping entry %q — missing type\n", spec.Name)
-			continue
-		}
-		opts := specToSpawnOpts(spec, fleetVolume)
-		if err := executeSpawn(opts); err != nil {
-			return fmt.Errorf("spawn %q: %w", spec.Name, err)
-		}
-		spawned++
+	spawned, err := spawnFleetAgents(cmd, m.Agents, fleetVolume)
+	if err != nil {
+		return err
 	}
 	fmt.Printf("Fleet spawned %d agent(s).\n", spawned)
 	return nil
@@ -213,82 +147,23 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
 func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
-	name := m.Name
-	if name == "" {
-		name = "(inline)"
-	}
-	if rootLabel == "" {
-		rootLabel = name
-		if rootLabel == "(inline)" {
-			rootLabel = "pipeline-" + timestamp
-		}
-	}
-	currentPath := append(append([]string{}, parentPath...), name)
-
+	name, rootLabel, currentPath := pipelineContext(m, timestamp, rootLabel, parentPath)
 	completed := make(map[string]bool)
-	remaining := make([]fleet.PipelineStage, len(m.Stages))
-	copy(remaining, m.Stages)
+	remaining := append([]fleet.PipelineStage{}, m.Stages...)
 
 	for len(remaining) > 0 {
-		var ready []fleet.PipelineStage
-		var notReady []fleet.PipelineStage
-		for _, stage := range remaining {
-			if depsmet(stage.DependsOn, completed) {
-				ready = append(ready, stage)
-			} else {
-				notReady = append(notReady, stage)
-			}
+		ready, notReady, err := partitionReadyStages(remaining, completed)
+		if err != nil {
+			return err
 		}
-		if len(ready) == 0 {
-			var names []string
-			for _, s := range notReady {
-				names = append(names, s.Name)
-			}
-			return fmt.Errorf("pipeline stuck: stages with unmet dependencies: %s", strings.Join(names, ", "))
+		containerNames, err := runReadyStages(ctx, exec, ready, dryRun, timestamp, rootLabel, currentPath)
+		if err != nil {
+			return err
 		}
-
-		var containerNames []string
-		for _, stage := range ready {
-			fmt.Printf("Running stage: %s\n", stage.Name)
-
-			// Sub-pipeline: recursively execute another pipeline file
-			if stage.Pipeline != "" {
-				fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
-				subManifest, err := fleet.ParsePipeline(stage.Pipeline)
-				if err != nil {
-					return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
-				}
-				if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp, rootLabel, currentPath); err != nil {
-					return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
-				}
-				continue
-			}
-
-			for _, spec := range stage.Agents {
-				if spec.Type == "" {
-					continue
-				}
-				opts := specToSpawnOpts(spec, rootLabel)
-				opts.Hierarchy = strings.Join(currentPath, "/")
-				opts.Background = true
-				if err := executeSpawn(opts); err != nil {
-					return fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
-				}
-				containerNames = append(containerNames, resolveContainerName(
-					opts.AgentType, opts.Name,
-					time.Now().Format("20060102-150405"), opts.Repos))
-			}
+		if err := waitForContainers(ctx, exec, containerNames); err != nil {
+			return err
 		}
-
-		if len(containerNames) > 0 {
-			if err := waitForContainers(ctx, exec, containerNames); err != nil {
-				return err
-			}
-		}
-
-		for _, stage := range ready {
-			completed[stage.Name] = true
-		}
+		markStagesCompleted(completed, ready)
 		remaining = notReady
 	}
 
@@ -304,6 +179,192 @@ func depsmet(deps []string, completed map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+func printFleetDryRun(path string, m *fleet.FleetManifest) {
+	fmt.Printf("Fleet manifest: %s\n", path)
+	if m.Name != "" {
+		fmt.Printf("Fleet name: %s\n", m.Name)
+	}
+	fmt.Printf("Agents: %d\n\n", len(m.Agents))
+	for _, spec := range m.Agents {
+		printFleetDryRunSpec(spec)
+	}
+}
+
+func printFleetDryRunSpec(spec fleet.AgentSpec) {
+	if spec.Type == "" {
+		fmt.Printf("  [skip] %q — missing type\n", spec.Name)
+		return
+	}
+	opts := specToSpawnOpts(spec, "fleet-dry-run")
+	fmt.Printf("  Would spawn: safe-ag spawn %s", opts.AgentType)
+	appendFleetDryRunFlags(opts)
+	fmt.Println()
+}
+
+func appendFleetDryRunFlags(opts SpawnOpts) {
+	if opts.Name != "" {
+		fmt.Printf(" --name %s", opts.Name)
+	}
+	for _, r := range opts.Repos {
+		fmt.Printf(" --repo %s", r)
+	}
+	appendBoolFlag(opts.SSH, " --ssh")
+	appendBoolFlag(opts.ReuseAuth, " --reuse-auth")
+	appendBoolFlag(opts.ReuseGHAuth, " --reuse-gh-auth")
+	appendBoolFlag(opts.AutoTrust, " --auto-trust")
+	appendBoolFlag(opts.Background, " --background")
+	appendBoolFlag(opts.DockerAccess, " --docker")
+	appendStringFlag(opts.Network, " --network %s")
+	appendStringFlag(opts.Memory, " --memory %s")
+	appendStringFlag(opts.CPUs, " --cpus %s")
+	appendStringFlag(opts.AWSProfile, " --aws %s")
+	if opts.Prompt != "" {
+		fmt.Printf(" --prompt %q", opts.Prompt)
+	}
+}
+
+func appendBoolFlag(enabled bool, flag string) {
+	if enabled {
+		fmt.Print(flag)
+	}
+}
+
+func appendStringFlag(value, format string) {
+	if value != "" {
+		fmt.Printf(format, value)
+	}
+}
+
+func createFleetVolume(ctx context.Context, exec orb.Executor, fleetVolume string) error {
+	if _, err := exec.Run(ctx, "docker", "volume", "create",
+		"--label", "app=safe-agentic",
+		"--label", "safe-agentic.type=fleet",
+		fleetVolume,
+	); err != nil {
+		return fmt.Errorf("create fleet volume: %w", err)
+	}
+	return nil
+}
+
+func spawnFleetAgents(cmd *cobra.Command, agents []fleet.AgentSpec, fleetVolume string) (int, error) {
+	var spawned int
+	for _, spec := range agents {
+		if spec.Type == "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "[fleet] skipping entry %q — missing type\n", spec.Name)
+			continue
+		}
+		if err := executeSpawn(specToSpawnOpts(spec, fleetVolume)); err != nil {
+			return 0, fmt.Errorf("spawn %q: %w", spec.Name, err)
+		}
+		spawned++
+	}
+	return spawned, nil
+}
+
+func pipelineContext(m *fleet.PipelineManifest, timestamp, rootLabel string, parentPath []string) (string, string, []string) {
+	name := m.Name
+	if name == "" {
+		name = "(inline)"
+	}
+	if rootLabel == "" {
+		rootLabel = name
+		if rootLabel == "(inline)" {
+			rootLabel = "pipeline-" + timestamp
+		}
+	}
+	currentPath := append(append([]string{}, parentPath...), name)
+	return name, rootLabel, currentPath
+}
+
+func partitionReadyStages(remaining []fleet.PipelineStage, completed map[string]bool) ([]fleet.PipelineStage, []fleet.PipelineStage, error) {
+	var ready []fleet.PipelineStage
+	var notReady []fleet.PipelineStage
+	for _, stage := range remaining {
+		if depsmet(stage.DependsOn, completed) {
+			ready = append(ready, stage)
+		} else {
+			notReady = append(notReady, stage)
+		}
+	}
+	if len(ready) > 0 {
+		return ready, notReady, nil
+	}
+	return nil, nil, fmt.Errorf("pipeline stuck: stages with unmet dependencies: %s", strings.Join(stageNames(notReady), ", "))
+}
+
+func stageNames(stages []fleet.PipelineStage) []string {
+	names := make([]string, 0, len(stages))
+	for _, s := range stages {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+	var containerNames []string
+	for _, stage := range ready {
+		names, err := runPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+		if err != nil {
+			return nil, err
+		}
+		containerNames = append(containerNames, names...)
+	}
+	return containerNames, nil
+}
+
+func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+	fmt.Printf("Running stage: %s\n", stage.Name)
+	if stage.Pipeline != "" {
+		return nil, runSubPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+	}
+	return spawnPipelineStageAgents(stage, rootLabel, currentPath)
+}
+
+func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
+	fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
+	subManifest, err := fleet.ParsePipeline(stage.Pipeline)
+	if err != nil {
+		return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
+	}
+	if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp, rootLabel, currentPath); err != nil {
+		return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
+	}
+	return nil
+}
+
+func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, currentPath []string) ([]string, error) {
+	var containerNames []string
+	for _, spec := range stage.Agents {
+		name, err := spawnPipelineAgent(stage, spec, rootLabel, currentPath)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" {
+			containerNames = append(containerNames, name)
+		}
+	}
+	return containerNames, nil
+}
+
+func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLabel string, currentPath []string) (string, error) {
+	if spec.Type == "" {
+		return "", nil
+	}
+	opts := specToSpawnOpts(spec, rootLabel)
+	opts.Hierarchy = strings.Join(currentPath, "/")
+	opts.Background = true
+	if err := executeSpawn(opts); err != nil {
+		return "", fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
+	}
+	return resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos), nil
+}
+
+func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage) {
+	for _, stage := range ready {
+		completed[stage.Name] = true
+	}
 }
 
 // waitForContainers polls docker inspect until all containers exit.

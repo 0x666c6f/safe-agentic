@@ -64,17 +64,16 @@ func TestPreviewPaneUpdateToggleAndUnavailable(t *testing.T) {
 	}
 }
 
-func TestAgentTableLoadingSelectionSortAndFilter(t *testing.T) {
+func TestAgentTableLoadingState(t *testing.T) {
 	at := NewAgentTable()
-
 	at.ShowLoading()
 	if got := at.table.GetCell(0, 0).Text; !strings.Contains(got, "Connecting to VM") {
 		t.Fatalf("loading cell = %q", got)
 	}
+}
 
-	agents := testAgents()
-	at.Update(append([]Agent(nil), agents...))
-
+func TestAgentTableSelectionAndSorting(t *testing.T) {
+	at := newLoadedAgentTable()
 	if at.RunningCount() != 2 {
 		t.Fatalf("RunningCount() = %d, want 2", at.RunningCount())
 	}
@@ -87,7 +86,6 @@ func TestAgentTableLoadingSelectionSortAndFilter(t *testing.T) {
 	if sel := at.SelectedAgent(); sel == nil {
 		t.Fatalf("default selection = %#v", sel)
 	}
-
 	at.SetSort(0)
 	if got := at.table.GetCell(0, 0).Text; got != "NAME▼" {
 		t.Fatalf("desc header = %q, want %q", got, "NAME▼")
@@ -95,12 +93,14 @@ func TestAgentTableLoadingSelectionSortAndFilter(t *testing.T) {
 	if sel := at.SelectedAgent(); sel == nil {
 		t.Fatalf("desc selection = %#v", sel)
 	}
+}
 
+func TestAgentTableFilteringAndEmptyState(t *testing.T) {
+	at := newLoadedAgentTable()
 	at.table.Select(2, 0)
 	if sel := at.SelectedAgent(); sel == nil || sel.Name != "agent-beta" {
 		t.Fatalf("manual selection = %#v", sel)
 	}
-
 	at.SetFilter("private")
 	if len(at.agents) != 1 || at.agents[0].Name != "agent-beta" {
 		t.Fatalf("filtered agents = %#v", at.agents)
@@ -108,7 +108,6 @@ func TestAgentTableLoadingSelectionSortAndFilter(t *testing.T) {
 	if sel := at.SelectedAgent(); sel == nil || sel.Name != "agent-beta" {
 		t.Fatalf("filtered selection = %#v", sel)
 	}
-
 	at.SetFilter("missing")
 	if got := at.table.GetCell(1, 0).Text; !strings.Contains(got, "No agents found") {
 		t.Fatalf("empty state cell = %q", got)
@@ -116,11 +115,19 @@ func TestAgentTableLoadingSelectionSortAndFilter(t *testing.T) {
 	if at.SelectedAgent() != nil {
 		t.Fatal("SelectedAgent() should be nil for empty state")
 	}
+}
 
+func TestPadRight(t *testing.T) {
 	if got := padRight("abc", 5); got != "abc  " {
 		t.Fatalf("padRight() = %q, want %q", got, "abc  ")
 	}
 	if got := padRight("abcdef", 3); got != "abcdef" {
 		t.Fatalf("padRight() with short width = %q", got)
 	}
+}
+
+func newLoadedAgentTable() *AgentTable {
+	at := NewAgentTable()
+	at.Update(append([]Agent(nil), testAgents()...))
+	return at
 }

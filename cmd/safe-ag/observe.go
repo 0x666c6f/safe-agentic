@@ -282,73 +282,111 @@ func renderLogEntry(line string) string {
 		return ""
 	}
 
-	entryType, _ := entry["type"].(string)
-
-	switch entryType {
+	switch entryType(entry) {
 	case "user":
-		msg, _ := entry["message"].(map[string]interface{})
-		if msg == nil {
-			return ""
-		}
-		role, _ := msg["role"].(string)
-		if role != "user" {
-			return ""
-		}
-		content, _ := msg["content"].(string)
-		if content == "" {
-			// content might be array of blocks
-			if blocks, ok := msg["content"].([]interface{}); ok {
-				for _, b := range blocks {
-					if block, ok := b.(map[string]interface{}); ok {
-						if t, _ := block["type"].(string); t == "text" {
-							content, _ = block["text"].(string)
-							break
-						}
-					}
-				}
-			}
-		}
-		if content == "" {
-			return ""
-		}
-		if len(content) > 200 {
-			content = content[:200] + "..."
-		}
-		return fmt.Sprintf("\033[0;36m> %s\033[0m", content)
-
+		return renderUserLogEntry(entry)
 	case "assistant":
-		msg, _ := entry["message"].(map[string]interface{})
-		if msg == nil {
-			return ""
-		}
-		// Extract text from content blocks
-		content := extractAssistantText(msg)
-		if content == "" {
-			return ""
-		}
-		if len(content) > 300 {
-			content = content[:300] + "..."
-		}
-		return fmt.Sprintf("\033[0;32m  %s\033[0m", content)
-
+		return renderAssistantLogEntry(entry)
 	case "system":
-		subtype, _ := entry["subtype"].(string)
-		switch subtype {
-		case "tool_use":
-			// Show tool calls
-			if infos, ok := entry["hookInfos"].([]interface{}); ok && len(infos) > 0 {
-				return ""
-			}
-			return ""
-		case "result":
-			dur, _ := entry["durationMs"].(float64)
-			msgCount, _ := entry["messageCount"].(float64)
-			if dur > 0 {
-				return fmt.Sprintf("\033[0;33m  [%d messages, %.1fs]\033[0m", int(msgCount), dur/1000)
-			}
+		return renderSystemLogEntry(entry)
+	default:
+		return ""
+	}
+}
+
+func entryType(entry map[string]interface{}) string {
+	entryType, _ := entry["type"].(string)
+	return entryType
+}
+
+func renderUserLogEntry(entry map[string]interface{}) string {
+	msg := entryMessage(entry)
+	if msg == nil {
+		return ""
+	}
+	role, _ := msg["role"].(string)
+	if role != "user" {
+		return ""
+	}
+	content := extractUserText(msg)
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("\033[0;36m> %s\033[0m", truncateObserveText(content, 200))
+}
+
+func entryMessage(entry map[string]interface{}) map[string]interface{} {
+	msg, _ := entry["message"].(map[string]interface{})
+	return msg
+}
+
+func extractUserText(msg map[string]interface{}) string {
+	if content, _ := msg["content"].(string); content != "" {
+		return content
+	}
+	blocks, ok := msg["content"].([]interface{})
+	if !ok {
+		return ""
+	}
+	for _, item := range blocks {
+		block, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if textBlockContent(block) != "" {
+			return textBlockContent(block)
 		}
 	}
 	return ""
+}
+
+func textBlockContent(block map[string]interface{}) string {
+	bType, _ := block["type"].(string)
+	if bType != "text" {
+		return ""
+	}
+	text, _ := block["text"].(string)
+	return text
+}
+
+func truncateObserveText(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+func renderAssistantLogEntry(entry map[string]interface{}) string {
+	msg := entryMessage(entry)
+	if msg == nil {
+		return ""
+	}
+	content := extractAssistantText(msg)
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("\033[0;32m  %s\033[0m", truncateObserveText(content, 300))
+}
+
+func renderSystemLogEntry(entry map[string]interface{}) string {
+	subtype, _ := entry["subtype"].(string)
+	switch subtype {
+	case "tool_use":
+		return ""
+	case "result":
+		return renderSystemResult(entry)
+	default:
+		return ""
+	}
+}
+
+func renderSystemResult(entry map[string]interface{}) string {
+	dur, _ := entry["durationMs"].(float64)
+	msgCount, _ := entry["messageCount"].(float64)
+	if dur <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("\033[0;33m  [%d messages, %.1fs]\033[0m", int(msgCount), dur/1000)
 }
 
 func extractAssistantText(msg map[string]interface{}) string {
@@ -459,105 +497,111 @@ func runOutput(cmd *cobra.Command, args []string) error {
 
 	wsCmd := workspaceFindCmd()
 	running, _ := docker.IsRunning(ctx, exec, name)
+	if label, gitCmd, ok := outputGitMode(); ok {
+		return runOutputGitMode(ctx, exec, name, wsCmd, running, label, gitCmd)
+	}
+	if outputJSON {
+		return runOutputJSONMode(ctx, exec, name)
+	}
+	return runOutputDefaultMode(ctx, exec, name, running)
+}
 
+func outputGitMode() (label, gitCmd string, ok bool) {
 	switch {
 	case outputDiff:
-		var out []byte
-		if running {
-			out, err = exec.Run(ctx, "docker", "exec", name,
-				"bash", "-c", wsCmd+" && git diff")
-		} else {
-			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git diff")
-		}
-		if err != nil {
-			return fmt.Errorf("git diff: %w", err)
-		}
-		fmt.Print(string(out))
-
+		return "git diff", "git diff", true
 	case outputFiles:
-		var out []byte
-		if running {
-			out, err = exec.Run(ctx, "docker", "exec", name,
-				"bash", "-c", wsCmd+" && git diff --name-only && git ls-files --others --exclude-standard")
-		} else {
-			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git diff --name-only && git ls-files --others --exclude-standard")
-		}
-		if err != nil {
-			return fmt.Errorf("list changed files: %w", err)
-		}
-		fmt.Print(string(out))
-
+		return "list changed files", "git diff --name-only && git ls-files --others --exclude-standard", true
 	case outputCommits:
-		var out []byte
-		if running {
-			out, err = exec.Run(ctx, "docker", "exec", name,
-				"bash", "-c", wsCmd+" && git log --oneline")
-		} else {
-			out, err = runGitOnStoppedWorkspace(ctx, exec, name, "git log --oneline")
-		}
-		if err != nil {
-			return fmt.Errorf("git log: %w", err)
-		}
-		fmt.Print(string(out))
-
-	case outputJSON:
-		statusOut, _ := exec.Run(ctx, "docker", "inspect",
-			"--format", "{{.State.Status}}", name)
-		status := strings.TrimSpace(string(statusOut))
-
-		lastMessage, _ := readLastSessionMessage(ctx, exec, name)
-		if lastMessage == "" {
-			rendered, _ := readRenderedAgentLogs(ctx, exec, name, 200)
-			lastMessage = summarizeAgentLogs(rendered)
-		}
-		if lastMessage == "" {
-			logsOut, _ := exec.Run(ctx, "docker", "logs", "--tail", "20", name)
-			lastMessage = strings.TrimSpace(string(logsOut))
-			if len(lastMessage) > 500 {
-				lastMessage = lastMessage[len(lastMessage)-500:]
-			}
-		}
-
-		result := map[string]string{
-			"name":        name,
-			"status":      status,
-			"last_output": lastMessage,
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
-
+		return "git log", "git log --oneline", true
 	default:
-		if lastMessage, _ := readLastSessionMessage(ctx, exec, name); strings.TrimSpace(lastMessage) != "" {
-			fmt.Println(lastMessage)
-			return nil
-		}
-		if rendered, _ := readRenderedAgentLogs(ctx, exec, name, 50); strings.TrimSpace(rendered) != "" {
-			if summary := summarizeAgentLogs(rendered); summary != "" {
-				fmt.Println(summary)
-				return nil
-			}
-			fmt.Println(rendered)
-			return nil
-		}
-		// For tmux containers, capture the pane (docker logs only shows entrypoint)
-		termLabel, _ := docker.InspectLabel(ctx, exec, name, "safe-agentic.terminal")
-		if running && termLabel == "tmux" {
-			paneOut, err := exec.Run(ctx, tmux.BuildCapturePaneArgs(name, 80)...)
-			if err == nil && len(strings.TrimSpace(string(paneOut))) > 0 {
-				fmt.Print(string(paneOut))
-				return nil
-			}
-		}
-		// Fallback to docker logs
-		out, err := exec.Run(ctx, "docker", "logs", "--tail", "80", name)
-		if err != nil {
-			return fmt.Errorf("docker logs: %w", err)
-		}
-		fmt.Print(string(out))
+		return "", "", false
 	}
+}
 
+func runOutputGitMode(ctx context.Context, exec orb.Executor, name, wsCmd string, running bool, label, gitCmd string) error {
+	out, err := runOutputGitCommand(ctx, exec, name, wsCmd, running, gitCmd)
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	fmt.Print(string(out))
 	return nil
+}
+
+func runOutputGitCommand(ctx context.Context, exec orb.Executor, name, wsCmd string, running bool, gitCmd string) ([]byte, error) {
+	if running {
+		return exec.Run(ctx, "docker", "exec", name, "bash", "-c", wsCmd+" && "+gitCmd)
+	}
+	return runGitOnStoppedWorkspace(ctx, exec, name, gitCmd)
+}
+
+func runOutputJSONMode(ctx context.Context, exec orb.Executor, name string) error {
+	statusOut, _ := exec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
+	result := map[string]string{
+		"name":        name,
+		"status":      strings.TrimSpace(string(statusOut)),
+		"last_output": outputLastMessage(ctx, exec, name),
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
+}
+
+func outputLastMessage(ctx context.Context, exec orb.Executor, name string) string {
+	if lastMessage, _ := readLastSessionMessage(ctx, exec, name); lastMessage != "" {
+		return lastMessage
+	}
+	if rendered, _ := readRenderedAgentLogs(ctx, exec, name, 200); rendered != "" {
+		if summary := summarizeAgentLogs(rendered); summary != "" {
+			return summary
+		}
+	}
+	logsOut, _ := exec.Run(ctx, "docker", "logs", "--tail", "20", name)
+	lastMessage := strings.TrimSpace(string(logsOut))
+	if len(lastMessage) > 500 {
+		return lastMessage[len(lastMessage)-500:]
+	}
+	return lastMessage
+}
+
+func runOutputDefaultMode(ctx context.Context, exec orb.Executor, name string, running bool) error {
+	if lastMessage, _ := readLastSessionMessage(ctx, exec, name); strings.TrimSpace(lastMessage) != "" {
+		fmt.Println(lastMessage)
+		return nil
+	}
+	if rendered, _ := readRenderedAgentLogs(ctx, exec, name, 50); strings.TrimSpace(rendered) != "" {
+		if summary := summarizeAgentLogs(rendered); summary != "" {
+			fmt.Println(summary)
+			return nil
+		}
+		fmt.Println(rendered)
+		return nil
+	}
+	if paneOut, ok := readTmuxPaneOutput(ctx, exec, name, running); ok {
+		fmt.Print(string(paneOut))
+		return nil
+	}
+	out, err := exec.Run(ctx, "docker", "logs", "--tail", "80", name)
+	if err != nil {
+		return fmt.Errorf("docker logs: %w", err)
+	}
+	fmt.Print(string(out))
+	return nil
+}
+
+func readTmuxPaneOutput(ctx context.Context, exec orb.Executor, name string, running bool) ([]byte, bool) {
+	if !running {
+		return nil, false
+	}
+	termLabel, _ := docker.InspectLabel(ctx, exec, name, "safe-agentic.terminal")
+	if termLabel != "tmux" {
+		return nil, false
+	}
+	paneOut, err := exec.Run(ctx, tmux.BuildCapturePaneArgs(name, 80)...)
+	if err != nil || len(strings.TrimSpace(string(paneOut))) == 0 {
+		return nil, false
+	}
+	return paneOut, true
 }
 
 func readRenderedAgentLogs(ctx context.Context, exec orb.Executor, name string, lines int) (string, error) {
@@ -1232,78 +1276,86 @@ func runReplay(cmd *cobra.Command, args []string) error {
 
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		var event map[string]json.RawMessage
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
-		}
-
-		eventType := ""
-		if raw, ok := event["type"]; ok {
-			json.Unmarshal(raw, &eventType)
-		}
-
-		// Filter if --tools-only
-		if replayToolsOnly && eventType != "tool.call" {
-			continue
-		}
-
-		// Parse timestamp
-		ts := ""
-		if raw, ok := event["timestamp"]; ok {
-			var tsStr string
-			if err := json.Unmarshal(raw, &tsStr); err == nil {
-				if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
-					ts = t.Format("15:04:05")
-				} else {
-					ts = tsStr
-				}
-			}
-		}
-		if ts == "" {
-			ts = "??:??:??"
-		}
-
-		switch eventType {
-		case "session.start":
-			fmt.Printf("[%s] Session started\n", ts)
-
-		case "tool.call":
-			toolName := jsonStringFromEvent(event, "tool")
-			tokens := int64(0)
-			if raw, ok := event["tokens"]; ok {
-				json.Unmarshal(raw, &tokens)
-			}
-			if tokens > 0 {
-				fmt.Printf("[%s] tool: %s (%d tokens)\n", ts, toolName, tokens)
-			} else {
-				fmt.Printf("[%s] tool: %s\n", ts, toolName)
-			}
-
-		case "git.commit":
-			sha := jsonStringFromEvent(event, "sha")
-			message := jsonStringFromEvent(event, "message")
-			if len(sha) > 7 {
-				sha = sha[:7]
-			}
-			fmt.Printf("[%s] Git commit: %s %q\n", ts, sha, message)
-
-		case "agent.message":
-			msg := jsonStringFromEvent(event, "content")
-			if len(msg) > 80 {
-				msg = msg[:80] + "..."
-			}
-			fmt.Printf("[%s] Agent: %s\n", ts, msg)
-
-		case "session.end":
-			fmt.Printf("[%s] Session ended\n", ts)
-
-		default:
-			fmt.Printf("[%s] %s\n", ts, eventType)
+		if rendered := renderReplayLine(scanner.Bytes()); rendered != "" {
+			fmt.Println(rendered)
 		}
 	}
 
 	return scanner.Err()
+}
+
+func renderReplayLine(line []byte) string {
+	var event map[string]json.RawMessage
+	if err := json.Unmarshal(line, &event); err != nil {
+		return ""
+	}
+	eventType := jsonStringFromEvent(event, "type")
+	if replayToolsOnly && eventType != "tool.call" {
+		return ""
+	}
+
+	ts := replayTimestamp(event)
+	switch eventType {
+	case "session.start":
+		return fmt.Sprintf("[%s] Session started", ts)
+	case "tool.call":
+		return replayToolCall(ts, event)
+	case "git.commit":
+		return replayGitCommit(ts, event)
+	case "agent.message":
+		return replayAgentMessage(ts, event)
+	case "session.end":
+		return fmt.Sprintf("[%s] Session ended", ts)
+	default:
+		return fmt.Sprintf("[%s] %s", ts, eventType)
+	}
+}
+
+func replayTimestamp(event map[string]json.RawMessage) string {
+	tsStr := jsonStringFromEvent(event, "timestamp")
+	if tsStr == "" {
+		return "??:??:??"
+	}
+	if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
+		return t.Format("15:04:05")
+	}
+	return tsStr
+}
+
+func replayToolCall(ts string, event map[string]json.RawMessage) string {
+	toolName := jsonStringFromEvent(event, "tool")
+	tokens := jsonInt64FromEvent(event, "tokens")
+	if tokens > 0 {
+		return fmt.Sprintf("[%s] tool: %s (%d tokens)", ts, toolName, tokens)
+	}
+	return fmt.Sprintf("[%s] tool: %s", ts, toolName)
+}
+
+func replayGitCommit(ts string, event map[string]json.RawMessage) string {
+	sha := truncateSHA(jsonStringFromEvent(event, "sha"))
+	message := jsonStringFromEvent(event, "message")
+	return fmt.Sprintf("[%s] Git commit: %s %q", ts, sha, message)
+}
+
+func truncateSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func replayAgentMessage(ts string, event map[string]json.RawMessage) string {
+	return fmt.Sprintf("[%s] Agent: %s", ts, truncateObserveText(jsonStringFromEvent(event, "content"), 80))
+}
+
+func jsonInt64FromEvent(event map[string]json.RawMessage, key string) int64 {
+	raw, ok := event[key]
+	if !ok {
+		return 0
+	}
+	var n int64
+	json.Unmarshal(raw, &n)
+	return n
 }
 
 // jsonStringFromEvent extracts a string value from an event map.

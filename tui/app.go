@@ -138,159 +138,159 @@ func (a *App) spinAnimations() {
 }
 
 func (a *App) handleInput(event *tcell.EventKey) *tcell.EventKey {
-	// In filter/command mode, let the input field handle keys
-	if a.footer.Mode() == FooterModeFilter || a.footer.Mode() == FooterModeCommand {
+	if handled, next := a.handleFooterModeInput(event); handled {
+		return next
+	}
+	if handled, next := a.handleOverlayInput(event); handled {
+		return next
+	}
+	if handled, next := a.handleGlobalInput(event); handled {
+		return next
+	}
+	if event.Key() == tcell.KeyRune {
+		if handled, next := a.handleRuneInput(event.Rune()); handled {
+			return next
+		}
+	}
+	return event
+}
+
+func (a *App) handleFooterModeInput(event *tcell.EventKey) (bool, *tcell.EventKey) {
+	switch a.footer.Mode() {
+	case FooterModeFilter, FooterModeCommand:
 		if event.Key() == tcell.KeyEscape {
 			a.footer.Reset()
 			a.tapp.SetFocus(a.table.Table())
-			return nil
+			return true, nil
 		}
-		return event
-	}
-
-	// In confirm mode, handle y/n
-	if a.footer.Mode() == FooterModeConfirm {
+		return true, event
+	case FooterModeConfirm:
 		if event.Key() == tcell.KeyEscape {
 			a.footer.Reset()
-			return nil
+			return true, nil
 		}
-		if event.Key() == tcell.KeyRune {
-			if a.footer.HandleConfirmKey(event.Rune()) {
-				return nil
-			}
+		if event.Key() == tcell.KeyRune && a.footer.HandleConfirmKey(event.Rune()) {
+			return true, nil
 		}
-		return nil
-	}
-
-	// In status mode, any key resets
-	if a.footer.Mode() == FooterModeStatus {
+		return true, nil
+	case FooterModeStatus:
 		a.footer.Reset()
-		return event
+		return true, event
+	default:
+		return false, nil
 	}
+}
 
-	// Overlay pages: Esc closes them
-	if name, _ := a.pages.GetFrontPage(); name != "main" {
-		if event.Key() == tcell.KeyEscape {
-			a.pages.SwitchToPage("main")
-			a.pages.RemovePage(name)
-			a.tapp.SetFocus(a.table.Table())
-			return nil
-		}
-		return event
+func (a *App) handleOverlayInput(event *tcell.EventKey) (bool, *tcell.EventKey) {
+	name, _ := a.pages.GetFrontPage()
+	if name == "main" {
+		return false, nil
 	}
+	if event.Key() == tcell.KeyEscape {
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage(name)
+		a.tapp.SetFocus(a.table.Table())
+		return true, nil
+	}
+	return true, event
+}
 
-	// Global keybindings
+func (a *App) handleGlobalInput(event *tcell.EventKey) (bool, *tcell.EventKey) {
 	switch event.Key() {
 	case tcell.KeyCtrlC:
 		a.tapp.Stop()
-		return nil
 	case tcell.KeyCtrlD:
 		a.actions.StopAgent()
-		return nil
 	case tcell.KeyCtrlK:
 		a.actions.KillAll()
-		return nil
 	case tcell.KeyEnter:
 		a.actions.Attach()
-		return nil
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+func (a *App) handleRuneInput(r rune) (bool, *tcell.EventKey) {
+	if action, ok := a.simpleRuneActions()[r]; ok {
+		action()
+		return true, nil
 	}
 
-	if event.Key() == tcell.KeyRune {
-		switch event.Rune() {
-		case 'q':
-			a.tapp.Stop()
-			return nil
-		case 'a':
-			a.actions.Attach()
-			return nil
-		case 'r':
-			a.actions.Resume()
-			return nil
-		case 's':
-			a.actions.StopAgent()
-			return nil
-		case 'l':
-			a.actions.Logs()
-			return nil
-		case 'd':
-			a.actions.Describe()
-			return nil
-		case 'y':
-			a.actions.YAMLView()
-			return nil
-		case 'e':
-			a.actions.ExportSessions()
-			return nil
-		case 'c':
-			a.actions.CopyFiles()
-			return nil
-		case 'n':
-			a.actions.SpawnNew()
-			return nil
-		case 'p':
-			a.preview.Toggle()
-			if a.preview.Visible() {
-				if agent := a.table.SelectedAgent(); agent != nil {
-					a.updatePreview(agent)
-				}
-			}
-			a.rebuildLayout()
-			return nil
-		case 'f':
-			a.actions.Diff()
-			return nil
-		case 'x':
-			a.actions.Checkpoint()
-			return nil
-		case 't':
-			a.actions.Todo()
-			return nil
-		case 'm':
-			a.actions.McpLogin()
-			return nil
-		case 'g':
-			a.actions.CreatePR()
-			return nil
-		case 'R':
-			a.actions.Review()
-			return nil
-		case '$':
-			a.actions.Cost()
-			return nil
-		case 'A':
-			a.actions.Audit()
-			return nil
-		case '?':
-			a.showHelpOverlay()
-			return nil
-		case '/':
-			a.footer.ShowFilter(func(text string) {
-				a.table.SetFilter(text)
-				a.tapp.SetFocus(a.table.Table())
-			})
-			a.tapp.SetFocus(a.footer.InputField())
-			return nil
-		case ':':
-			a.footer.ShowCommand(func(cmd string) {
-				a.handleCommand(cmd)
-				a.tapp.SetFocus(a.table.Table())
-			})
-			a.tapp.SetFocus(a.footer.InputField())
-			return nil
-		case 'j':
-			return tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
-		case 'k':
-			return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
-		case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			col := int(event.Rune() - '1')
-			if col < len(columns) {
-				a.table.SetSort(col)
-			}
-			return nil
+	switch r {
+	case 'p':
+		a.togglePreview()
+	case '/':
+		a.startFilterInput()
+	case ':':
+		a.startCommandInput()
+	case 'j':
+		return true, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	case 'k':
+		return true, tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		a.sortByRune(r)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+func (a *App) simpleRuneActions() map[rune]func() {
+	return map[rune]func(){
+		'q': a.tapp.Stop,
+		'a': a.actions.Attach,
+		'r': a.actions.Resume,
+		's': a.actions.StopAgent,
+		'l': a.actions.Logs,
+		'd': a.actions.Describe,
+		'y': a.actions.YAMLView,
+		'e': a.actions.ExportSessions,
+		'c': a.actions.CopyFiles,
+		'n': a.actions.SpawnNew,
+		'f': a.actions.Diff,
+		'x': a.actions.Checkpoint,
+		't': a.actions.Todo,
+		'm': a.actions.McpLogin,
+		'g': a.actions.CreatePR,
+		'R': a.actions.Review,
+		'$': a.actions.Cost,
+		'A': a.actions.Audit,
+		'?': a.showHelpOverlay,
+	}
+}
+
+func (a *App) togglePreview() {
+	a.preview.Toggle()
+	if a.preview.Visible() {
+		if agent := a.table.SelectedAgent(); agent != nil {
+			a.updatePreview(agent)
 		}
 	}
+	a.rebuildLayout()
+}
 
-	return event
+func (a *App) startFilterInput() {
+	a.footer.ShowFilter(func(text string) {
+		a.table.SetFilter(text)
+		a.tapp.SetFocus(a.table.Table())
+	})
+	a.tapp.SetFocus(a.footer.InputField())
+}
+
+func (a *App) startCommandInput() {
+	a.footer.ShowCommand(func(cmd string) {
+		a.handleCommand(cmd)
+		a.tapp.SetFocus(a.table.Table())
+	})
+	a.tapp.SetFocus(a.footer.InputField())
+}
+
+func (a *App) sortByRune(r rune) {
+	col := int(r - '1')
+	if col < len(columns) {
+		a.table.SetSort(col)
+	}
 }
 
 func (a *App) handleCommand(cmd string) {

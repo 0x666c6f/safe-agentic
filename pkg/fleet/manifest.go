@@ -20,16 +20,16 @@ type AgentSpec struct {
 	Repo        string   `yaml:"repo"`
 	Repos       []string `yaml:"repos"`
 	Prompt      string   `yaml:"prompt"`
-	SSH         bool   `yaml:"ssh"`
-	ReuseAuth   bool   `yaml:"reuse_auth"`
-	ReuseGHAuth bool   `yaml:"reuse_gh_auth"`
-	AutoTrust   bool   `yaml:"auto_trust"`
-	Background  bool   `yaml:"background"`
-	Docker      bool   `yaml:"docker"`
-	Network     string `yaml:"network"`
-	Memory      string `yaml:"memory"`
-	CPUs        string `yaml:"cpus"`
-	AWS         string `yaml:"aws"`
+	SSH         bool     `yaml:"ssh"`
+	ReuseAuth   bool     `yaml:"reuse_auth"`
+	ReuseGHAuth bool     `yaml:"reuse_gh_auth"`
+	AutoTrust   bool     `yaml:"auto_trust"`
+	Background  bool     `yaml:"background"`
+	Docker      bool     `yaml:"docker"`
+	Network     string   `yaml:"network"`
+	Memory      string   `yaml:"memory"`
+	CPUs        string   `yaml:"cpus"`
+	AWS         string   `yaml:"aws"`
 	// Pipeline-specific fields
 	DependsOn string `yaml:"depends_on"`
 	OnFailure string `yaml:"on_failure"`
@@ -79,7 +79,6 @@ type PipelineManifest struct {
 	Steps    []AgentSpec       `yaml:"steps"`
 }
 
-
 // ParseFleet reads and parses a fleet YAML manifest file.
 // Defaults are merged into agents, vars are interpolated in prompts.
 func ParseFleet(path string) (*FleetManifest, error) {
@@ -113,132 +112,165 @@ func ParsePipeline(path string) (*PipelineManifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse pipeline manifest %q: %w", path, err)
 	}
-	// Normalize flat steps → stages
-	if len(m.Steps) > 0 && len(m.Stages) == 0 {
-		for _, step := range m.Steps {
-			stage := PipelineStage{
-				Name:   step.Name,
-				Agents: []AgentSpec{step},
-			}
-			if step.DependsOn != "" {
-				stage.DependsOn = []string{step.DependsOn}
-			}
-			m.Stages = append(m.Stages, stage)
-		}
-	}
-	// Expand models: if a stage has models: [claude, codex], duplicate agents per model
-	var expanded []PipelineStage
-	for _, stage := range m.Stages {
-		if len(stage.Models) > 0 {
-			for _, model := range stage.Models {
-				newStage := PipelineStage{
-					Name:      stage.Name + "-" + model,
-					DependsOn: stage.DependsOn,
-					Parent:    stage.Name,
-				}
-				for _, agent := range stage.Agents {
-					a := agent
-					a.Type = model
-					a.Name = model + "-" + agent.Name
-					// Add ${model} to vars for prompt interpolation
-					a.Prompt = strings.ReplaceAll(a.Prompt, "${model}", model)
-					newStage.Agents = append(newStage.Agents, a)
-				}
-				expanded = append(expanded, newStage)
-			}
-		} else {
-			expanded = append(expanded, stage)
-		}
-	}
-	m.Stages = expanded
-
-	// Fix depends_on references that point to model-expanded stage names
-	// e.g., depends_on: [review] → depends_on: [review-claude, review-codex]
-	stageNames := make(map[string]bool)
-	for _, s := range m.Stages {
-		stageNames[s.Name] = true
-	}
-	for i, stage := range m.Stages {
-		var newDeps []string
-		for _, dep := range stage.DependsOn {
-			if stageNames[dep] {
-				newDeps = append(newDeps, dep)
-			} else {
-				// Expand: "review" → "review-claude", "review-codex" (any matching prefix)
-				found := false
-				for name := range stageNames {
-					if strings.HasPrefix(name, dep+"-") {
-						newDeps = append(newDeps, name)
-						found = true
-					}
-				}
-				if !found {
-					newDeps = append(newDeps, dep) // keep as-is
-				}
-			}
-		}
-		m.Stages[i].DependsOn = newDeps
-	}
-
-	// Apply defaults to all agents
-	for i, stage := range m.Stages {
-		for j := range stage.Agents {
-			m.Stages[i].Agents[j] = mergeDefaults(m.Defaults, m.Stages[i].Agents[j])
-		}
-	}
-	// Interpolate vars in all prompts
-	if len(m.Vars) > 0 {
-		for i, stage := range m.Stages {
-			for j := range stage.Agents {
-				m.Stages[i].Agents[j].Prompt = interpolateVars(m.Stages[i].Agents[j].Prompt, m.Vars)
-			}
-		}
-	}
+	normalizePipelineSteps(&m)
+	m.Stages = expandPipelineModels(m.Stages)
+	rewriteStageDependencies(m.Stages)
+	applyPipelineDefaults(&m)
+	interpolatePipelinePrompts(&m)
 	return &m, nil
 }
 
 // mergeDefaults applies default values to an agent spec (agent values take precedence).
 func mergeDefaults(defaults, agent AgentSpec) AgentSpec {
-	if agent.Repo == "" && defaults.Repo != "" {
-		agent.Repo = defaults.Repo
-	}
-	if len(agent.Repos) == 0 && len(defaults.Repos) > 0 {
-		agent.Repos = defaults.Repos
-	}
-	if !agent.SSH && defaults.SSH {
-		agent.SSH = true
-	}
-	if !agent.ReuseAuth && defaults.ReuseAuth {
-		agent.ReuseAuth = true
-	}
-	if !agent.ReuseGHAuth && defaults.ReuseGHAuth {
-		agent.ReuseGHAuth = true
-	}
-	if !agent.AutoTrust && defaults.AutoTrust {
-		agent.AutoTrust = true
-	}
-	if !agent.Background && defaults.Background {
-		agent.Background = true
-	}
-	if !agent.Docker && defaults.Docker {
-		agent.Docker = true
-	}
-	if agent.Network == "" && defaults.Network != "" {
-		agent.Network = defaults.Network
-	}
-	if agent.Memory == "" && defaults.Memory != "" {
-		agent.Memory = defaults.Memory
-	}
-	if agent.CPUs == "" && defaults.CPUs != "" {
-		agent.CPUs = defaults.CPUs
-	}
-	if agent.AWS == "" && defaults.AWS != "" {
-		agent.AWS = defaults.AWS
-	}
-	if agent.Type == "" && defaults.Type != "" {
-		agent.Type = defaults.Type
-	}
+	agent.Repo = mergeStringDefault(agent.Repo, defaults.Repo)
+	agent.Repos = mergeSliceDefault(agent.Repos, defaults.Repos)
+	agent.SSH = mergeBoolDefault(agent.SSH, defaults.SSH)
+	agent.ReuseAuth = mergeBoolDefault(agent.ReuseAuth, defaults.ReuseAuth)
+	agent.ReuseGHAuth = mergeBoolDefault(agent.ReuseGHAuth, defaults.ReuseGHAuth)
+	agent.AutoTrust = mergeBoolDefault(agent.AutoTrust, defaults.AutoTrust)
+	agent.Background = mergeBoolDefault(agent.Background, defaults.Background)
+	agent.Docker = mergeBoolDefault(agent.Docker, defaults.Docker)
+	agent.Network = mergeStringDefault(agent.Network, defaults.Network)
+	agent.Memory = mergeStringDefault(agent.Memory, defaults.Memory)
+	agent.CPUs = mergeStringDefault(agent.CPUs, defaults.CPUs)
+	agent.AWS = mergeStringDefault(agent.AWS, defaults.AWS)
+	agent.Type = mergeStringDefault(agent.Type, defaults.Type)
 	return agent
+}
+
+func normalizePipelineSteps(m *PipelineManifest) {
+	if len(m.Steps) == 0 || len(m.Stages) > 0 {
+		return
+	}
+	for _, step := range m.Steps {
+		m.Stages = append(m.Stages, stageFromStep(step))
+	}
+}
+
+func stageFromStep(step AgentSpec) PipelineStage {
+	stage := PipelineStage{
+		Name:   step.Name,
+		Agents: []AgentSpec{step},
+	}
+	if step.DependsOn != "" {
+		stage.DependsOn = []string{step.DependsOn}
+	}
+	return stage
+}
+
+func expandPipelineModels(stages []PipelineStage) []PipelineStage {
+	var expanded []PipelineStage
+	for _, stage := range stages {
+		expanded = append(expanded, expandStageModels(stage)...)
+	}
+	return expanded
+}
+
+func expandStageModels(stage PipelineStage) []PipelineStage {
+	if len(stage.Models) == 0 {
+		return []PipelineStage{stage}
+	}
+	var expanded []PipelineStage
+	for _, model := range stage.Models {
+		expanded = append(expanded, stageForModel(stage, model))
+	}
+	return expanded
+}
+
+func stageForModel(stage PipelineStage, model string) PipelineStage {
+	expanded := PipelineStage{
+		Name:      stage.Name + "-" + model,
+		DependsOn: stage.DependsOn,
+		Parent:    stage.Name,
+	}
+	for _, agent := range stage.Agents {
+		expanded.Agents = append(expanded.Agents, agentForModel(agent, model))
+	}
+	return expanded
+}
+
+func agentForModel(agent AgentSpec, model string) AgentSpec {
+	expanded := agent
+	expanded.Type = model
+	expanded.Name = model + "-" + agent.Name
+	expanded.Prompt = strings.ReplaceAll(agent.Prompt, "${model}", model)
+	return expanded
+}
+
+func rewriteStageDependencies(stages []PipelineStage) {
+	stageNames := stageNameSet(stages)
+	for i, stage := range stages {
+		stages[i].DependsOn = expandedDependencies(stage.DependsOn, stageNames)
+	}
+}
+
+func stageNameSet(stages []PipelineStage) map[string]bool {
+	stageNames := make(map[string]bool, len(stages))
+	for _, s := range stages {
+		stageNames[s.Name] = true
+	}
+	return stageNames
+}
+
+func expandedDependencies(deps []string, stageNames map[string]bool) []string {
+	var expanded []string
+	for _, dep := range deps {
+		expanded = append(expanded, expandDependency(dep, stageNames)...)
+	}
+	return expanded
+}
+
+func expandDependency(dep string, stageNames map[string]bool) []string {
+	if stageNames[dep] {
+		return []string{dep}
+	}
+	var expanded []string
+	for name := range stageNames {
+		if strings.HasPrefix(name, dep+"-") {
+			expanded = append(expanded, name)
+		}
+	}
+	if len(expanded) == 0 {
+		return []string{dep}
+	}
+	return expanded
+}
+
+func applyPipelineDefaults(m *PipelineManifest) {
+	for i, stage := range m.Stages {
+		for j := range stage.Agents {
+			m.Stages[i].Agents[j] = mergeDefaults(m.Defaults, m.Stages[i].Agents[j])
+		}
+	}
+}
+
+func interpolatePipelinePrompts(m *PipelineManifest) {
+	if len(m.Vars) == 0 {
+		return
+	}
+	for i, stage := range m.Stages {
+		for j := range stage.Agents {
+			m.Stages[i].Agents[j].Prompt = interpolateVars(m.Stages[i].Agents[j].Prompt, m.Vars)
+		}
+	}
+}
+
+func mergeStringDefault(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func mergeSliceDefault(value, fallback []string) []string {
+	if len(value) > 0 {
+		return value
+	}
+	return fallback
+}
+
+func mergeBoolDefault(value, fallback bool) bool {
+	return value || fallback
 }
 
 // interpolateVars replaces ${key} in a string with values from vars map.

@@ -17,33 +17,12 @@ const (
 )
 
 func main() {
-	// Check for dashboard mode before TUI initialization.
-	for _, arg := range os.Args[1:] {
-		if arg == "--dashboard" || arg == "dashboard" {
-			bind := "localhost:8420"
-			for i, a := range os.Args[1:] {
-				if a == "--bind" && i+2 < len(os.Args) {
-					bind = os.Args[i+2]
-				}
-			}
-			if err := preflight(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			d := NewDashboard(bind)
-			log.Fatal(d.Start())
-		}
+	if handleDashboardMode() {
+		return
 	}
 
-	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Println("Usage: safe-ag-tui [--dashboard [--bind host:port]]")
-		fmt.Println()
-		fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
-		fmt.Println("  --dashboard    Start web dashboard instead of TUI")
-		fmt.Println("  --bind         Bind address (default: localhost:8420)")
-		fmt.Println()
-		fmt.Println("Keybindings: a=attach s=stop l=logs d=describe n=new q=quit")
-		os.Exit(0)
+	if handleHelpMode() {
+		return
 	}
 
 	if err := preflight(); err != nil {
@@ -59,26 +38,82 @@ func main() {
 		os.Exit(0)
 	}()
 
-	app := NewApp()
-	if err := app.Run(); err != nil {
+	app, err := runMainApp()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	execAfterExit(app)
+}
 
-	// If an action scheduled an exec-after-exit (resume, spawn), run it now
-	// that tview has fully restored the terminal.
-	if args := app.ExecAfterArgs(); len(args) > 0 {
-		bin, err := exec.LookPath(args[0])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %s not found: %v\n", args[0], err)
-			os.Exit(1)
+func handleDashboardMode() bool {
+	if !wantsDashboard(os.Args[1:]) {
+		return false
+	}
+	if err := preflight(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	log.Fatal(NewDashboard(dashboardBind(os.Args[1:])).Start())
+	return true
+}
+
+func wantsDashboard(args []string) bool {
+	for _, arg := range args {
+		if arg == "--dashboard" || arg == "dashboard" {
+			return true
 		}
-		// Stop the signal handler so the child process gets signals directly
-		signal.Reset(syscall.SIGINT, syscall.SIGTERM)
-		if err := syscall.Exec(bin, args, os.Environ()); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: exec failed: %v\n", err)
-			os.Exit(1)
+	}
+	return false
+}
+
+func dashboardBind(args []string) string {
+	bind := "localhost:8420"
+	for i, arg := range args {
+		if arg == "--bind" && i+1 < len(args) {
+			return args[i+1]
 		}
+	}
+	return bind
+}
+
+func handleHelpMode() bool {
+	if len(os.Args) <= 1 || (os.Args[1] != "-h" && os.Args[1] != "--help") {
+		return false
+	}
+	fmt.Println("Usage: safe-ag-tui [--dashboard [--bind host:port]]")
+	fmt.Println()
+	fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
+	fmt.Println("  --dashboard    Start web dashboard instead of TUI")
+	fmt.Println("  --bind         Bind address (default: localhost:8420)")
+	fmt.Println()
+	fmt.Println("Keybindings: a=attach s=stop l=logs d=describe n=new q=quit")
+	os.Exit(0)
+	return true
+}
+
+func runMainApp() (*App, error) {
+	app := NewApp()
+	if err := app.Run(); err != nil {
+		return nil, err
+	}
+	return app, nil
+}
+
+func execAfterExit(app *App) {
+	args := app.ExecAfterArgs()
+	if len(args) == 0 {
+		return
+	}
+	bin, err := exec.LookPath(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s not found: %v\n", args[0], err)
+		os.Exit(1)
+	}
+	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+	if err := syscall.Exec(bin, args, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: exec failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 

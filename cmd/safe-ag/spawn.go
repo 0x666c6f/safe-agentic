@@ -14,6 +14,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
@@ -154,7 +155,63 @@ func executeSpawn(opts SpawnOpts) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	// Validation
+	if err := validateSpawnOpts(opts); err != nil {
+		return err
+	}
+
+	resolved, err := prepareSpawnResolved(opts)
+	if err != nil {
+		return err
+	}
+	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
+		return err
+	}
+
+	cmd := buildSpawnRunCmd(opts, resolved)
+	if err := appendSpawnSSH(ctx, exec, cmd, opts); err != nil {
+		return err
+	}
+	appendSpawnLabels(cmd, opts, resolved)
+	appendAuthVolumes(ctx, exec, cmd, opts, resolved)
+	appendGHAuth(cmd, opts)
+	appendHostConfig(cmd, opts)
+	if err := appendAWSConfig(cmd, opts); err != nil {
+		return err
+	}
+	if err := appendPromptAndTemplate(cmd, opts); err != nil {
+		return err
+	}
+	appendCallbacksAndMetadata(cmd, opts)
+	if err := appendDockerMode(ctx, exec, cmd, opts, resolved); err != nil {
+		return err
+	}
+	if opts.DryRun {
+		fmt.Println("Would execute:")
+		fmt.Printf("  orb run -m safe-agentic %s\n", cmd.Render())
+		return nil
+	}
+
+	if err := startSpawnContainer(ctx, exec, cmd, opts, resolved); err != nil {
+		return err
+	}
+	logSpawnEvent(opts, resolved)
+	return maybeAttachSpawn(ctx, exec, opts, resolved)
+}
+
+type spawnResolved struct {
+	Config        config.Config
+	Memory        string
+	CPUs          string
+	PIDsLimit     int
+	GitName       string
+	GitEmail      string
+	ContainerName string
+	NetworkName   string
+	NetworkMode   string
+	ImageName     string
+}
+
+func validateSpawnOpts(opts SpawnOpts) error {
 	switch opts.AgentType {
 	case "claude", "codex", "shell":
 	default:
@@ -170,105 +227,110 @@ func executeSpawn(opts SpawnOpts) error {
 			return err
 		}
 	}
-	if err := docker.EnsureSSHForRepos(opts.SSH, opts.Repos); err != nil {
-		return err
-	}
+	return docker.EnsureSSHForRepos(opts.SSH, opts.Repos)
+}
 
-	// Load defaults
+func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
 	cfg, err := config.LoadDefaults(config.DefaultsPath())
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return spawnResolved{}, fmt.Errorf("load config: %w", err)
 	}
-	memory := coalesce(opts.Memory, cfg.Memory)
-	cpus := coalesce(opts.CPUs, cfg.CPUs)
-	pidsLimit := opts.PIDsLimit
-	if pidsLimit == 0 && cfg.PIDsLimit != "" {
+
+	resolved := spawnResolved{
+		Config:        cfg,
+		Memory:        coalesce(opts.Memory, cfg.Memory),
+		CPUs:          coalesce(opts.CPUs, cfg.CPUs),
+		PIDsLimit:     opts.PIDsLimit,
+		ContainerName: resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos),
+		ImageName:     "safe-agentic:latest",
+	}
+	if resolved.PIDsLimit == 0 && cfg.PIDsLimit != "" {
 		if v, err := strconv.Atoi(cfg.PIDsLimit); err == nil {
-			pidsLimit = v
+			resolved.PIDsLimit = v
 		}
 	}
 
-	// Identity
-	if opts.Identity == "" {
-		opts.Identity = cfg.Identity
+	identity := opts.Identity
+	if identity == "" {
+		identity = cfg.Identity
 	}
-	if opts.Identity == "" {
-		opts.Identity = config.DetectGitIdentity()
+	if identity == "" {
+		identity = config.DetectGitIdentity()
 	}
-	var gitName, gitEmail string
-	if opts.Identity != "" {
-		gitName, gitEmail, err = config.ParseIdentity(opts.Identity)
-		if err != nil {
-			return fmt.Errorf("parse identity: %w", err)
-		}
+	if identity == "" {
+		return resolved, nil
 	}
 
-	// Container name
-	timestamp := time.Now().Format("20060102-150405")
-	containerName := resolveContainerName(opts.AgentType, opts.Name, timestamp, opts.Repos)
+	resolved.GitName, resolved.GitEmail, err = config.ParseIdentity(identity)
+	if err != nil {
+		return spawnResolved{}, fmt.Errorf("parse identity: %w", err)
+	}
+	return resolved, nil
+}
 
-	// Network
+func prepareSpawnNetwork(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved *spawnResolved) error {
 	customNetwork := opts.Network
 	if customNetwork == "" {
-		customNetwork = cfg.Network
+		customNetwork = resolved.Config.Network
 	}
-	networkName, networkMode, err := docker.PrepareNetwork(ctx, exec, containerName, customNetwork, opts.DryRun)
+	networkName, networkMode, err := docker.PrepareNetwork(ctx, exec, resolved.ContainerName, customNetwork, opts.DryRun)
 	if err != nil {
 		return fmt.Errorf("prepare network: %w", err)
 	}
+	resolved.NetworkName = networkName
+	resolved.NetworkMode = networkMode
+	return nil
+}
 
-	// Build Docker command
-	imageName := "safe-agentic:latest"
-	cmd := docker.NewRunCmd(containerName, imageName)
+func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunCmd {
+	cmd := docker.NewRunCmd(resolved.ContainerName, resolved.ImageName)
 	cmd.AddEnv("AGENT_TYPE", opts.AgentType)
 	if len(opts.Repos) > 0 {
 		cmd.AddEnv("REPOS", strings.Join(opts.Repos, ","))
 	}
-	if gitName != "" {
-		cmd.AddEnv("GIT_AUTHOR_NAME", gitName)
-		cmd.AddEnv("GIT_AUTHOR_EMAIL", gitEmail)
-		cmd.AddEnv("GIT_COMMITTER_NAME", gitName)
-		cmd.AddEnv("GIT_COMMITTER_EMAIL", gitEmail)
+	if resolved.GitName != "" {
+		cmd.AddEnv("GIT_AUTHOR_NAME", resolved.GitName)
+		cmd.AddEnv("GIT_AUTHOR_EMAIL", resolved.GitEmail)
+		cmd.AddEnv("GIT_COMMITTER_NAME", resolved.GitName)
+		cmd.AddEnv("GIT_COMMITTER_EMAIL", resolved.GitEmail)
 	}
-
 	docker.AppendRuntimeHardening(cmd, docker.HardeningOpts{
-		Network:   networkName,
-		Memory:    memory,
-		CPUs:      cpus,
-		PIDsLimit: pidsLimit,
+		Network:   resolved.NetworkName,
+		Memory:    resolved.Memory,
+		CPUs:      resolved.CPUs,
+		PIDsLimit: resolved.PIDsLimit,
 	})
 	docker.AppendCacheMounts(cmd)
-
-	// Auto-trust: tell entrypoint to use --dangerously-skip-permissions
 	if opts.AutoTrust {
 		cmd.AddEnv("SAFE_AGENTIC_AUTO_TRUST", "1")
 	}
+	return cmd
+}
 
-	// SSH
-	if opts.SSH {
-		if opts.DryRun {
-			docker.AppendSSHMountDryRun(cmd)
-		} else {
-			if err := docker.AppendSSHMount(ctx, exec, cmd); err != nil {
-				return err
-			}
-		}
+func appendSpawnSSH(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts) error {
+	if !opts.SSH {
+		return nil
 	}
+	if opts.DryRun {
+		docker.AppendSSHMountDryRun(cmd)
+		return nil
+	}
+	return docker.AppendSSHMount(ctx, exec, cmd)
+}
 
-	// Labels
+func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) {
 	cmd.AddLabel(labels.AgentType, opts.AgentType)
 	cmd.AddLabel(labels.SSH, fmt.Sprintf("%v", opts.SSH))
 	cmd.AddLabel(labels.RepoDisplay, repourl.DisplayLabel(opts.Repos))
-	cmd.AddLabel(labels.NetworkMode, networkMode)
-	cmd.AddLabel(labels.Resources, fmt.Sprintf("cpu=%s,mem=%s,pids=%d", cpus, memory, pidsLimit))
+	cmd.AddLabel(labels.NetworkMode, resolved.NetworkMode)
+	cmd.AddLabel(labels.Resources, fmt.Sprintf("cpu=%s,mem=%s,pids=%d", resolved.CPUs, resolved.Memory, resolved.PIDsLimit))
 	cmd.AddLabel(labels.Terminal, "tmux")
+}
 
-	// Auth volumes
-	// Fleet/pipeline agents get per-container volumes (seeded from shared) for session isolation.
+func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) {
 	if opts.FleetVolume != "" && !opts.EphemeralAuth {
 		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
-		perContainerVol := containerName + "-auth"
-		// Create per-container volume and seed ALL contents from shared volume
+		perContainerVol := resolved.ContainerName + "-auth"
 		if !opts.DryRun {
 			exec.Run(ctx, "docker", "volume", "create", perContainerVol)
 			exec.Run(ctx, "docker", "run", "--rm",
@@ -279,24 +341,26 @@ func executeSpawn(opts SpawnOpts) error {
 		}
 		cmd.AddLabel(labels.AuthType, "fleet-isolated")
 		cmd.AddNamedVolume(perContainerVol, authDestination(opts.AgentType))
-	} else if opts.EphemeralAuth {
+		return
+	}
+	if opts.EphemeralAuth {
 		cmd.AddLabel(labels.AuthType, "ephemeral")
-		authVol := docker.AuthVolumeName(opts.AgentType, true, containerName)
-		cmd.AddNamedVolume(authVol, authDestination(opts.AgentType))
-	} else {
-		cmd.AddLabel(labels.AuthType, "shared")
-		authVol := docker.AuthVolumeName(opts.AgentType, false, "")
-		cmd.AddNamedVolume(authVol, authDestination(opts.AgentType))
+		cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, true, resolved.ContainerName), authDestination(opts.AgentType))
+		return
 	}
+	cmd.AddLabel(labels.AuthType, "shared")
+	cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, false, ""), authDestination(opts.AgentType))
+}
 
-	// GH auth
-	if opts.ReuseGHAuth {
-		cmd.AddLabel(labels.GHAuth, "shared")
-		ghVol := docker.GHAuthVolumeName(opts.AgentType)
-		cmd.AddNamedVolume(ghVol, "/home/agent/.config/gh")
+func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {
+	if !opts.ReuseGHAuth {
+		return
 	}
+	cmd.AddLabel(labels.GHAuth, "shared")
+	cmd.AddNamedVolume(docker.GHAuthVolumeName(opts.AgentType), "/home/agent/.config/gh")
+}
 
-	// Host config injection
+func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	claudeDir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if claudeDir == "" {
 		home, _ := os.UserHomeDir()
@@ -308,45 +372,44 @@ func executeSpawn(opts SpawnOpts) error {
 		codexHome = home + "/.codex"
 	}
 	if opts.AgentType == "claude" || opts.AgentType == "shell" {
-		if envs, err := inject.ReadClaudeConfig(claudeDir); err == nil {
-			for k, v := range envs {
-				cmd.AddEnv(k, v)
-			}
-		}
-		// Inject support files: CLAUDE.md, hooks/, commands/, statusline-command.sh
-		if envs, err := inject.ReadClaudeSupportFiles(claudeDir); err == nil {
-			for k, v := range envs {
-				cmd.AddEnv(k, v)
-			}
-		}
+		envs, err := inject.ReadClaudeConfig(claudeDir)
+		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadClaudeSupportFiles(claudeDir)
+		appendEnvMap(cmd, envs, err)
 	}
 	if opts.AgentType == "codex" || opts.AgentType == "shell" {
-		if envs, err := inject.ReadCodexConfig(codexHome); err == nil {
-			for k, v := range envs {
-				cmd.AddEnv(k, v)
-			}
-		}
+		envs, err := inject.ReadCodexConfig(codexHome)
+		appendEnvMap(cmd, envs, err)
 	}
+}
 
-	// AWS
-	if opts.AWSProfile != "" {
-		home, _ := os.UserHomeDir()
-		credPath := home + "/.aws/credentials"
-		envs, err := inject.ReadAWSCredentials(credPath, opts.AWSProfile)
-		if err != nil {
-			return fmt.Errorf("AWS credentials: %w", err)
-		}
-		for k, v := range envs {
-			cmd.AddEnv(k, v)
-		}
-		cmd.AddTmpfs("/home/agent/.aws", "1m", true, false)
-		cmd.AddLabel(labels.AWS, opts.AWSProfile)
+func appendEnvMap(cmd *docker.DockerRunCmd, envs map[string]string, err error) {
+	if err != nil {
+		return
 	}
+	for k, v := range envs {
+		cmd.AddEnv(k, v)
+	}
+}
 
-	// Prompt / instructions / template
-	// Pass prompt as CMD arg to agent-session.sh:
-	// - Claude: -p "prompt" (runs non-interactively in fleet mode, tmux send-keys otherwise)
-	// - Codex: bare "prompt" (codex --yolo "$@" handles it)
+func appendAWSConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
+	if opts.AWSProfile == "" {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	envs, err := inject.ReadAWSCredentials(home+"/.aws/credentials", opts.AWSProfile)
+	if err != nil {
+		return fmt.Errorf("AWS credentials: %w", err)
+	}
+	for k, v := range envs {
+		cmd.AddEnv(k, v)
+	}
+	cmd.AddTmpfs("/home/agent/.aws", "1m", true, false)
+	cmd.AddLabel(labels.AWS, opts.AWSProfile)
+	return nil
+}
+
+func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 	if opts.Prompt != "" {
 		if opts.AgentType == "codex" {
 			cmd.AddCmdArgs(opts.Prompt)
@@ -370,8 +433,10 @@ func executeSpawn(opts SpawnOpts) error {
 	if opts.Template != "" {
 		cmd.AddEnv("SAFE_AGENTIC_TEMPLATE_B64", inject.EncodeB64(opts.Template))
 	}
+	return nil
+}
 
-	// Callbacks
+func appendCallbacksAndMetadata(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	if opts.OnExit != "" {
 		cmd.AddLabel(labels.OnExit, "1")
 		cmd.AddEnv("SAFE_AGENTIC_ON_EXIT_B64", inject.EncodeB64(opts.OnExit))
@@ -391,14 +456,14 @@ func executeSpawn(opts SpawnOpts) error {
 	if opts.FleetVolume != "" {
 		cmd.AddNamedVolume(opts.FleetVolume, "/fleet")
 		cmd.AddLabel(labels.Fleet, opts.FleetVolume)
-		// Tell agent-session.sh to pass -p directly to Claude (non-interactive exit)
 		cmd.AddEnv("SAFE_AGENTIC_FLEET", "1")
 	}
 	if opts.Hierarchy != "" {
 		cmd.AddLabel(labels.Hierarchy, opts.Hierarchy)
 	}
+}
 
-	// Docker access
+func appendDockerMode(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	if opts.DockerSocket {
 		if !opts.DryRun {
 			if err := docker.AppendHostDockerSocket(ctx, exec, cmd); err != nil {
@@ -406,63 +471,58 @@ func executeSpawn(opts SpawnOpts) error {
 			}
 		}
 		cmd.AddLabel(labels.DockerMode, "host-socket")
-	} else if opts.DockerAccess {
-		docker.AppendDinDAccess(cmd, containerName)
-		cmd.AddLabel(labels.DockerMode, "dind")
-	} else {
-		cmd.AddLabel(labels.DockerMode, "off")
-	}
-
-	// Dry run
-	if opts.DryRun {
-		fmt.Println("Would execute:")
-		fmt.Printf("  orb run -m safe-agentic %s\n", cmd.Render())
 		return nil
 	}
+	if opts.DockerAccess {
+		docker.AppendDinDAccess(cmd, resolved.ContainerName)
+		cmd.AddLabel(labels.DockerMode, "dind")
+		return nil
+	}
+	cmd.AddLabel(labels.DockerMode, "off")
+	return nil
+}
 
-	// Execute
+func startSpawnContainer(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	cmd.Detached = true
-	fullArgs := cmd.Build()
-	_, err = exec.Run(ctx, fullArgs...)
-	if err != nil {
+	if _, err := exec.Run(ctx, cmd.Build()...); err != nil {
 		return fmt.Errorf("start container: %w", err)
 	}
-	fmt.Printf("Agent %s started: %s\n", opts.AgentType, containerName)
-
-	// DinD sidecar
-	if opts.DockerAccess {
-		if err := docker.StartDinDRuntime(ctx, exec, containerName, networkName, imageName); err != nil {
-			return fmt.Errorf("start Docker runtime: %w", err)
-		}
+	fmt.Printf("Agent %s started: %s\n", opts.AgentType, resolved.ContainerName)
+	if !opts.DockerAccess {
+		return nil
 	}
+	if err := docker.StartDinDRuntime(ctx, exec, resolved.ContainerName, resolved.NetworkName, resolved.ImageName); err != nil {
+		return fmt.Errorf("start Docker runtime: %w", err)
+	}
+	return nil
+}
 
-	// Audit log
+func logSpawnEvent(opts SpawnOpts, resolved spawnResolved) {
 	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
-	auditLogger.Log("spawn", containerName, map[string]string{
+	auditLogger.Log("spawn", resolved.ContainerName, map[string]string{
 		"type":    opts.AgentType,
 		"repos":   strings.Join(opts.Repos, ","),
 		"ssh":     fmt.Sprintf("%v", opts.SSH),
-		"network": networkMode,
+		"network": resolved.NetworkMode,
 	})
-
-	// Event
 	events.Emit(events.DefaultEventsPath(), "agent.spawned", map[string]string{
-		"container": containerName,
+		"container": resolved.ContainerName,
 		"type":      opts.AgentType,
 	})
+}
 
-	// Auto-attach
-	if !opts.Background && opts.AgentType != "shell" {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Printf("Not attaching to %s: stdin is not a terminal. Use --background to silence this message.\n", containerName)
-			return nil
-		}
-		if err := tmux.WaitForSession(ctx, exec, containerName); err != nil {
-			return err
-		}
-		return tmux.Attach(exec, containerName)
+func maybeAttachSpawn(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved spawnResolved) error {
+	if opts.Background || opts.AgentType == "shell" {
+		return nil
 	}
-	return nil
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Printf("Not attaching to %s: stdin is not a terminal. Use --background to silence this message.\n", resolved.ContainerName)
+		return nil
+	}
+	if err := tmux.WaitForSession(ctx, exec, resolved.ContainerName); err != nil {
+		return err
+	}
+	return tmux.Attach(exec, resolved.ContainerName)
 }
 
 func resolveContainerName(agentType, name, timestamp string, repos []string) string {

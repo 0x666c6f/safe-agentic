@@ -3,8 +3,8 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"os"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"os"
 	"time"
 )
 

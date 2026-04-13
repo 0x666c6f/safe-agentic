@@ -74,10 +74,8 @@ func TestAppUpdatePreviewHandleCommandAndOverlayHelpers(t *testing.T) {
 	}
 }
 
-func TestAppHandleInputModesAndSorting(t *testing.T) {
-	a := NewApp()
-	a.table.Update(append([]Agent(nil), testAgents()...))
-
+func TestAppHandleInputFilterMode(t *testing.T) {
+	a := newInputTestApp()
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone)); got != nil {
 		t.Fatalf("filter input should return nil, got %#v", got)
 	}
@@ -90,7 +88,10 @@ func TestAppHandleInputModesAndSorting(t *testing.T) {
 	if a.footer.Mode() != FooterModeShortcuts {
 		t.Fatalf("Mode() after filter escape = %v", a.footer.Mode())
 	}
+}
 
+func TestAppHandleInputCommandMode(t *testing.T) {
+	a := newInputTestApp()
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, ':', tcell.ModNone)); got != nil {
 		t.Fatalf("command input should return nil, got %#v", got)
 	}
@@ -100,7 +101,10 @@ func TestAppHandleInputModesAndSorting(t *testing.T) {
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)); got != nil {
 		t.Fatalf("escape in command should return nil, got %#v", got)
 	}
+}
 
+func TestAppHandleInputStatusAndOverlayModes(t *testing.T) {
+	a := newInputTestApp()
 	a.footer.ShowStatus("ok", false)
 	ev := tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone)
 	if got := a.handleInput(ev); got != ev {
@@ -117,20 +121,28 @@ func TestAppHandleInputModesAndSorting(t *testing.T) {
 	if name, _ := a.pages.GetFrontPage(); name != "main" {
 		t.Fatalf("front page after overlay escape = %q", name)
 	}
+}
 
+func TestAppHandleInputNavigationAndSorting(t *testing.T) {
+	a := newInputTestApp()
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone)); got == nil || got.Key() != tcell.KeyDown {
 		t.Fatalf("j should map to down, got %#v", got)
 	}
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone)); got == nil || got.Key() != tcell.KeyUp {
 		t.Fatalf("k should map to up, got %#v", got)
 	}
-
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, '2', tcell.ModNone)); got != nil {
 		t.Fatalf("sort key should return nil, got %#v", got)
 	}
 	if a.table.sortCol != 1 || !a.table.sortAsc {
 		t.Fatalf("sort state = col %d asc %v, want col 1 asc true", a.table.sortCol, a.table.sortAsc)
 	}
+}
+
+func newInputTestApp() *App {
+	a := NewApp()
+	a.table.Update(append([]Agent(nil), testAgents()...))
+	return a
 }
 
 func TestPreviewUpdatesOnSelectionChange(t *testing.T) {

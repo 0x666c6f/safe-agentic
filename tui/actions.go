@@ -427,31 +427,8 @@ func sessionSearchDirs(configDir, repo string) []string {
 }
 
 func (ac *Actions) fetchDockerLogs(name, tailLines string) []byte {
-	// Get the container's repo label to find the right project dir
-	repoLabel, _ := execOrb("docker", "inspect", "--format",
-		`{{index .Config.Labels "safe-agentic.repo-display"}}`, name)
-	repo := strings.TrimSpace(string(repoLabel))
-
-	agentType, _ := execOrb("docker", "inspect", "--format",
-		`{{index .Config.Labels "safe-agentic.agent-type"}}`, name)
-	atype := strings.TrimSpace(string(agentType))
-
-	configDir := "/home/agent/.codex"
-	if atype == "claude" {
-		configDir = "/home/agent/.claude"
-	}
+	repo, configDir, containerCreated, running := inspectLogContext(name)
 	searchDirs := sessionSearchDirs(configDir, repo)
-
-	// Get container creation time to match the correct session file
-	createdOut, _ := execOrb("docker", "inspect", "--format", "{{.Created}}", name)
-	containerCreated := strings.TrimSpace(string(createdOut))
-
-	// Check if container is running
-	stateOut, _ := execOrb("docker", "inspect", "--format", "{{.State.Status}}", name)
-	running := strings.TrimSpace(string(stateOut)) == "running"
-
-	// Python script: find the session file whose first timestamp is closest
-	// to the container creation time. Fall back to file mtime when needed.
 	matchScript := `
 import os, json, sys, glob, datetime
 container_created = sys.argv[1][:19]
@@ -512,55 +489,66 @@ if best_file:
 `
 
 	if running {
-		// Write match script, run via docker exec
-		args := append([]string{"docker", "exec", name, "python3", "-c", matchScript, containerCreated}, searchDirs...)
-		result, err := execOrbTimeout(15*time.Second, args...)
-		if err != nil || strings.TrimSpace(string(result)) == "" {
-			return nil
-		}
-		path := strings.TrimSpace(string(result))
-		if tailLines == "0" {
-			data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
-			return data
-		}
-		data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
+		return fetchRunningSessionLogs(name, tailLines, containerCreated, searchDirs, matchScript)
+	}
+	return fetchStoppedSessionLogs(name, tailLines, configDir, containerCreated, searchDirs, matchScript)
+}
+
+func inspectLogContext(name string) (string, string, string, bool) {
+	repo := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.repo-display"}}`)
+	agentType := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.agent-type"}}`)
+	configDir := logConfigDir(strings.TrimSpace(agentType))
+	createdOut, _ := execOrb("docker", "inspect", "--format", "{{.Created}}", name)
+	stateOut, _ := execOrb("docker", "inspect", "--format", "{{.State.Status}}", name)
+	return strings.TrimSpace(repo), configDir, strings.TrimSpace(string(createdOut)), strings.TrimSpace(string(stateOut)) == "running"
+}
+
+func inspectLogLabel(name, format string) string {
+	out, _ := execOrb("docker", "inspect", "--format", format, name)
+	return strings.TrimSpace(string(out))
+}
+
+func logConfigDir(agentType string) string {
+	if agentType == "claude" {
+		return "/home/agent/.claude"
+	}
+	return "/home/agent/.codex"
+}
+
+func fetchRunningSessionLogs(name, tailLines, containerCreated string, searchDirs []string, matchScript string) []byte {
+	args := append([]string{"docker", "exec", name, "python3", "-c", matchScript, containerCreated}, searchDirs...)
+	path := findSessionLogPath(args...)
+	if path == "" {
+		return nil
+	}
+	return readSessionLogPath(name, tailLines, path)
+}
+
+func findSessionLogPath(args ...string) string {
+	result, err := execOrbTimeout(15*time.Second, args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(result))
+}
+
+func readSessionLogPath(name, tailLines, path string) []byte {
+	if tailLines == "0" {
+		data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
 		return data
 	}
+	data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
+	return data
+}
 
-	// Stopped: docker cp the project dir, then match locally
+func fetchStoppedSessionLogs(name, tailLines, configDir, containerCreated string, searchDirs []string, matchScript string) []byte {
 	tmpDir := "/tmp/satui-logs-" + name
 	execOrb("rm", "-rf", tmpDir)
 	defer execOrb("rm", "-rf", tmpDir)
-
-	for _, dir := range searchDirs {
-		switch {
-		case strings.HasSuffix(dir, "/sessions"):
-			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/sessions/")
-		case strings.Contains(dir, "/projects/"):
-			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/projects/")
-		case dir == configDir:
-			execOrbLong("docker", "cp", name+":"+configDir+"/history.jsonl", tmpDir+"/history.jsonl")
-		default:
-			execOrbLong("docker", "cp", name+":"+dir, tmpDir+"/")
-		}
-	}
-
-	localSearchDirs := make([]string, 0, len(searchDirs))
-	for _, dir := range searchDirs {
-		switch {
-		case strings.HasSuffix(dir, "/sessions"):
-			localSearchDirs = append(localSearchDirs, tmpDir+"/sessions")
-		case strings.Contains(dir, "/projects/"):
-			localSearchDirs = append(localSearchDirs, tmpDir+"/projects")
-		case dir == configDir:
-			localSearchDirs = append(localSearchDirs, tmpDir)
-		default:
-			localSearchDirs = append(localSearchDirs, tmpDir)
-		}
-	}
+	copyStoppedSearchDirs(name, configDir, searchDirs, tmpDir)
+	localSearchDirs := localStoppedSearchDirs(configDir, searchDirs, tmpDir)
 	args := append([]string{"python3", "-c", matchScript, containerCreated}, localSearchDirs...)
-	result, _ := execOrbTimeout(15*time.Second, args...)
-	path := strings.TrimSpace(string(result))
+	path := findSessionLogPath(args...)
 	if path == "" {
 		return nil
 	}
@@ -570,6 +558,51 @@ if best_file:
 	}
 	data, _ := execOrbLong("tail", "-"+tailLines, path)
 	return data
+}
+
+func copyStoppedSearchDirs(name, configDir string, searchDirs []string, tmpDir string) {
+	for _, dir := range searchDirs {
+		dst := stoppedCopyTarget(configDir, dir, tmpDir)
+		src := dir
+		if dir == configDir {
+			src = configDir + "/history.jsonl"
+		}
+		execOrbLong("docker", "cp", name+":"+src, dst)
+	}
+}
+
+func stoppedCopyTarget(configDir, dir, tmpDir string) string {
+	switch {
+	case strings.HasSuffix(dir, "/sessions"):
+		return tmpDir + "/sessions/"
+	case strings.Contains(dir, "/projects/"):
+		return tmpDir + "/projects/"
+	case dir == configDir:
+		return tmpDir + "/history.jsonl"
+	default:
+		return tmpDir + "/"
+	}
+}
+
+func localStoppedSearchDirs(configDir string, searchDirs []string, tmpDir string) []string {
+	localSearchDirs := make([]string, 0, len(searchDirs))
+	for _, dir := range searchDirs {
+		localSearchDirs = append(localSearchDirs, localStoppedSearchDir(configDir, dir, tmpDir))
+	}
+	return localSearchDirs
+}
+
+func localStoppedSearchDir(configDir, dir, tmpDir string) string {
+	switch {
+	case strings.HasSuffix(dir, "/sessions"):
+		return tmpDir + "/sessions"
+	case strings.Contains(dir, "/projects/"):
+		return tmpDir + "/projects"
+	case dir == configDir:
+		return tmpDir
+	default:
+		return tmpDir
+	}
 }
 
 func fetchPlainDockerLogs(name, tailLines string) []byte {
@@ -917,120 +950,8 @@ func renderSessionLog(data []byte) string {
 		if len(line) == 0 {
 			continue
 		}
-
-		// Try Claude Code format first (type: user/assistant/system with message field)
-		var ce claudeEntry
-		if err := json.Unmarshal(line, &ce); err == nil {
-			switch ce.Type {
-			case "user", "assistant", "system":
-				var msg claudeMessage
-				if err := json.Unmarshal(ce.Message, &msg); err == nil {
-					text := extractText(msg.Content)
-					if text == "" {
-						continue
-					}
-					label := "???"
-					switch ce.Type {
-					case "user":
-						label = "USER"
-					case "assistant":
-						label = "AGENT"
-					case "system":
-						label = "SYS"
-					}
-					// Pick timestamp from entry or nested message
-					ts := ce.Timestamp
-					if ts == "" {
-						ts = msg.Timestamp
-					}
-					if len(ts) > 19 {
-						ts = ts[:19]
-					}
-					if ts != "" {
-						// Show just HH:MM:SS for compactness
-						if len(ts) >= 19 {
-							ts = ts[11:19]
-						}
-						fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
-					} else {
-						fmt.Fprintf(&b, "── %s ──\n%s\n\n", label, text)
-					}
-					continue
-				}
-			}
-		}
-
-		// Fall back to Codex format (type: session_meta/response_item with payload)
-		var entry sessionLogEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+		if renderClaudeSessionLine(&b, line) || renderCodexSessionLine(&b, line) {
 			continue
-		}
-		ts := entry.Timestamp
-		if len(ts) > 19 {
-			ts = ts[:19]
-		}
-
-		switch entry.Type {
-		case "session_meta":
-			var meta sessionMeta
-			json.Unmarshal(entry.Payload, &meta)
-			fmt.Fprintf(&b, "━━━ Session ━━━\n")
-			fmt.Fprintf(&b, "  Time:    %s\n", ts)
-			if meta.CWD != "" {
-				fmt.Fprintf(&b, "  Dir:     %s\n", meta.CWD)
-			}
-			if meta.CLIVersion != "" {
-				fmt.Fprintf(&b, "  CLI:     %s\n", meta.CLIVersion)
-			}
-			if meta.Originator != "" {
-				fmt.Fprintf(&b, "  Agent:   %s\n", meta.Originator)
-			}
-			b.WriteString("\n")
-
-		case "response_item":
-			var ri responseItem
-			json.Unmarshal(entry.Payload, &ri)
-			itemType := ri.Type
-			role := ri.Role
-			content := ri.Content
-			if itemType == "" && ri.Item.Type != "" {
-				itemType = ri.Item.Type
-				role = ri.Item.Role
-				content = ri.Item.Content
-			}
-			if role == "" || itemType != "message" {
-				continue
-			}
-			text := extractText(content)
-			if text == "" {
-				continue
-			}
-			label := "???"
-			switch role {
-			case "user":
-				label = "USER"
-			case "assistant":
-				label = "AGENT"
-			case "developer", "system":
-				label = "SYS"
-			}
-			fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
-
-		case "event_msg":
-			var em eventMsg
-			json.Unmarshal(entry.Payload, &em)
-			text := strings.TrimSpace(em.Message)
-			if text == "" {
-				text = strings.TrimSpace(em.Msg)
-			}
-			if text == "" {
-				continue
-			}
-			label := "INFO"
-			if em.Phase == "commentary" {
-				label = "AGENT"
-			}
-			fmt.Fprintf(&b, "── %s [%s] ──\n%s\n\n", label, ts, text)
 		}
 	}
 
@@ -1038,6 +959,149 @@ func renderSessionLog(data []byte) string {
 		return "(empty session log)"
 	}
 	return b.String()
+}
+
+func renderClaudeSessionLine(b *strings.Builder, line []byte) bool {
+	var entry claudeEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return false
+	}
+	label := actorLabel(entry.Type)
+	if label == "" {
+		return false
+	}
+
+	var msg claudeMessage
+	if err := json.Unmarshal(entry.Message, &msg); err != nil {
+		return false
+	}
+	text := extractText(msg.Content)
+	if text == "" {
+		return true
+	}
+
+	ts := entry.Timestamp
+	if ts == "" {
+		ts = msg.Timestamp
+	}
+	appendLogBlock(b, label, compactLogTimestamp(ts), text)
+	return true
+}
+
+func renderCodexSessionLine(b *strings.Builder, line []byte) bool {
+	var entry sessionLogEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return false
+	}
+
+	switch entry.Type {
+	case "session_meta":
+		appendSessionMeta(b, compactSessionTimestamp(entry.Timestamp), entry.Payload)
+	case "response_item":
+		appendResponseItem(b, compactSessionTimestamp(entry.Timestamp), entry.Payload)
+	case "event_msg":
+		appendEventMessage(b, compactSessionTimestamp(entry.Timestamp), entry.Payload)
+	default:
+		return false
+	}
+	return true
+}
+
+func appendSessionMeta(b *strings.Builder, ts string, payload json.RawMessage) {
+	var meta sessionMeta
+	json.Unmarshal(payload, &meta)
+	fmt.Fprintf(b, "━━━ Session ━━━\n")
+	fmt.Fprintf(b, "  Time:    %s\n", ts)
+	if meta.CWD != "" {
+		fmt.Fprintf(b, "  Dir:     %s\n", meta.CWD)
+	}
+	if meta.CLIVersion != "" {
+		fmt.Fprintf(b, "  CLI:     %s\n", meta.CLIVersion)
+	}
+	if meta.Originator != "" {
+		fmt.Fprintf(b, "  Agent:   %s\n", meta.Originator)
+	}
+	b.WriteString("\n")
+}
+
+func appendResponseItem(b *strings.Builder, ts string, payload json.RawMessage) {
+	var item responseItem
+	json.Unmarshal(payload, &item)
+	itemType, role, content := normalizeResponseItem(item)
+	if itemType != "message" || role == "" {
+		return
+	}
+	text := extractText(content)
+	if text == "" {
+		return
+	}
+	appendLogBlock(b, actorLabel(role), ts, text)
+}
+
+func normalizeResponseItem(item responseItem) (string, string, json.RawMessage) {
+	itemType := item.Type
+	role := item.Role
+	content := item.Content
+	if itemType == "" && item.Item.Type != "" {
+		return item.Item.Type, item.Item.Role, item.Item.Content
+	}
+	return itemType, role, content
+}
+
+func appendEventMessage(b *strings.Builder, ts string, payload json.RawMessage) {
+	var msg eventMsg
+	json.Unmarshal(payload, &msg)
+	text := strings.TrimSpace(msg.Message)
+	if text == "" {
+		text = strings.TrimSpace(msg.Msg)
+	}
+	if text == "" {
+		return
+	}
+	label := "INFO"
+	if msg.Phase == "commentary" {
+		label = "AGENT"
+	}
+	appendLogBlock(b, label, ts, text)
+}
+
+func actorLabel(kind string) string {
+	switch kind {
+	case "user":
+		return "USER"
+	case "assistant", "commentary":
+		return "AGENT"
+	case "developer", "system":
+		return "SYS"
+	default:
+		return ""
+	}
+}
+
+func compactSessionTimestamp(ts string) string {
+	if len(ts) > 19 {
+		return ts[:19]
+	}
+	return ts
+}
+
+func compactLogTimestamp(ts string) string {
+	ts = compactSessionTimestamp(ts)
+	if len(ts) >= 19 {
+		return ts[11:19]
+	}
+	return ts
+}
+
+func appendLogBlock(b *strings.Builder, label, ts, text string) {
+	if label == "" || text == "" {
+		return
+	}
+	if ts != "" {
+		fmt.Fprintf(b, "── %s [%s] ──\n%s\n\n", label, ts, text)
+		return
+	}
+	fmt.Fprintf(b, "── %s ──\n%s\n\n", label, text)
 }
 
 // extractText pulls readable text from a message content field.

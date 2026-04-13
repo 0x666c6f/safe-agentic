@@ -90,47 +90,45 @@ func groupKey(a Agent) string {
 	return strings.Join(groupSegments(a), "\x00")
 }
 
+var columnFieldGetters = []func(Agent) string{
+	func(a Agent) string { return a.Name },
+	func(a Agent) string { return a.Type },
+	func(a Agent) string { return a.Repo },
+	func(a Agent) string { return a.SSH },
+	func(a Agent) string { return a.Auth },
+	func(a Agent) string { return a.GHAuth },
+	func(a Agent) string { return a.Docker },
+	func(a Agent) string { return a.NetworkMode },
+	func(a Agent) string { return a.Status },
+	func(a Agent) string { return a.Activity },
+	func(a Agent) string { return a.CPU },
+	func(a Agent) string { return a.Memory },
+	func(a Agent) string { return a.NetIO },
+	func(a Agent) string { return a.PIDs },
+}
+
 func fieldByColumn(a Agent, col int) string {
-	if a.Deleting {
-		switch col {
-		case 8:
-			return "Deleting"
-		case 9:
-			if a.Progress != "" {
-				return a.Progress
-			}
-			return "…"
-		}
+	if deleting := deletingFieldValue(a, col); deleting != "" {
+		return deleting
+	}
+	if col < 0 || col >= len(columnFieldGetters) {
+		return ""
+	}
+	return columnFieldGetters[col](a)
+}
+
+func deletingFieldValue(a Agent, col int) string {
+	if !a.Deleting {
+		return ""
 	}
 	switch col {
-	case 0:
-		return a.Name
-	case 1:
-		return a.Type
-	case 2:
-		return a.Repo
-	case 3:
-		return a.SSH
-	case 4:
-		return a.Auth
-	case 5:
-		return a.GHAuth
-	case 6:
-		return a.Docker
-	case 7:
-		return a.NetworkMode
 	case 8:
-		return a.Status
+		return "Deleting"
 	case 9:
-		return a.Activity
-	case 10:
-		return a.CPU
-	case 11:
-		return a.Memory
-	case 12:
-		return a.NetIO
-	case 13:
-		return a.PIDs
+		if a.Progress != "" {
+			return a.Progress
+		}
+		return "…"
 	default:
 		return ""
 	}

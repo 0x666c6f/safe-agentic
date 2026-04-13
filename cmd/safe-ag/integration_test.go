@@ -246,112 +246,132 @@ func TestE2E_SpawnCreatesContainer(t *testing.T) {
 	if !waitForContainer(t, fullName) {
 		t.Fatal("container did not appear within 30s")
 	}
+	runSpawnContainerChecks(t, fullName)
+}
 
-	t.Run("CapDropAll", func(t *testing.T) {
-		caps := dockerInspectField(t, fullName, "{{json .HostConfig.CapDrop}}")
-		if !strings.Contains(caps, "ALL") {
-			t.Fatalf("CapDrop = %s, want ALL", caps)
-		}
-	})
+func runSpawnContainerChecks(t *testing.T, fullName string) {
+	checks := []func(*testing.T, string){
+		checkSpawnCapDropAll,
+		checkSpawnReadOnlyRootfs,
+		checkSpawnNoNewPrivileges,
+		checkSpawnMemoryLimit,
+		checkSpawnCPULimit,
+		checkSpawnPIDsLimit,
+		checkSpawnAgentTypeLabel,
+		checkSpawnSSHLabel,
+		checkSpawnAuthLabel,
+		checkSpawnTerminalLabel,
+		checkSpawnNetworkModeLabel,
+		checkSpawnRunsAsNonRoot,
+		checkSpawnManagedNetwork,
+		checkSpawnSeccompProfile,
+	}
+	for _, check := range checks {
+		check(t, fullName)
+	}
+}
 
-	t.Run("ReadOnlyRootfs", func(t *testing.T) {
-		ro := dockerInspectField(t, fullName, "{{.HostConfig.ReadonlyRootfs}}")
-		if ro != "true" {
-			t.Fatalf("ReadonlyRootfs = %s, want true", ro)
-		}
-	})
+func checkSpawnCapDropAll(t *testing.T, fullName string) {
+	caps := dockerInspectField(t, fullName, "{{json .HostConfig.CapDrop}}")
+	if !strings.Contains(caps, "ALL") {
+		t.Fatalf("CapDrop = %s, want ALL", caps)
+	}
+}
 
-	t.Run("NoNewPrivileges", func(t *testing.T) {
-		secopt := dockerInspectField(t, fullName, "{{json .HostConfig.SecurityOpt}}")
-		if !strings.Contains(secopt, "no-new-privileges:true") {
-			t.Fatalf("SecurityOpt = %s, want no-new-privileges:true", secopt)
-		}
-	})
+func checkSpawnReadOnlyRootfs(t *testing.T, fullName string) {
+	ro := dockerInspectField(t, fullName, "{{.HostConfig.ReadonlyRootfs}}")
+	if ro != "true" {
+		t.Fatalf("ReadonlyRootfs = %s, want true", ro)
+	}
+}
 
-	t.Run("MemoryLimit", func(t *testing.T) {
-		mem := dockerInspectField(t, fullName, "{{.HostConfig.Memory}}")
-		// 8g = 8589934592
-		if mem != "8589934592" {
-			t.Fatalf("Memory = %s, want 8589934592 (8g)", mem)
-		}
-	})
+func checkSpawnNoNewPrivileges(t *testing.T, fullName string) {
+	secopt := dockerInspectField(t, fullName, "{{json .HostConfig.SecurityOpt}}")
+	if !strings.Contains(secopt, "no-new-privileges:true") {
+		t.Fatalf("SecurityOpt = %s, want no-new-privileges:true", secopt)
+	}
+}
 
-	t.Run("CPULimit", func(t *testing.T) {
-		cpus := dockerInspectField(t, fullName, "{{.HostConfig.NanoCpus}}")
-		// 4 CPUs = 4000000000
-		if cpus != "4000000000" {
-			t.Fatalf("NanoCpus = %s, want 4000000000 (4 cpus)", cpus)
-		}
-	})
+func checkSpawnMemoryLimit(t *testing.T, fullName string) {
+	mem := dockerInspectField(t, fullName, "{{.HostConfig.Memory}}")
+	if mem != "8589934592" {
+		t.Fatalf("Memory = %s, want 8589934592 (8g)", mem)
+	}
+}
 
-	t.Run("PIDsLimit", func(t *testing.T) {
-		pids := dockerInspectField(t, fullName, "{{.HostConfig.PidsLimit}}")
-		if pids != "512" {
-			t.Fatalf("PidsLimit = %s, want 512", pids)
-		}
-	})
+func checkSpawnCPULimit(t *testing.T, fullName string) {
+	cpus := dockerInspectField(t, fullName, "{{.HostConfig.NanoCpus}}")
+	if cpus != "4000000000" {
+		t.Fatalf("NanoCpus = %s, want 4000000000 (4 cpus)", cpus)
+	}
+}
 
-	t.Run("LabelAgentType", func(t *testing.T) {
-		v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.agent-type"}}`)
-		if v != "claude" {
-			t.Fatalf("agent-type label = %q, want claude", v)
-		}
-	})
+func checkSpawnPIDsLimit(t *testing.T, fullName string) {
+	pids := dockerInspectField(t, fullName, "{{.HostConfig.PidsLimit}}")
+	if pids != "512" {
+		t.Fatalf("PidsLimit = %s, want 512", pids)
+	}
+}
 
-	t.Run("LabelSSH", func(t *testing.T) {
-		v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.ssh"}}`)
-		if v != "false" {
-			t.Fatalf("ssh label = %q, want false", v)
-		}
-	})
+func checkSpawnAgentTypeLabel(t *testing.T, fullName string) {
+	v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.agent-type"}}`)
+	if v != "claude" {
+		t.Fatalf("agent-type label = %q, want claude", v)
+	}
+}
 
-	t.Run("LabelAuth", func(t *testing.T) {
-		v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.auth"}}`)
-		if v != "shared" {
-			t.Fatalf("auth label = %q, want shared", v)
-		}
-	})
+func checkSpawnSSHLabel(t *testing.T, fullName string) {
+	v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.ssh"}}`)
+	if v != "false" {
+		t.Fatalf("ssh label = %q, want false", v)
+	}
+}
 
-	t.Run("LabelTerminal", func(t *testing.T) {
-		v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.terminal"}}`)
-		if v != "tmux" {
-			t.Fatalf("terminal label = %q, want tmux", v)
-		}
-	})
+func checkSpawnAuthLabel(t *testing.T, fullName string) {
+	v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.auth"}}`)
+	if v != "shared" {
+		t.Fatalf("auth label = %q, want shared", v)
+	}
+}
 
-	t.Run("LabelNetworkMode", func(t *testing.T) {
-		v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.network-mode"}}`)
-		if v != "managed" {
-			t.Fatalf("network-mode label = %q, want managed", v)
-		}
-	})
+func checkSpawnTerminalLabel(t *testing.T, fullName string) {
+	v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.terminal"}}`)
+	if v != "tmux" {
+		t.Fatalf("terminal label = %q, want tmux", v)
+	}
+}
 
-	t.Run("RunsAsNonRoot", func(t *testing.T) {
-		ctx := context.Background()
-		out, err := orbExec.Run(ctx, "docker", "exec", fullName, "id", "-u")
-		if err != nil {
-			t.Skipf("container may have exited: %v", err)
-		}
-		uid := strings.TrimSpace(string(out))
-		if uid == "0" {
-			t.Fatal("container running as root (uid=0)")
-		}
-	})
+func checkSpawnNetworkModeLabel(t *testing.T, fullName string) {
+	v := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.network-mode"}}`)
+	if v != "managed" {
+		t.Fatalf("network-mode label = %q, want managed", v)
+	}
+}
 
-	t.Run("NetworkCreated", func(t *testing.T) {
-		ctx := context.Background()
-		_, err := orbExec.Run(ctx, "docker", "network", "inspect", fullName+"-net")
-		if err != nil {
-			t.Fatal("managed network not created")
-		}
-	})
+func checkSpawnRunsAsNonRoot(t *testing.T, fullName string) {
+	ctx := context.Background()
+	out, err := orbExec.Run(ctx, "docker", "exec", fullName, "id", "-u")
+	if err != nil {
+		t.Skipf("container may have exited: %v", err)
+	}
+	uid := strings.TrimSpace(string(out))
+	if uid == "0" {
+		t.Fatal("container running as root (uid=0)")
+	}
+}
 
-	t.Run("SeccompProfile", func(t *testing.T) {
-		secopt := dockerInspectField(t, fullName, "{{json .HostConfig.SecurityOpt}}")
-		if !strings.Contains(secopt, "seccomp=") {
-			t.Fatalf("SecurityOpt should contain seccomp profile, got: %s", secopt[:min(len(secopt), 100)])
-		}
-	})
+func checkSpawnManagedNetwork(t *testing.T, fullName string) {
+	ctx := context.Background()
+	if _, err := orbExec.Run(ctx, "docker", "network", "inspect", fullName+"-net"); err != nil {
+		t.Fatal("managed network not created")
+	}
+}
+
+func checkSpawnSeccompProfile(t *testing.T, fullName string) {
+	secopt := dockerInspectField(t, fullName, "{{json .HostConfig.SecurityOpt}}")
+	if !strings.Contains(secopt, "seccomp=") {
+		t.Fatalf("SecurityOpt should contain seccomp profile, got: %s", secopt[:min(len(secopt), 100)])
+	}
 }
 
 func TestE2E_SpawnWithCustomResources(t *testing.T) {

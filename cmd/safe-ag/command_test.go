@@ -539,6 +539,22 @@ func TestOutputCommand_Default_StoppedUsesSessionMessage(t *testing.T) {
 	}
 }
 
+func TestRenderLogEntry_UserBlockContent(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello from block"}]}}`
+	got := renderLogEntry(line)
+	if !strings.Contains(got, "hello from block") {
+		t.Fatalf("renderLogEntry() missing user text block: %q", got)
+	}
+}
+
+func TestRenderLogEntry_SystemResult(t *testing.T) {
+	line := `{"type":"system","subtype":"result","durationMs":2500,"messageCount":3}`
+	got := renderLogEntry(line)
+	if !strings.Contains(got, "[3 messages, 2.5s]") {
+		t.Fatalf("renderLogEntry() missing system result summary: %q", got)
+	}
+}
+
 // ─── summary ──────────────────────────────────────────────────────────────────
 
 func TestSummaryCommand(t *testing.T) {

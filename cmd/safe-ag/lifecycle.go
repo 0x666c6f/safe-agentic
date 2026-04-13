@@ -390,99 +390,71 @@ func reconstructSpawnOpts(ctx context.Context, exec orb.Executor, name string) (
 
 	opts := SpawnOpts{}
 
-	// Agent type
 	opts.AgentType = getLabel(labels.AgentType)
 	if opts.AgentType == "" {
 		return opts, fmt.Errorf("missing label %s", labels.AgentType)
 	}
+	applyReconstructedLabels(&opts, getLabel)
+	applyReconstructedEnvs(&opts, getEnv)
+	opts.Identity = reconstructedIdentity(getEnv)
 
-	// SSH
+	return opts, nil
+}
+
+func applyReconstructedLabels(opts *SpawnOpts, getLabel func(string) string) {
 	opts.SSH = getLabel(labels.SSH) == "true"
+	applyReconstructedAuth(opts, getLabel(labels.AuthType), getLabel(labels.GHAuth))
+	applyReconstructedDockerMode(opts, getLabel(labels.DockerMode))
+	opts.MaxCost = getLabel(labels.MaxCost)
+	opts.AWSProfile = getLabel(labels.AWS)
+	opts.Notify = decodeB64Value(getLabel(labels.NotifyB64))
+	opts.OnComplete = decodeB64Value(getLabel(labels.OnCompleteB64))
+	opts.OnFail = decodeB64Value(getLabel(labels.OnFailB64))
+}
 
-	// Auth
-	authType := getLabel(labels.AuthType)
+func applyReconstructedAuth(opts *SpawnOpts, authType, ghAuth string) {
 	opts.EphemeralAuth = authType == "ephemeral"
 	opts.ReuseAuth = authType == "shared"
+	opts.ReuseGHAuth = ghAuth == "shared"
+}
 
-	// GH auth
-	opts.ReuseGHAuth = getLabel(labels.GHAuth) == "shared"
-
-	// Docker mode
-	switch getLabel(labels.DockerMode) {
+func applyReconstructedDockerMode(opts *SpawnOpts, dockerMode string) {
+	switch dockerMode {
 	case "dind":
 		opts.DockerAccess = true
 	case "host-socket":
 		opts.DockerSocket = true
 	}
+}
 
-	// Max cost
-	opts.MaxCost = getLabel(labels.MaxCost)
-
-	// AWS profile
-	opts.AWSProfile = getLabel(labels.AWS)
-
-	// Repos
+func applyReconstructedEnvs(opts *SpawnOpts, getEnv func(string) string) {
 	if reposEnv := getEnv("REPOS"); reposEnv != "" {
 		opts.Repos = strings.Fields(reposEnv)
 	}
+	opts.Prompt = decodeB64Value(getEnv("SAFE_AGENTIC_PROMPT_B64"))
+	opts.Instructions = decodeB64Value(getEnv("SAFE_AGENTIC_INSTRUCTIONS_B64"))
+	opts.Template = decodeB64Value(getEnv("SAFE_AGENTIC_TEMPLATE_B64"))
+	opts.OnExit = decodeB64Value(getEnv("SAFE_AGENTIC_ON_EXIT_B64"))
+}
 
-	// Prompt
-	if promptB64 := getEnv("SAFE_AGENTIC_PROMPT_B64"); promptB64 != "" {
-		if decoded, err := inject.DecodeB64(promptB64); err == nil {
-			opts.Prompt = decoded
-		}
+func decodeB64Value(raw string) string {
+	if raw == "" {
+		return ""
 	}
-
-	// Instructions
-	if instrB64 := getEnv("SAFE_AGENTIC_INSTRUCTIONS_B64"); instrB64 != "" {
-		if decoded, err := inject.DecodeB64(instrB64); err == nil {
-			opts.Instructions = decoded
-		}
+	decoded, err := inject.DecodeB64(raw)
+	if err != nil {
+		return ""
 	}
+	return decoded
+}
 
-	// Template
-	if tplB64 := getEnv("SAFE_AGENTIC_TEMPLATE_B64"); tplB64 != "" {
-		if decoded, err := inject.DecodeB64(tplB64); err == nil {
-			opts.Template = decoded
-		}
-	}
-
-	// OnExit
-	if onExitB64 := getEnv("SAFE_AGENTIC_ON_EXIT_B64"); onExitB64 != "" {
-		if decoded, err := inject.DecodeB64(onExitB64); err == nil {
-			opts.OnExit = decoded
-		}
-	}
-
-	// Notify
-	if notifyB64 := getLabel(labels.NotifyB64); notifyB64 != "" {
-		if decoded, err := inject.DecodeB64(notifyB64); err == nil {
-			opts.Notify = decoded
-		}
-	}
-
-	// OnComplete
-	if onCompleteB64 := getLabel(labels.OnCompleteB64); onCompleteB64 != "" {
-		if decoded, err := inject.DecodeB64(onCompleteB64); err == nil {
-			opts.OnComplete = decoded
-		}
-	}
-
-	// OnFail
-	if onFailB64 := getLabel(labels.OnFailB64); onFailB64 != "" {
-		if decoded, err := inject.DecodeB64(onFailB64); err == nil {
-			opts.OnFail = decoded
-		}
-	}
-
-	// Git identity from env
+func reconstructedIdentity(getEnv func(string) string) string {
 	gitName := getEnv("GIT_AUTHOR_NAME")
 	gitEmail := getEnv("GIT_AUTHOR_EMAIL")
-	if gitName != "" && gitEmail != "" {
-		opts.Identity = gitName + " <" + gitEmail + ">"
+	if gitName == "" || gitEmail == "" {
+		return ""
 	}
-
-	return opts, nil
+	return gitName + " <" + gitEmail + ">"
 }
 
 // containerEnvVar reads a specific env var from a running or stopped container

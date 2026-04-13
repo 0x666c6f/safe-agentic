@@ -121,94 +121,9 @@ func ShowSpawnForm(app *App) {
 		AddInputField("Identity (optional):", "", 40, nil, nil)
 
 	form.AddButton("Spawn", func() {
-		repoURL := form.GetFormItemByLabel("Repo URL (optional):").(*tview.InputField).GetText()
-		name := form.GetFormItemByLabel("Name (optional):").(*tview.InputField).GetText()
-		prompt := form.GetFormItemByLabel("Prompt (optional):").(*tview.InputField).GetText()
-		ssh := form.GetFormItemByLabel("SSH:").(*tview.Checkbox).IsChecked()
-		reuseAuth := form.GetFormItemByLabel("Reuse auth:").(*tview.Checkbox).IsChecked()
-		reuseGHAuth := form.GetFormItemByLabel("Reuse GH auth:").(*tview.Checkbox).IsChecked()
-		awsProfile := form.GetFormItemByLabel("AWS profile (optional):").(*tview.InputField).GetText()
-		docker := form.GetFormItemByLabel("Docker:").(*tview.Checkbox).IsChecked()
-		identity := form.GetFormItemByLabel("Identity (optional):").(*tview.InputField).GetText()
-
-		app.pages.SwitchToPage("main")
-		app.pages.RemovePage("spawn")
-		app.tapp.SetFocus(app.table.Table())
-
-		// Auto-convert HTTPS GitHub URLs to SSH when SSH is enabled
-		if ssh && strings.HasPrefix(repoURL, "https://github.com/") {
-			path := strings.TrimPrefix(repoURL, "https://github.com/")
-			path = strings.TrimSuffix(path, ".git")
-			repoURL = "git@github.com:" + path + ".git"
-		}
-
-		args := []string{"spawn", agentType}
-		if repoURL != "" {
-			args = append(args, "--repo", repoURL)
-		}
-		if name != "" {
-			args = append(args, "--name", name)
-		}
-		if prompt != "" {
-			args = append(args, "--prompt", prompt)
-		}
-		if ssh {
-			args = append(args, "--ssh")
-		}
-		if reuseAuth {
-			args = append(args, "--reuse-auth")
-		}
-		if reuseGHAuth {
-			args = append(args, "--reuse-gh-auth")
-		}
-		if awsProfile != "" {
-			args = append(args, "--aws", awsProfile)
-		}
-		if docker {
-			args = append(args, "--docker")
-		}
-		if identity != "" {
-			args = append(args, "--identity", identity)
-		}
-
-		// Spawn detached using --background flag: the agent CLI handles
-		// creating networks and running the container in detached mode.
-		app.footer.ShowStatus("Spawning "+agentType+" agent...", false)
-		go func() {
-			spawnArgs := append(args, "--background")
-			spawnCmd := newAgentCmd(spawnArgs...)
-			spawnOut, spawnErr := spawnCmd.CombinedOutput()
-			outStr := strings.TrimSpace(string(spawnOut))
-
-			if spawnErr != nil {
-				app.tapp.QueueUpdateDraw(func() {
-					msg := "Spawn failed"
-					if outStr != "" {
-						msg += ": " + outStr
-					}
-					app.footer.ShowStatus(msg, true)
-				})
-				return
-			}
-
-			// Extract container name from output (last non-empty line)
-			containerName := ""
-			for _, line := range strings.Split(outStr, "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "agent-") {
-					containerName = line
-				}
-			}
-
-			app.poller.ForceRefresh()
-			app.tapp.QueueUpdateDraw(func() {
-				if containerName != "" {
-					app.footer.ShowStatus("Spawned "+containerName+". Press 'r' to connect.", false)
-				} else {
-					app.footer.ShowStatus("Agent spawned. Press 'r' to connect.", false)
-				}
-			})
-		}()
+		spec := readSpawnForm(form, agentType)
+		closeSpawnForm(app)
+		runSpawnFormSubmit(app, spec)
 	})
 
 	form.AddButton("Cancel", func() {
@@ -234,6 +149,129 @@ func ShowSpawnForm(app *App) {
 
 	app.pages.AddAndSwitchToPage("spawn", modal, true)
 	app.tapp.SetFocus(form)
+}
+
+type spawnFormSpec struct {
+	agentType   string
+	repoURL     string
+	name        string
+	prompt      string
+	ssh         bool
+	reuseAuth   bool
+	reuseGHAuth bool
+	awsProfile  string
+	docker      bool
+	identity    string
+}
+
+func readSpawnForm(form *tview.Form, agentType string) spawnFormSpec {
+	return spawnFormSpec{
+		agentType:   agentType,
+		repoURL:     formInputText(form, "Repo URL (optional):"),
+		name:        formInputText(form, "Name (optional):"),
+		prompt:      formInputText(form, "Prompt (optional):"),
+		ssh:         formCheckboxValue(form, "SSH:"),
+		reuseAuth:   formCheckboxValue(form, "Reuse auth:"),
+		reuseGHAuth: formCheckboxValue(form, "Reuse GH auth:"),
+		awsProfile:  formInputText(form, "AWS profile (optional):"),
+		docker:      formCheckboxValue(form, "Docker:"),
+		identity:    formInputText(form, "Identity (optional):"),
+	}
+}
+
+func formInputText(form *tview.Form, label string) string {
+	return form.GetFormItemByLabel(label).(*tview.InputField).GetText()
+}
+
+func formCheckboxValue(form *tview.Form, label string) bool {
+	return form.GetFormItemByLabel(label).(*tview.Checkbox).IsChecked()
+}
+
+func closeSpawnForm(app *App) {
+	app.pages.SwitchToPage("main")
+	app.pages.RemovePage("spawn")
+	app.tapp.SetFocus(app.table.Table())
+}
+
+func runSpawnFormSubmit(app *App, spec spawnFormSpec) {
+	app.footer.ShowStatus("Spawning "+spec.agentType+" agent...", false)
+	go func() {
+		outStr, err := executeSpawnForm(spec)
+		if err != nil {
+			app.tapp.QueueUpdateDraw(func() {
+				msg := "Spawn failed"
+				if outStr != "" {
+					msg += ": " + outStr
+				}
+				app.footer.ShowStatus(msg, true)
+			})
+			return
+		}
+		containerName := spawnedContainerName(outStr)
+		app.poller.ForceRefresh()
+		app.tapp.QueueUpdateDraw(func() {
+			if containerName != "" {
+				app.footer.ShowStatus("Spawned "+containerName+". Press 'r' to connect.", false)
+			} else {
+				app.footer.ShowStatus("Agent spawned. Press 'r' to connect.", false)
+			}
+		})
+	}()
+}
+
+func executeSpawnForm(spec spawnFormSpec) (string, error) {
+	spawnArgs := append(buildSpawnFormArgs(spec), "--background")
+	spawnOut, spawnErr := newAgentCmd(spawnArgs...).CombinedOutput()
+	return strings.TrimSpace(string(spawnOut)), spawnErr
+}
+
+func buildSpawnFormArgs(spec spawnFormSpec) []string {
+	args := []string{"spawn", spec.agentType}
+	repoURL := normalizeSpawnRepoURL(spec.repoURL, spec.ssh)
+	args = appendStringArg(args, "--repo", repoURL)
+	args = appendStringArg(args, "--name", spec.name)
+	args = appendStringArg(args, "--prompt", spec.prompt)
+	args = appendBoolArg(args, spec.ssh, "--ssh")
+	args = appendBoolArg(args, spec.reuseAuth, "--reuse-auth")
+	args = appendBoolArg(args, spec.reuseGHAuth, "--reuse-gh-auth")
+	args = appendStringArg(args, "--aws", spec.awsProfile)
+	args = appendBoolArg(args, spec.docker, "--docker")
+	args = appendStringArg(args, "--identity", spec.identity)
+	return args
+}
+
+func normalizeSpawnRepoURL(repoURL string, ssh bool) string {
+	if !ssh || !strings.HasPrefix(repoURL, "https://github.com/") {
+		return repoURL
+	}
+	path := strings.TrimPrefix(repoURL, "https://github.com/")
+	path = strings.TrimSuffix(path, ".git")
+	return "git@github.com:" + path + ".git"
+}
+
+func appendStringArg(args []string, flag, value string) []string {
+	if value == "" {
+		return args
+	}
+	return append(args, flag, value)
+}
+
+func appendBoolArg(args []string, enabled bool, flag string) []string {
+	if !enabled {
+		return args
+	}
+	return append(args, flag)
+}
+
+func spawnedContainerName(outStr string) string {
+	containerName := ""
+	for _, line := range strings.Split(outStr, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "agent-") {
+			containerName = line
+		}
+	}
+	return containerName
 }
 
 // newAgentCmd creates an exec.Cmd for the safe-ag CLI.
