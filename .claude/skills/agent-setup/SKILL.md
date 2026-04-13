@@ -10,7 +10,7 @@ First-time setup, image rebuilds, and VM management.
 ## First-time setup
 
 ```bash
-agent setup
+safe-ag setup
 ```
 
 This is idempotent and does everything:
@@ -43,43 +43,43 @@ After changes to the Dockerfile, entrypoint, or when CLI tools need updating:
 
 ```bash
 # Standard rebuild (uses Docker cache)
-agent update
+safe-ag update
 
 # Fast: rebuild only the AI CLI layer (Claude Code / Codex updates)
-agent update --quick
+safe-ag update --quick
 
 # Full: no cache, rebuild everything from scratch
-agent update --full
+safe-ag update --full
 ```
 
 ### When to use each
 
 | Scenario | Command |
 |----------|---------|
-| Claude Code or Codex released a new version | `agent update --quick` |
-| Changed Dockerfile, entrypoint, or config | `agent update` |
-| Need fresh OS packages or full clean slate | `agent update --full` |
+| Claude Code or Codex released a new version | `safe-ag update --quick` |
+| Changed Dockerfile, entrypoint, or config | `safe-ag update` |
+| Need fresh OS packages or full clean slate | `safe-ag update --full` |
 
 ## VM management
 
 ```bash
 # Start VM and re-apply hardening (use instead of `orb start`)
-agent vm start
+safe-ag vm start
 
 # Stop the VM
-agent vm stop
+safe-ag vm stop
 
 # SSH into VM for debugging
-agent vm ssh
+safe-ag vm ssh
 ```
 
-**Important:** Always use `agent vm start` instead of `orb start` directly — it re-applies filesystem hardening that OrbStack may reset on restart.
+**Important:** Always use `safe-ag vm start` instead of `orb start` directly — it re-applies filesystem hardening that OrbStack may reset on restart.
 
 ## Troubleshooting
 
 ### "VM not found" error
 ```bash
-agent setup   # Creates the VM
+safe-ag setup   # Creates the VM
 ```
 
 ### "'orb' is required but not installed"
@@ -90,22 +90,22 @@ brew install orbstack
 ### Image build fails
 ```bash
 # SSH into VM and check Docker
-agent vm ssh
+safe-ag vm ssh
 docker info
 docker images
 exit
 
 # Try a full rebuild
-agent update --full
+safe-ag update --full
 ```
 
 ### OrbStack restored macOS mounts
 ```bash
-agent vm start   # Re-applies hardening
+safe-ag vm start   # Re-applies hardening
 ```
 
 ### Need to start over
 ```bash
-agent cleanup            # Remove all containers, auth, networks
-agent update --full      # Rebuild image from scratch
+safe-ag cleanup            # Remove all containers, auth, networks
+safe-ag update --full      # Rebuild image from scratch
 ```

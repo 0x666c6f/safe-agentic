@@ -284,17 +284,64 @@ func init() {
 	rootCmd.AddCommand(templateCmd)
 }
 
-// repoTemplatesDir returns the built-in templates directory next to the binary.
-func repoTemplatesDir() string {
-	// Walk up from the binary to find the templates/ dir.
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
+func looksLikeBuiltInTemplates(dir string) bool {
+	for _, name := range []string{"security-audit.md", "code-review.md"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return false
+		}
 	}
-	// Try binary dir, then parent (useful when running from cmd/safe-ag/).
-	for _, dir := range []string{filepath.Dir(exe), filepath.Dir(filepath.Dir(exe))} {
-		candidate := filepath.Join(dir, "templates")
-		if _, err := os.Stat(candidate); err == nil {
+	return true
+}
+
+func addTemplateCandidates(candidates *[]string, seen map[string]bool, roots ...string) {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		candidate := filepath.Join(root, "templates")
+		abs, err := filepath.Abs(candidate)
+		if err == nil {
+			candidate = abs
+		}
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		*candidates = append(*candidates, candidate)
+	}
+}
+
+// repoTemplatesDir returns the built-in templates directory for repo and packaged installs.
+func repoTemplatesDir() string {
+	var candidates []string
+	seen := map[string]bool{}
+
+	// Start from the current executable. This covers direct repo binaries and
+	// packaged installs where templates sit next to the real binary.
+	exe, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		addTemplateCandidates(&candidates, seen, exeDir, filepath.Dir(exeDir))
+		if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+			resolvedDir := filepath.Dir(resolved)
+			addTemplateCandidates(&candidates, seen, resolvedDir, filepath.Dir(resolvedDir))
+		}
+	}
+
+	// Fall back to walking upward from cwd. This keeps `go run ./cmd/safe-ag`
+	// usable from a source checkout.
+	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; ; dir = filepath.Dir(dir) {
+			addTemplateCandidates(&candidates, seen, dir)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+
+	for _, candidate := range candidates {
+		if looksLikeBuiltInTemplates(candidate) {
 			return candidate
 		}
 	}

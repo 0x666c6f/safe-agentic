@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate Safe Agents"
+  short_description: "Run and supervise multi-agent safe-ag workflows"
+  default_prompt: "Use $agent-orchestrate to split work across safe-agentic workers, monitor progress, and drive the workflow to review or PR."

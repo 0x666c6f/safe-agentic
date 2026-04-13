@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1643,12 +1644,50 @@ func TestUserTemplatesDir(t *testing.T) {
 }
 
 func TestRepoTemplatesDir(t *testing.T) {
-	// repoTemplatesDir walks up from the binary — it may or may not find a
-	// templates dir in test context. Just verify it returns a string (possibly empty).
 	got := repoTemplatesDir()
-	// Either empty (not found) or a valid path ending in templates
-	if got != "" && !strings.HasSuffix(got, "templates") {
+	if got == "" {
+		t.Fatal("repoTemplatesDir() = empty, want built-in templates dir")
+	}
+	if !strings.HasSuffix(got, "templates") {
 		t.Errorf("repoTemplatesDir() = %q, expected path ending in 'templates'", got)
+	}
+	if !looksLikeBuiltInTemplates(got) {
+		t.Errorf("repoTemplatesDir() = %q, want built-in templates", got)
+	}
+}
+
+func TestTemplateList_FromSymlinkedBinary(t *testing.T) {
+	tmp := t.TempDir()
+	binPath := filepath.Join(tmp, "safe-ag")
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = "."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build safe-ag failed: %v\n%s", err, out)
+	}
+
+	linkPath := filepath.Join(tmp, "agent")
+	if err := os.Symlink(binPath, linkPath); err != nil {
+		t.Fatalf("symlink safe-ag: %v", err)
+	}
+
+	listCmd := exec.Command(linkPath, "template", "list")
+	listCmd.Dir = filepath.Join("..", "..")
+	listOut, err := listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("template list via symlink failed: %v\n%s", err, listOut)
+	}
+	if !strings.Contains(string(listOut), "security-audit") {
+		t.Fatalf("template list missing built-ins:\n%s", listOut)
+	}
+
+	showCmd := exec.Command(linkPath, "template", "show", "security-audit")
+	showCmd.Dir = filepath.Join("..", "..")
+	showOut, err := showCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("template show via symlink failed: %v\n%s", err, showOut)
+	}
+	if !strings.Contains(string(showOut), "Perform a security audit") {
+		t.Fatalf("template show returned unexpected content:\n%s", showOut)
 	}
 }
 

@@ -7,6 +7,9 @@
 
 `safe-agentic` runs Claude Code and Codex inside Docker containers inside a hardened OrbStack VM.
 
+Primary CLI: `safe-ag`.
+Agent-facing shortcuts also ship: `safe-ag-claude`, `safe-ag-codex`.
+
 The goal is simple:
 - let the agent operate freely inside its own sandbox
 - keep host access, shared auth, SSH, Docker daemon access, and private-network access opt-in
