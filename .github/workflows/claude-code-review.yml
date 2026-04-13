@@ -77,4 +77,4 @@ jobs:
             Severity levels: CRITICAL, HIGH, MEDIUM, LOW
 
             Do NOT post any summary comment. Only inline comments on specific lines.
-          claude_args: "--max-turns 32"
+          claude_args: "--max-turns 200"
