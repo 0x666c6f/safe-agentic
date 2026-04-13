@@ -386,7 +386,7 @@ func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.Docke
 		return
 	}
 	cmd.AddLabel(labels.AuthType, "ephemeral")
-	cmd.AddTmpfsOwned(authDestination(opts.AgentType), "8m", true, false, 1000, 1000)
+	cmd.AddTmpfsOwned(authDestination(opts.AgentType), "8m", true, true, 1000, 1000)
 }
 
 func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {
@@ -447,7 +447,7 @@ func appendAWSConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 	for k, v := range envs {
 		cmd.AddEnv(k, v)
 	}
-	cmd.AddTmpfs("/home/agent/.aws", "1m", true, false)
+	cmd.AddTmpfs("/home/agent/.aws", "1m", true, true)
 	cmd.AddLabel(labels.AWS, opts.AWSProfile)
 	return nil
 }

@@ -178,8 +178,8 @@ func AppendRuntimeHardening(cmd *DockerRunCmd, opts HardeningOpts) {
 	cmd.AddTmpfs("/var/tmp", "256m", true, true)
 	cmd.AddTmpfs("/run", "16m", true, true)
 	cmd.AddTmpfs("/dev/shm", "64m", true, true)
-	cmd.AddTmpfsOwned("/home/agent/.config", "32m", true, false, 1000, 1000)
-	cmd.AddTmpfsOwned("/home/agent/.ssh", "1m", true, false, 1000, 1000)
+	cmd.AddTmpfsOwned("/home/agent/.config", "32m", true, true, 1000, 1000)
+	cmd.AddTmpfsOwned("/home/agent/.ssh", "1m", true, true, 1000, 1000)
 	cmd.AddEphemeralVolume("/workspace")
 }
 

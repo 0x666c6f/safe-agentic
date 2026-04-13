@@ -456,18 +456,7 @@ func waitForContainers(ctx context.Context, exec orb.Executor, names []string) e
 					return fmt.Errorf("container %s exited with status %d", name, exitCode)
 				}
 				done[name] = true
-				exitCode, codeErr := containerExitCode(ctx, exec, name)
-				if codeErr != nil {
-					fmt.Printf("  ✓ %s exited\n", name)
-					allDone = false
-					continue
-				}
-				if exitCode == 0 {
-					fmt.Printf("  ✓ %s exited\n", name)
-				} else {
-					fmt.Printf("  ✗ %s exited (%d)\n", name, exitCode)
-					failed = append(failed, fmt.Sprintf("%s (%d)", name, exitCode))
-				}
+				fmt.Printf("  ✓ %s exited\n", name)
 			} else {
 				allDone = false
 			}

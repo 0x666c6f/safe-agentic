@@ -164,8 +164,8 @@ func TestAppendRuntimeHardening(t *testing.T) {
 		"--tmpfs /var/tmp:rw,noexec,nosuid,size=256m",
 		"--tmpfs /run:rw,noexec,nosuid,size=16m",
 		"--tmpfs /dev/shm:rw,noexec,nosuid,size=64m",
-		"--tmpfs /home/agent/.config:rw,noexec,size=32m",
-		"--tmpfs /home/agent/.ssh:rw,noexec,size=1m",
+		"--tmpfs /home/agent/.config:rw,noexec,nosuid,size=32m",
+		"--tmpfs /home/agent/.ssh:rw,noexec,nosuid,size=1m",
 		"type=volume,dst=/workspace",
 	}
 	for _, check := range checks {

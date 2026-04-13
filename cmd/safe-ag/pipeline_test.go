@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
 
 func TestRunPipeline_DryRunNestedExample(t *testing.T) {
@@ -90,5 +92,24 @@ func TestSpawnPipelineAgentIncludesStageInHierarchy(t *testing.T) {
 
 	if !strings.Contains(output, "safe-agentic.hierarchy=double-review-reconcile/claude-reviews") {
 		t.Fatalf("dry-run missing stage hierarchy label:\n%s", output)
+	}
+}
+
+func TestWaitForContainers_FetchesExitCodeOnceOnSuccess(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetResponse("docker inspect --format {{.State.Status}} agent-1", "exited")
+	fake.SetResponse("docker inspect --format {{.State.ExitCode}} agent-1", "0")
+
+	output := captureOutput(func() {
+		if err := waitForContainers(context.Background(), fake, []string{"agent-1"}); err != nil {
+			t.Fatalf("waitForContainers() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "✓ agent-1 exited") {
+		t.Fatalf("expected success output, got:\n%s", output)
+	}
+	if got := len(fake.CommandsMatching("docker inspect --format {{.State.ExitCode}} agent-1")); got != 1 {
+		t.Fatalf("exit code inspected %d times, want 1", got)
 	}
 }
