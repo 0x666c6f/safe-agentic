@@ -1,18 +1,18 @@
 @font-face {
   font-family: "FKGrotesk";
-  src: url("https://brand.morpho.org/_next/static/media/FKGrotesk.3acbd9f7.ttf") format("truetype");
+  src: url("./fonts/FKGrotesk.ttf") format("truetype");
   font-display: swap;
 }
 
 @font-face {
   font-family: "FKGrotesk SemiMono";
-  src: url("https://brand.morpho.org/_next/static/media/FKGroteskSemiMono-Regular.3be9e2bb.ttf") format("truetype");
+  src: url("./fonts/FKGroteskSemiMono-Regular.ttf") format("truetype");
   font-display: swap;
 }
 
 @font-face {
   font-family: "FKGrotesk SemiMono";
-  src: url("https://brand.morpho.org/_next/static/media/FKGroteskSemiMono-Medium.ac7b288e.ttf") format("truetype");
+  src: url("./fonts/FKGroteskSemiMono-Medium.ttf") format("truetype");
   font-weight: 500;
   font-display: swap;
 }
