@@ -24,3 +24,17 @@ func TestRuntimePathsIncludeGoBinary(t *testing.T) {
 		t.Fatalf("config/bashrc PATH is missing /usr/local/go/bin")
 	}
 }
+
+func TestAgentSessionDoesNotResumeFleetOrBackgroundRuns(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "bin", "agent-session.sh"))
+	if err != nil {
+		t.Fatalf("read bin/agent-session.sh: %v", err)
+	}
+	content := string(script)
+	if !strings.Contains(content, `[ "${SAFE_AGENTIC_BACKGROUND:-}" != "1" ]`) {
+		t.Fatalf("agent-session.sh missing background resume guard")
+	}
+	if !strings.Contains(content, `[ "${SAFE_AGENTIC_FLEET:-}" != "1" ]`) {
+		t.Fatalf("agent-session.sh missing fleet resume guard")
+	}
+}
