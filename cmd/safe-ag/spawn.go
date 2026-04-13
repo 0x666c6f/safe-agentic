@@ -24,36 +24,36 @@ import (
 )
 
 type SpawnOpts struct {
-	AgentType        string
-	Repos            []string
-	Name             string
-	Prompt           string
-	Template         string
-	Instructions     string
-	InstructionsFile string
-	SSH              bool
-	ReuseAuth        bool
-	EphemeralAuth    bool
-	ReuseGHAuth      bool
-	DockerAccess     bool
-	DockerSocket     bool
-	Network          string
-	Memory           string
-	CPUs             string
-	PIDsLimit        int
-	Identity         string
-	AWSProfile       string
-	AutoTrust        bool
-	Background       bool
-	OnExit           string
-	OnComplete       string
-	OnFail           string
-	MaxCost          string
-	Notify           string
-	FleetVolume      string
-	Hierarchy        string
+	AgentType         string
+	Repos             []string
+	Name              string
+	Prompt            string
+	Template          string
+	Instructions      string
+	InstructionsFile  string
+	SSH               bool
+	ReuseAuth         bool
+	EphemeralAuth     bool
+	ReuseGHAuth       bool
+	DockerAccess      bool
+	DockerSocket      bool
+	Network           string
+	Memory            string
+	CPUs              string
+	PIDsLimit         int
+	Identity          string
+	AWSProfile        string
+	AutoTrust         bool
+	Background        bool
+	OnExit            string
+	OnComplete        string
+	OnFail            string
+	MaxCost           string
+	Notify            string
+	FleetVolume       string
+	Hierarchy         string
 	AllowSetupScripts bool
-	DryRun           bool
+	DryRun            bool
 }
 
 var spawnOpts SpawnOpts
@@ -386,7 +386,7 @@ func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.Docke
 		return
 	}
 	cmd.AddLabel(labels.AuthType, "ephemeral")
-	cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, true, resolved.ContainerName), authDestination(opts.AgentType))
+	cmd.AddTmpfsOwned(authDestination(opts.AgentType), "8m", true, false, 1000, 1000)
 }
 
 func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {

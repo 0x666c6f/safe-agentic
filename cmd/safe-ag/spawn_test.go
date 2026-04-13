@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"strings"
 	"testing"
 )
@@ -101,6 +103,24 @@ func TestAuthDestination(t *testing.T) {
 		if got != tt.want {
 			t.Fatalf("authDestination(%q) = %q, want %q", tt.agentType, got, tt.want)
 		}
+	}
+}
+
+func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
+	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
+
+	appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+		AgentType: "claude",
+	}, spawnResolved{
+		ContainerName: "agent-claude-test",
+	})
+
+	joined := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(joined, "--tmpfs /home/agent/.claude:rw,noexec,size=8m,uid=1000,gid=1000") {
+		t.Fatalf("expected ephemeral auth tmpfs in docker command, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "src=agent-claude-test-auth,dst=/home/agent/.claude") {
+		t.Fatalf("did not expect named auth volume in docker command, got:\n%s", joined)
 	}
 }
 

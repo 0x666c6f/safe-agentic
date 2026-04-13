@@ -129,6 +129,16 @@ func TestAddFlag_RejectsUnsafeFlags(t *testing.T) {
 	cmd.AddFlag("--privileged")
 }
 
+func TestAddFlag_RejectsUnsafeNetworkSplitArgs(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for split --network host")
+		}
+	}()
+	cmd.AddFlag("--network", "host")
+}
+
 func TestAppendRuntimeHardening(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{

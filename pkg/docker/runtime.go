@@ -34,23 +34,34 @@ func NewRunCmd(name, image string) *DockerRunCmd {
 func (d *DockerRunCmd) AddLabel(key, value string) { d.labels[key] = value }
 func (d *DockerRunCmd) AddEnv(key, value string)   { d.envs = append(d.envs, envEntry{key, value}) }
 func (d *DockerRunCmd) AddFlag(flags ...string) {
-	for _, flag := range flags {
+	for i, flag := range flags {
+		next := ""
+		if i+1 < len(flags) {
+			next = flags[i+1]
+		}
 		switch {
 		case flag == "--privileged",
 			flag == "--cap-add=ALL",
 			strings.HasPrefix(flag, "--cap-add="),
+			flag == "--cap-add",
 			flag == "--pid=host",
+			flag == "--pid" && next == "host",
 			flag == "--ipc=host",
+			flag == "--ipc" && next == "host",
 			flag == "--uts=host",
+			flag == "--uts" && next == "host",
 			flag == "--userns=host",
+			flag == "--userns" && next == "host",
 			flag == "--network=host",
-			flag == "--security-opt=seccomp=unconfined":
+			flag == "--network" && next == "host",
+			flag == "--security-opt=seccomp=unconfined",
+			flag == "--security-opt" && next == "seccomp=unconfined":
 			panic("unsafe docker run flag rejected: " + flag)
 		}
 	}
 	d.flags = append(d.flags, flags...)
 }
-func (d *DockerRunCmd) AddCmdArgs(args ...string)  { d.cmdArgs = append(d.cmdArgs, args...) }
+func (d *DockerRunCmd) AddCmdArgs(args ...string) { d.cmdArgs = append(d.cmdArgs, args...) }
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
