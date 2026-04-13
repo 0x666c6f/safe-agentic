@@ -1,95 +1,163 @@
-# safe-agentic
+---
+hide:
+  - navigation
+  - toc
+---
 
-Run Claude Code and Codex inside a hardened OrbStack VM with one container per agent.
+<div class="landing-hero" markdown="1">
 
-The docs are organized around the questions users usually have:
+<p class="landing-eyebrow">safe-agentic</p>
 
-- how do I get this running?
-- how do I spawn and manage an agent?
-- how do fleet/pipeline manifests work?
-- what is safe by default and what is explicitly opt-in?
+# Sandbox coding agents without handing them your host
 
-## Start here
+Launch Claude Code and Codex inside a hardened OrbStack VM, with one isolated container per agent and risky capabilities kept opt-in.
 
-If you are new:
-
-1. [Quickstart](quickstart.md)
-2. [Command Map](usage.md)
-3. [Spawning Agents](guide/spawning.md)
-4. [Managing Agents](guide/managing.md)
-
-If you are evaluating the design:
-
-1. [Architecture](architecture.md)
-2. [Security](security.md)
-
-## What safe-agentic actually is
-
-```text
-macOS host
-  -> OrbStack VM
-    -> Docker daemon
-      -> one hardened container per agent
-```
-
-It is not a policy engine inside your editor. It is a host-side sandbox runner for autonomous coding agents.
-
-## Core defaults
-
-| Area | Default |
-|---|---|
-| SSH agent | off |
-| Claude/Codex auth reuse | off |
-| GitHub auth reuse | off |
-| AWS credentials | off |
-| Docker access | off |
-| Root filesystem | read-only |
-| Linux capabilities | all dropped |
-| Network | dedicated managed bridge |
-| Resource limits | 8g / 4 CPU / 512 PIDs |
-
-## Main entrypoints
+<div class="landing-terminal" markdown="1">
 
 ```bash
+brew install orbstack
+brew tap 0x666c6f/tap
+brew install safe-agentic
 safe-ag setup
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
-safe-ag list
-safe-ag attach --latest
-safe-ag diff --latest
-safe-ag tui
 ```
 
-## Main workflows
+</div>
 
-Single agent:
+[Get Started](quickstart.md){ .md-button .md-button--primary }
+[Command Map](usage.md){ .md-button }
+[GitHub](https://github.com/0x666c6f/safe-agentic){ .md-button }
 
-```bash
-safe-ag spawn claude --ssh --repo git@github.com:org/api.git \
-  --prompt "Fix the failing tests"
-safe-ag peek --latest
-safe-ag diff --latest
-safe-ag review --latest
-```
+<div class="landing-meta">
+  <span>macOS host</span>
+  <span>hardened OrbStack VM</span>
+  <span>one container per agent</span>
+</div>
 
-Parallel agents:
+</div>
 
-```bash
-safe-ag fleet fleet.yaml
-safe-ag tui
-```
+<div class="landing-callout" markdown="1">
 
-Sequential stages:
+`safe-agentic` is a sandbox runner for autonomous coding agents. It is not an editor policy layer pretending to be isolation.
 
-```bash
-safe-ag pipeline pipeline.yaml
-```
+</div>
 
-## Reading order
+## Start with the page that matches the job
 
-- [Quickstart](quickstart.md): installation and first successful run
-- [Usage](usage.md): command map by task
-- [Workflow](guide/workflow.md): review, retry, PR flow
-- [Fleet and Pipelines](guide/fleet.md): manifests and staged runs
-- [Configuration](guide/configuration.md): defaults, templates, image rebuilds
-- [CLI Reference](reference/cli.md): top-level command inventory
-- [TUI Reference](reference/tui.md): keybindings, modes, and dashboard entrypoints
+<div class="grid cards" markdown>
+
+-   :material-rocket-launch-outline: __First successful run__
+
+    Install the toolchain, harden the VM, spawn an agent, inspect the session.
+
+    [Open Quickstart](quickstart.md)
+
+-   :material-console-network-outline: __Daily command map__
+
+    Jump straight to the command you need for setup, attach, diff, retry, or PR flow.
+
+    [Open Command Map](usage.md)
+
+-   :material-source-fork: __Parallel and staged workflows__
+
+    Use fleet manifests, pipelines, retries, and dashboard tooling for multi-agent work.
+
+    [Open Fleet Guide](guide/fleet.md)
+
+-   :material-shield-lock-outline: __Architecture and security__
+
+    Understand trust boundaries, default isolation, and every flag that widens access.
+
+    [Open Security Model](security.md)
+
+</div>
+
+## What you can do with it
+
+<div class="landing-panel-grid">
+  <a class="landing-panel" href="guide/spawning/">
+    <span class="landing-panel-kicker">Spawn</span>
+    <strong>Launch Claude Code, Codex, or a shell in an isolated container.</strong>
+    <code>safe-ag spawn codex --repo ...</code>
+  </a>
+  <a class="landing-panel" href="guide/workflow/">
+    <span class="landing-panel-kicker">Review</span>
+    <strong>Peek at output, diff the workspace, review changes, then open a PR.</strong>
+    <code>safe-ag peek --latest</code>
+  </a>
+  <a class="landing-panel" href="guide/fleet/">
+    <span class="landing-panel-kicker">Orchestrate</span>
+    <strong>Run fleets and pipelines for fan-out review, staged fixes, and consolidation.</strong>
+    <code>safe-ag fleet manifest.yaml</code>
+  </a>
+  <a class="landing-panel" href="guide/tui/">
+    <span class="landing-panel-kicker">Observe</span>
+    <strong>Use the TUI and dashboard to monitor live sessions without dropping into Docker.</strong>
+    <code>safe-ag tui</code>
+  </a>
+</div>
+
+## Defaults that matter
+
+<div class="landing-defaults">
+  <div class="landing-default">
+    <strong>SSH agent</strong>
+    <span>off until <code>--ssh</code></span>
+  </div>
+  <div class="landing-default">
+    <strong>Shared auth</strong>
+    <span>off until reuse flags</span>
+  </div>
+  <div class="landing-default">
+    <strong>Container rootfs</strong>
+    <span>read-only by default</span>
+  </div>
+  <div class="landing-default">
+    <strong>Linux caps</strong>
+    <span><code>cap-drop ALL</code></span>
+  </div>
+  <div class="landing-default">
+    <strong>Network</strong>
+    <span>dedicated managed bridge</span>
+  </div>
+  <div class="landing-default">
+    <strong>Docker access</strong>
+    <span>off until explicitly requested</span>
+  </div>
+</div>
+
+## Common flows
+
+=== "Single agent"
+
+    ```bash
+    safe-ag spawn claude \
+      --ssh \
+      --repo git@github.com:org/repo.git \
+      --prompt "Fix the failing CI tests"
+
+    safe-ag peek --latest
+    safe-ag diff --latest
+    safe-ag review --latest
+    ```
+
+=== "Parallel review"
+
+    ```bash
+    safe-ag fleet examples/fleet-review-and-fix.yaml
+    safe-ag tui
+    ```
+
+=== "Staged pipeline"
+
+    ```bash
+    safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+    ```
+
+## Read in this order
+
+1. [Quickstart](quickstart.md): install, setup, first successful run
+2. [Command Map](usage.md): shortest path to the right command
+3. [Workflow](guide/workflow.md): diff, retry, review, PR flow
+4. [Fleet and Pipelines](guide/fleet.md): orchestration and manifests
+5. [Architecture](architecture.md): how the boundary layers fit together
+6. [Security](security.md): defaults, wideners, and threat model
