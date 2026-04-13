@@ -1,138 +1,148 @@
-# Usage Guide
+# Command Map
 
-## Commands at a glance
+This page answers: "Which command do I run for the job in front of me?"
 
-| Command | Purpose |
-|---|---|
-| `safe-ag setup` | Create/harden VM, build image |
-| `safe-ag spawn <claude|codex|shell>` | Start container |
-| `safe-ag run <repo...> [prompt]` | Quick-start wrapper around `spawn` |
-| `safe-ag list` | List containers |
-| `safe-ag attach <name>` | Reattach to tmux session |
-| `safe-ag peek <name>` | Tail latest visible output |
-| `safe-ag summary <name>` | Show safe-ag summary |
-| `safe-ag logs <name>` | Show conversation log |
-| `safe-ag output <name>` | Show final output / derived view |
-| `safe-ag diff <name>` | Show git diff |
-| `safe-ag checkpoint ...` | Save / list / revert checkpoints |
-| `safe-ag todo ...` | Track merge requirements |
-| `safe-ag review <name>` | Run review over changes |
-| `safe-ag pr <name>` | Push + open PR |
-| `safe-ag aws-refresh <name>` | Refresh AWS credentials in a running container |
-| `safe-ag mcp-login <service> [container]` | Authenticate an MCP service |
-| `safe-ag config ...` | Manage persistent defaults |
-| `safe-ag template ...` | Manage prompt templates |
-| `safe-ag fleet manifest.yaml` | Parallel fleet |
-| `safe-ag pipeline pipeline.yaml` | Sequential orchestration |
-| `safe-ag tui` | Launch TUI |
-| `safe-ag dashboard` | Launch web dashboard |
-| `safe-ag cleanup [--auth]` | Remove containers and optional auth volumes |
-
-## Typical flows
-
-### Spawn
+## Setup and maintenance
 
 ```bash
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
-safe-ag spawn claude --ssh --repo git@github.com:myorg/private.git
-safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:myorg/private.git
+safe-ag setup
+safe-ag update
+safe-ag update --quick
+safe-ag update --full
+safe-ag diagnose
+safe-ag vm start
+safe-ag vm stop
+safe-ag vm ssh
 ```
 
-### Quick-start
+## Spawn and connect
 
 ```bash
-safe-ag run git@github.com:org/api.git "Fix the failing tests"
-safe-ag run https://github.com/org/repo.git --background
+safe-ag spawn <claude|codex|shell> ...
+safe-ag run <repo...> [prompt]
+safe-ag attach <name>
+safe-ag attach --latest
 ```
 
-### Inspect
+Use `spawn` when you want explicit control. Use `run` for a quick single-task session.
+
+## See what the agent is doing
 
 ```bash
 safe-ag list
-safe-ag peek --latest
-safe-ag summary --latest
-safe-ag diff --latest
-safe-ag output --latest
-safe-ag logs --latest
+safe-ag peek <name>
+safe-ag logs <name>
+safe-ag summary <name>
+safe-ag output <name>
+safe-ag diff <name>
+safe-ag review <name>
 ```
 
-### Manage
+Typical meaning:
+- `peek`: last visible pane output
+- `logs`: conversation/session log
+- `summary`: compact state snapshot
+- `output`: last useful result
+- `diff`: git diff from the workspace
+- `review`: review the diff
+
+## Manage containers
 
 ```bash
-safe-ag attach --latest
+safe-ag stop <name>
 safe-ag stop --latest
 safe-ag stop --all
 safe-ag cleanup
 safe-ag cleanup --auth
+safe-ag cp <name> <container-path> <host-path>
+safe-ag sessions <name> [dest]
 ```
 
-### TUI
+## Workflow helpers
+
+```bash
+safe-ag checkpoint create <name> [label]
+safe-ag checkpoint list <name>
+safe-ag checkpoint revert <name> <ref>
+
+safe-ag todo add <name> "text"
+safe-ag todo list <name>
+safe-ag todo check <name> <index>
+safe-ag todo uncheck <name> <index>
+
+safe-ag retry <name> [--feedback "..."]
+safe-ag pr <name> [--title ... --base ...]
+```
+
+## Auth and config
+
+```bash
+safe-ag config show
+safe-ag config get <key>
+safe-ag config set <key> <value>
+safe-ag config reset <key>
+
+safe-ag template list
+safe-ag template show <name>
+safe-ag template create <name>
+
+safe-ag mcp-login <service> [container]
+safe-ag aws-refresh <name> [profile]
+```
+
+## Fleet and pipelines
+
+```bash
+safe-ag fleet manifest.yaml
+safe-ag fleet manifest.yaml --dry-run
+safe-ag fleet status
+
+safe-ag pipeline pipeline.yaml
+safe-ag pipeline pipeline.yaml --dry-run
+```
+
+## TUI and dashboard
 
 ```bash
 safe-ag tui
 safe-ag dashboard --bind localhost:8420
 ```
 
-### Orchestration
+## High-signal examples
+
+Private repo, reusable auth:
 
 ```bash
-safe-ag fleet manifest.yaml
-safe-ag pipeline pipeline.yaml
+safe-ag spawn codex \
+  --ssh \
+  --reuse-auth \
+  --reuse-gh-auth \
+  --repo git@github.com:org/repo.git
 ```
 
-## Important flags
-
-| Flag | Effect |
-|---|---|
-| `--ssh` | Forward SSH agent |
-| `--reuse-auth` | Persist Claude/Codex auth |
-| `--reuse-gh-auth` | Persist GitHub auth |
-| `--aws PROFILE` | Inject AWS credentials |
-| `--docker` | DinD sidecar |
-| `--docker-socket` | Mount VM Docker socket |
-| `--network NAME` | Join custom network |
-| `--background` | Detach immediately |
-| `--prompt TEXT` | Initial prompt |
-| `--template NAME` | Template prompt |
-| `--instructions TEXT` | Extra context |
-| `--auto-trust` | Skip trust prompt |
-| `--dry-run` | Print plan only |
-
-## Defaults
-
-Persistent defaults live in:
+Background run with a prompt:
 
 ```bash
-${XDG_CONFIG_HOME:-~/.config}/safe-agentic/defaults.sh
+safe-ag spawn claude \
+  --background \
+  --ssh \
+  --repo git@github.com:org/repo.git \
+  --prompt "Run the test suite and fix failures"
 ```
 
-Useful keys:
+Infrastructure session:
 
 ```bash
-SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
-SAFE_AGENTIC_DEFAULT_MEMORY="12g"
-SAFE_AGENTIC_DEFAULT_CPUS="6"
-SAFE_AGENTIC_DEFAULT_REUSE_AUTH="1"
+safe-ag spawn claude \
+  --ssh \
+  --aws my-profile \
+  --repo git@github.com:org/infra.git \
+  --prompt "Review Terraform drift"
 ```
 
-## VM override
+Parallel review:
 
 ```bash
-SAFE_AGENTIC_VM_NAME=safe-agentic-alt safe-ag list
-```
-
-Use this when you want the CLI to target a different OrbStack VM than the default `safe-agentic`.
-
-## Troubleshooting
-
-```bash
-safe-ag diagnose
-safe-ag vm start
-safe-ag update
-```
-
-If `safe-ag-tui` is missing:
-
-```bash
-make build-tui
+safe-ag fleet examples/fleet-review-and-fix.yaml
+safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
