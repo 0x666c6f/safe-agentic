@@ -68,6 +68,12 @@ func TestParsePSOutputAndHelpers(t *testing.T) {
 	if !agents[0].Running || agents[1].Running {
 		t.Fatalf("running flags = %#v", agents)
 	}
+	if !agents[1].Finished {
+		t.Fatalf("finished flag = false, want true: %#v", agents[1])
+	}
+	if agents[1].Status != "Finished 1 second ago" {
+		t.Fatalf("status = %q, want Finished 1 second ago", agents[1].Status)
+	}
 	if agents[0].Repo != "org/private-api" || agents[0].NetworkMode != "bridge" {
 		t.Fatalf("parsed agent = %#v", agents[0])
 	}

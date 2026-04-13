@@ -19,6 +19,7 @@ type Agent struct {
 	Hierarchy   string // slash-separated nested fleet/pipeline hierarchy
 	Status      string
 	Running     bool
+	Finished    bool
 	Activity    string // "Working", "Idle", "Stopped"
 	CPU         string
 	Memory      string
