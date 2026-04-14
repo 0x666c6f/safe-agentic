@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -65,6 +66,8 @@ type dashboardSpawnRequest struct {
 type dashboardCommandRequest struct {
 	Args []string `json:"args"`
 }
+
+var validDashboardStashRef = regexp.MustCompile(`^(stash@\{\d+\}|\d+)$`)
 
 // Dashboard is a browser UI backed by the same poller and CLI commands as the TUI.
 type Dashboard struct {
@@ -325,9 +328,39 @@ func (d *Dashboard) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 	d.writeJSON(w, agents)
 }
 
+func (d *Dashboard) checkCSRF(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return true
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		http.Error(w, "CSRF check failed", http.StatusForbidden)
+		return false
+	}
+	host := r.Host
+	if host == "" {
+		host = d.bind
+	}
+	if u.Host == host {
+		return true
+	}
+	if d.bind != "" && u.Host == d.bind {
+		return true
+	}
+	http.Error(w, "CSRF check failed", http.StatusForbidden)
+	return false
+}
+
 func (d *Dashboard) handleAPIStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !d.checkCSRF(w, r) {
 		return
 	}
 	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/agents/stop/"), "/")
@@ -428,6 +461,9 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !d.checkCSRF(w, r) {
+		return
+	}
 	if _, ok := d.lookupAgent(name); !ok {
 		http.NotFound(w, r)
 		return
@@ -461,6 +497,10 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 		ref := strings.TrimSpace(req.Ref)
 		if ref == "" {
 			http.Error(w, "ref is required", http.StatusBadRequest)
+			return
+		}
+		if !validDashboardStashRef.MatchString(ref) {
+			http.Error(w, "invalid stash ref: must be stash@{N} or a numeric index", http.StatusBadRequest)
 			return
 		}
 		out, err := d.runCLI("checkpoint", "restore", name, ref)
@@ -525,6 +565,9 @@ func (d *Dashboard) handleAPIAgentInteractive(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !d.checkCSRF(w, r) {
+		return
+	}
 	if name != "--latest" {
 		if _, ok := d.lookupAgent(name); !ok {
 			http.NotFound(w, r)
@@ -572,6 +615,9 @@ func (d *Dashboard) handleAPIGlobalContent(w http.ResponseWriter, r *http.Reques
 func (d *Dashboard) handleAPIGlobalAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !d.checkCSRF(w, r) {
 		return
 	}
 	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/global/action/"), "/")
@@ -637,6 +683,9 @@ func (d *Dashboard) handleAPIGlobalAction(w http.ResponseWriter, r *http.Request
 func (d *Dashboard) handleAPICommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !d.checkCSRF(w, r) {
 		return
 	}
 	var req dashboardCommandRequest
@@ -767,10 +816,6 @@ func (d *Dashboard) interactiveCommandFromArgs(args []string) (string, bool, err
 		}
 		cmd, err := d.interactiveCommand(target, "mcp-login", args[1])
 		return cmd, true, err
-	case "vm":
-		if len(args) >= 2 && args[1] == "ssh" {
-			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
-		}
 	case "tui", "dashboard":
 		return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
 	case "template":
@@ -779,6 +824,12 @@ func (d *Dashboard) interactiveCommandFromArgs(args []string) (string, bool, err
 		}
 	case "cron":
 		if len(args) >= 2 && args[1] == "daemon" {
+			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
+		}
+	case "cleanup":
+		return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
+	case "vm":
+		if len(args) >= 2 && (args[1] == "ssh" || args[1] == "start" || args[1] == "stop") {
 			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
 		}
 	case "run":
@@ -798,9 +849,17 @@ func validateDashboardCommandArgs(args []string) error {
 		return fmt.Errorf("args are required")
 	}
 	switch args[0] {
-	case "list", "audit", "cleanup", "diagnose",
-		"stop", "peek", "logs", "summary", "output", "diff", "review",
+	case "list", "audit", "diagnose",
+		"peek", "logs", "summary", "output", "diff", "review",
 		"replay", "retry", "sessions", "aws-refresh", "cost", "pr":
+		return nil
+	case "stop":
+		if len(args) < 2 {
+			return fmt.Errorf("stop requires an agent name")
+		}
+		if strings.HasPrefix(args[1], "--") {
+			return fmt.Errorf("stop %q is not allowed from the dashboard; use the kill-all action instead", args[1])
+		}
 		return nil
 	case "checkpoint":
 		if len(args) < 2 {
@@ -855,14 +914,7 @@ func validateDashboardCommandArgs(args []string) error {
 		}
 		return fmt.Errorf("cron subcommand %q is not allowed from the dashboard", args[1])
 	case "vm":
-		if len(args) < 2 {
-			return fmt.Errorf("vm subcommand is required")
-		}
-		switch args[1] {
-		case "start", "stop":
-			return nil
-		}
-		return fmt.Errorf("vm subcommand %q is not allowed from the dashboard", args[1])
+		return fmt.Errorf("vm commands must be run interactively from the dashboard")
 	case "spawn", "run":
 		if !containsArg(args[1:], "--background") {
 			return fmt.Errorf("%s requires --background when run from the dashboard", args[0])

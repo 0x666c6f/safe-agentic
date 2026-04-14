@@ -224,6 +224,28 @@ func TestDashboardInteractiveCommandFromArgsAttachLatest(t *testing.T) {
 	}
 }
 
+func TestDashboardInteractiveCommandFromArgsInteractiveGlobals(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"cleanup", "--auth"}, "safe-ag cleanup --auth"},
+		{[]string{"vm", "stop"}, "safe-ag vm stop"},
+	} {
+		cmd, ok, err := d.interactiveCommandFromArgs(tc.args)
+		if err != nil {
+			t.Fatalf("interactiveCommandFromArgs(%v) error = %v", tc.args, err)
+		}
+		if !ok {
+			t.Fatalf("interactiveCommandFromArgs(%v) should be interactive", tc.args)
+		}
+		if cmd != tc.want {
+			t.Fatalf("interactiveCommandFromArgs(%v) = %q, want %q", tc.args, cmd, tc.want)
+		}
+	}
+}
+
 func TestDashboardAgentTransferActions(t *testing.T) {
 	d := NewDashboard("localhost:8420")
 	d.poller.agents = testAgents()
@@ -323,6 +345,18 @@ func TestDashboardCheckpointActions(t *testing.T) {
 	}
 }
 
+func TestDashboardCheckpointRestoreRejectsInvalidRef(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+	d.poller.agents = testAgents()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/checkpoint-restore", strings.NewReader(`{"ref":"stash@{0}; rm -rf /"}`))
+	rec := httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("checkpoint-restore invalid ref status = %d", rec.Code)
+	}
+}
+
 func TestDashboardCheckpointCreateRejectsBadJSON(t *testing.T) {
 	d := NewDashboard("localhost:8420")
 	d.poller.agents = testAgents()
@@ -401,6 +435,47 @@ func TestDashboardCommandEndpointRejectsSetupAndUpdate(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("payload %s status = %d", payload, rec.Code)
 		}
+	}
+}
+
+func TestDashboardCommandEndpointRejectsStopFlags(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(`{"args":["stop","--all"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.handleAPICommand(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("stop --all status = %d", rec.Code)
+	}
+}
+
+func TestDashboardCommandEndpointCleanupIsInteractive(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(`{"args":["cleanup","--auth"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.handleAPICommand(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cleanup interactive status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"command":"safe-ag cleanup --auth"`) {
+		t.Fatalf("cleanup interactive body = %q", rec.Body.String())
+	}
+}
+
+func TestDashboardCSRFCheckRejectsCrossOriginPost(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+	d.poller.agents = testAgents()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/stop/agent-beta", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	req.Host = "localhost:8420"
+	rec := httptest.NewRecorder()
+	d.handleAPIStop(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("csrf status = %d", rec.Code)
 	}
 }
 
