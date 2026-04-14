@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -60,11 +63,12 @@ type dashboardCommandRequest struct {
 
 // Dashboard is a browser UI backed by the same poller and CLI commands as the TUI.
 type Dashboard struct {
-	bind   string
-	poller *Poller
-	tmpl   *template.Template
-	runCLI func(args ...string) (string, error)
-	runOrb func(args ...string) ([]byte, error)
+	bind         string
+	poller       *Poller
+	tmpl         *template.Template
+	runCLI       func(args ...string) (string, error)
+	runOrb       func(args ...string) ([]byte, error)
+	openTerminal func(args []string) error
 }
 
 // NewDashboard creates a Dashboard bound to the given address (e.g. "localhost:8420").
@@ -77,7 +81,8 @@ func NewDashboard(bind string) *Dashboard {
 			out, err := newCLICmd(args...).CombinedOutput()
 			return strings.TrimSpace(string(out)), err
 		},
-		runOrb: execOrbLong,
+		runOrb:       execOrbLong,
+		openTerminal: openTerminalCommand,
 	}
 }
 
@@ -396,16 +401,29 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 }
 
 func (d *Dashboard) handleAPIAgentInteractive(w http.ResponseWriter, r *http.Request, name, kind string) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if _, ok := d.lookupAgent(name); !ok {
-		http.NotFound(w, r)
+	if name != "--latest" {
+		if _, ok := d.lookupAgent(name); !ok {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	args, err := d.interactiveArgs(name, kind, r.URL.Query().Get("server"))
+	if err != nil {
+		d.writeCommandResult(w, "", err, "", false)
 		return
 	}
-	command, err := d.interactiveCommand(name, kind, r.URL.Query().Get("server"))
-	d.writeCommandResult(w, "", err, command, true)
+	command := interactiveDisplayCommand(args)
+	if r.Method == http.MethodPost {
+		out := "Opened Terminal for: " + command
+		err = d.openTerminal(args)
+		d.writeCommandResult(w, out, err, command, true)
+		return
+	}
+	d.writeCommandResult(w, "", nil, command, true)
 }
 
 func (d *Dashboard) handleAPIGlobalContent(w http.ResponseWriter, r *http.Request) {
@@ -508,27 +526,27 @@ func (d *Dashboard) handleAPICommand(w http.ResponseWriter, r *http.Request) {
 	d.writeCommandResult(w, out, err, "", false)
 }
 
-func (d *Dashboard) interactiveCommand(name, kind, server string) (string, error) {
+func (d *Dashboard) interactiveArgs(name, kind, server string) ([]string, error) {
 	switch kind {
 	case "attach":
 		target := strings.TrimSpace(name)
 		if target == "" {
-			return "", fmt.Errorf("attach target is required")
+			return nil, fmt.Errorf("attach target is required")
 		}
-		return shellQuoteArgs([]string{"safe-ag", "attach", target}), nil
+		return []string{cliBinary, "attach", target}, nil
 	case "resume":
 		agent, ok := d.lookupAgent(name)
 		if !ok {
-			return "", fmt.Errorf("agent %s not found", name)
+			return nil, fmt.Errorf("agent %s not found", name)
 		}
 		if containerUsesTmux(name) {
-			return shellQuoteArgs(buildTmuxAttachArgs(name)), nil
+			return buildTmuxAttachArgs(name), nil
 		}
 		if !resumeSupported(agent.Type) {
-			return "", fmt.Errorf("resume not supported for %s containers", agent.Type)
+			return nil, fmt.Errorf("resume not supported for %s containers", agent.Type)
 		}
 		if agent.Running {
-			return shellQuoteArgs(buildAttachArgs(name)), nil
+			return buildAttachArgs(name), nil
 		}
 		cwd := defaultResumeCWD
 		meta, err := loadLatestSessionMeta(name, agent.Type, false)
@@ -537,18 +555,55 @@ func (d *Dashboard) interactiveCommand(name, kind, server string) (string, error
 		}
 		args, err := buildResumeExecArgs(agent.Type, name, cwd)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return shellQuoteArgs(args), nil
+		return args, nil
 	case "mcp-login":
 		server = strings.TrimSpace(server)
 		if server == "" {
-			return "", fmt.Errorf("server is required for mcp-login")
+			return nil, fmt.Errorf("server is required for mcp-login")
 		}
-		return shellQuoteArgs(append([]string{"safe-ag"}, mcpLoginArgs(server, name)...)), nil
+		return append([]string{cliBinary}, mcpLoginArgs(server, name)...), nil
 	default:
-		return "", fmt.Errorf("unsupported interactive command: %s", kind)
+		return nil, fmt.Errorf("unsupported interactive command: %s", kind)
 	}
+}
+
+func interactiveDisplayCommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	display := append([]string(nil), args...)
+	if display[0] == cliBinary {
+		display[0] = cliBinaryName
+	}
+	return shellQuoteArgs(display)
+}
+
+func openTerminalCommand(args []string) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("opening interactive commands from the dashboard is only supported on macOS")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	command := "cd " + shellQuoteArgs([]string{cwd}) + " && exec " + shellQuoteArgs(args)
+	script := []string{
+		"-e", `tell application "Terminal"`,
+		"-e", `activate`,
+		"-e", `do script ` + strconv.Quote(command),
+		"-e", `end tell`,
+	}
+	return exec.Command("osascript", script...).Run()
+}
+
+func (d *Dashboard) interactiveCommand(name, kind, server string) (string, error) {
+	args, err := d.interactiveArgs(name, kind, server)
+	if err != nil {
+		return "", err
+	}
+	return interactiveDisplayCommand(args), nil
 }
 
 func (d *Dashboard) interactiveCommandFromArgs(args []string) (string, bool, error) {

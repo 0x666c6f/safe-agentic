@@ -843,8 +843,8 @@ const dashboardHTML = `
                   <div class="statusline">Fast controls, clearly separated from runtime info.</div>
                 </div>
                 <div class="agent-actions-grid">
-                  <button class="btn agent-action-btn" type="button" data-interactive="attach"><strong>Attach cmd</strong><small>Open terminal attach command for current agent.</small></button>
-                  <button class="btn agent-action-btn" type="button" data-interactive="resume"><strong>Resume cmd</strong><small>Reconnect to the latest supported session.</small></button>
+                  <button class="btn agent-action-btn" type="button" data-open-interactive="attach"><strong>Attach</strong><small>Open a Terminal window attached to the current agent.</small></button>
+                  <button class="btn agent-action-btn" type="button" data-open-interactive="resume"><strong>Resume</strong><small>Open a Terminal window for the latest resumable session.</small></button>
                   <button class="btn agent-action-btn warn" type="button" data-action="stop"><strong>Stop agent</strong><small>Stop the selected container immediately.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="checkpoint"><strong>Create checkpoint</strong><small>Capture current workspace state before risky work.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="sessions"><strong>Export sessions</strong><small>Pull session history for offline inspection.</small></button>
@@ -1714,6 +1714,24 @@ const dashboardHTML = `
     }
   }
 
+  async function openInteractive(kind, server = '') {
+    const agent = selectedAgent();
+    if (!agent) return;
+    showBusy('Opening Terminal for ' + kind);
+    $('command-output').textContent = 'Opening Terminal for ' + kind + '…';
+    try {
+      const suffix = server ? ('?server=' + encodeURIComponent(server)) : '';
+      const data = await fetchJSON('/api/agents/' + encodeURIComponent(agent.Name) + '/interactive/' + kind + suffix, {
+        method: 'POST'
+      });
+      $('command-output').textContent = data.output || data.command || '(no output)';
+    } catch (err) {
+      $('command-output').textContent = String(err.message || err);
+    } finally {
+      clearBusy();
+    }
+  }
+
   async function loadAudit() {
     showBusy('Loading audit');
     $('command-output').textContent = 'Loading audit…';
@@ -1819,6 +1837,9 @@ const dashboardHTML = `
     });
     document.querySelectorAll('[data-interactive]').forEach(btn => {
       btn.addEventListener('click', () => showInteractive(btn.dataset.interactive));
+    });
+    document.querySelectorAll('[data-open-interactive]').forEach(btn => {
+      btn.addEventListener('click', () => openInteractive(btn.dataset.openInteractive));
     });
     $('copy-submit').addEventListener('click', () => {
       postAgentAction('copy', {

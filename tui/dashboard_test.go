@@ -170,6 +170,29 @@ func TestDashboardAgentContentAndInteractive(t *testing.T) {
 	}
 }
 
+func TestDashboardAgentInteractiveOpen(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+	d.poller.agents = testAgents()
+	var gotArgs []string
+	d.openTerminal = func(args []string) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/interactive/attach", nil)
+	rec := httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("interactive open status = %d", rec.Code)
+	}
+	if strings.Join(gotArgs, " ") != cliBinary+" attach agent-beta" {
+		t.Fatalf("openTerminal args = %q", strings.Join(gotArgs, " "))
+	}
+	if !strings.Contains(rec.Body.String(), "Opened Terminal for: safe-ag attach agent-beta") {
+		t.Fatalf("interactive open body = %q", rec.Body.String())
+	}
+}
+
 func TestDashboardInteractiveCommandFromArgsAttachLatest(t *testing.T) {
 	d := NewDashboard("localhost:8420")
 
