@@ -35,6 +35,10 @@ type dashboardCheckpointRequest struct {
 	Label string `json:"label"`
 }
 
+type dashboardCheckpointRevertRequest struct {
+	Ref string `json:"ref"`
+}
+
 type dashboardTransferRequest struct {
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
@@ -360,6 +364,22 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			label = fmt.Sprintf("checkpoint-%d", time.Now().Unix())
 		}
 		out, err := d.runCLI("checkpoint", "create", name, label)
+		d.writeCommandResult(w, out, err, "", false)
+	case "checkpoint-list":
+		out, err := d.runCLI("checkpoint", "list", name)
+		d.writeCommandResult(w, out, err, "", false)
+	case "checkpoint-revert":
+		var req dashboardCheckpointRevertRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		ref := strings.TrimSpace(req.Ref)
+		if ref == "" {
+			http.Error(w, "ref is required", http.StatusBadRequest)
+			return
+		}
+		out, err := d.runCLI("checkpoint", "revert", name, ref)
 		d.writeCommandResult(w, out, err, "", false)
 	case "sessions":
 		out, err := d.runCLI("sessions", name)

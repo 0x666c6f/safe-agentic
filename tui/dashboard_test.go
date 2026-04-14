@@ -239,6 +239,37 @@ func TestDashboardAgentTransferActions(t *testing.T) {
 	}
 }
 
+func TestDashboardCheckpointActions(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+	d.poller.agents = testAgents()
+
+	var gotArgs []string
+	d.runCLI = func(args ...string) (string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "ok", nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/checkpoint-list", nil)
+	rec := httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checkpoint-list status = %d", rec.Code)
+	}
+	if strings.Join(gotArgs, " ") != "checkpoint list agent-beta" {
+		t.Fatalf("checkpoint-list args = %q", strings.Join(gotArgs, " "))
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/checkpoint-revert", strings.NewReader(`{"ref":"stash@{0}"}`))
+	rec = httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checkpoint-revert status = %d", rec.Code)
+	}
+	if strings.Join(gotArgs, " ") != "checkpoint revert agent-beta stash@{0}" {
+		t.Fatalf("checkpoint-revert args = %q", strings.Join(gotArgs, " "))
+	}
+}
+
 func TestDashboardCommandEndpoint(t *testing.T) {
 	d := NewDashboard("localhost:8420")
 	d.poller.agents = testAgents()

@@ -847,6 +847,8 @@ const dashboardHTML = `
                   <button class="btn agent-action-btn" type="button" data-open-interactive="resume"><strong>Resume</strong><small>Open a Terminal window for the latest resumable session.</small></button>
                   <button class="btn agent-action-btn warn" type="button" data-action="stop"><strong>Stop agent</strong><small>Stop the selected container immediately.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="checkpoint"><strong>Create checkpoint</strong><small>Capture current workspace state before risky work.</small></button>
+                  <button class="btn agent-action-btn" type="button" data-action="checkpoint-list"><strong>List checkpoints</strong><small>Show available stash-based checkpoint refs for this agent.</small></button>
+                  <button class="btn agent-action-btn" type="button" data-action="checkpoint-revert"><strong>Restore checkpoint</strong><small>Restore a checkpoint by stash ref such as <code>stash@{0}</code>.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="sessions"><strong>Export sessions</strong><small>Pull session history for offline inspection.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="pr"><strong>Create PR</strong><small>Open a pull request from the selected agent branch.</small></button>
                 </div>
@@ -1830,6 +1832,12 @@ const dashboardHTML = `
         if (action === 'checkpoint') {
           const label = prompt('Checkpoint label (optional):', '');
           postAgentAction(action, {label: label || ''});
+          return;
+        }
+        if (action === 'checkpoint-revert') {
+          const ref = prompt('Checkpoint ref to restore (e.g. stash@{0} or 0):', 'stash@{0}');
+          if (!ref) return;
+          postAgentAction(action, {ref});
           return;
         }
         postAgentAction(action);
