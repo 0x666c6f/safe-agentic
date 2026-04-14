@@ -103,26 +103,75 @@ func (d *Dashboard) Start() error {
 	mux.HandleFunc("/api/global/content/", d.handleAPIGlobalContent)
 	mux.HandleFunc("/api/global/action/", d.handleAPIGlobalAction)
 	mux.HandleFunc("/api/command", d.handleAPICommand)
-	mux.Handle("/dashboard-assets/", http.StripPrefix("/dashboard-assets/", http.FileServer(http.Dir(d.assetDir()))))
+	if assetDir := d.assetDir(); assetDir != "" {
+		mux.Handle("/dashboard-assets/", http.StripPrefix("/dashboard-assets/", http.FileServer(http.Dir(assetDir))))
+	}
 	log.Printf("Dashboard running at http://%s", d.bind)
 	return http.ListenAndServe(d.bind, mux)
 }
 
 func (d *Dashboard) assetDir() string {
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "docs", "assets"))
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+	exe, _ := os.Executable()
+	wd, _ := os.Getwd()
+	return findDashboardAssetDir(exe, wd)
+}
+
+func findDashboardAssetDir(exePath, wd string) string {
+	if exePath != "" {
+		candidate := filepath.Clean(filepath.Join(filepath.Dir(exePath), "..", "docs", "assets"))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return candidate
 		}
 	}
-	if wd, err := os.Getwd(); err == nil {
+	if wd != "" {
 		candidate := filepath.Join(wd, "docs", "assets")
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return candidate
 		}
 	}
-	return "."
+	return ""
+}
+
+func dashboardWorkspaceRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(wd), nil
+}
+
+func resolveDashboardWorkspacePath(raw string, requireYAML bool) (string, error) {
+	root, err := dashboardWorkspaceRoot()
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("path is required")
+	}
+
+	var candidate string
+	if filepath.IsAbs(value) {
+		candidate = filepath.Clean(value)
+	} else {
+		candidate = filepath.Join(root, value)
+	}
+	candidate = filepath.Clean(candidate)
+
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path must stay within %s", root)
+	}
+	if requireYAML {
+		ext := strings.ToLower(filepath.Ext(candidate))
+		if ext != ".yaml" && ext != ".yml" {
+			return "", fmt.Errorf("manifest path must end in .yaml or .yml")
+		}
+	}
+	return candidate, nil
 }
 
 func (d *Dashboard) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +407,10 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 		d.writeCommandResult(w, out, err, "", false)
 	case "checkpoint":
 		var req dashboardCheckpointRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
 		label := strings.TrimSpace(req.Label)
 		if label == "" {
 			label = fmt.Sprintf("checkpoint-%d", time.Now().Unix())
@@ -394,9 +446,13 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		source := strings.TrimSpace(req.Source)
-		destination := strings.TrimSpace(req.Destination)
-		if source == "" || destination == "" {
+		destination, err := resolveDashboardWorkspacePath(req.Destination, false)
+		if source == "" || strings.TrimSpace(req.Destination) == "" {
 			http.Error(w, "source and destination are required", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		out, err := d.runOrb("docker", "cp", name+":"+source, destination)
@@ -407,10 +463,14 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		source := strings.TrimSpace(req.Source)
+		source, err := resolveDashboardWorkspacePath(req.Source, false)
 		destination := strings.TrimSpace(req.Destination)
-		if source == "" || destination == "" {
+		if strings.TrimSpace(req.Source) == "" || destination == "" {
 			http.Error(w, "source and destination are required", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		out, err := d.runOrb("docker", "cp", source, name+":"+destination)
@@ -485,7 +545,12 @@ func (d *Dashboard) handleAPIGlobalAction(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		out, err := d.runCLI("fleet", strings.TrimSpace(req.Path))
+		path, err := resolveDashboardWorkspacePath(req.Path, true)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		out, err := d.runCLI("fleet", path)
 		d.writeCommandResult(w, out, err, "", false)
 	case "pipeline":
 		var req dashboardPathRequest
@@ -493,7 +558,12 @@ func (d *Dashboard) handleAPIGlobalAction(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		out, err := d.runCLI("pipeline", strings.TrimSpace(req.Path))
+		path, err := resolveDashboardWorkspacePath(req.Path, true)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		out, err := d.runCLI("pipeline", path)
 		d.writeCommandResult(w, out, err, "", false)
 	case "spawn":
 		var req dashboardSpawnRequest
@@ -540,6 +610,10 @@ func (d *Dashboard) handleAPICommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if command, ok, err := d.interactiveCommandFromArgs(req.Args); ok {
 		d.writeCommandResult(w, "", err, command, true)
+		return
+	}
+	if err := validateDashboardCommandArgs(req.Args); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	out, err := d.runCLI(req.Args...)
@@ -668,13 +742,109 @@ func (d *Dashboard) interactiveCommandFromArgs(args []string) (string, bool, err
 			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
 		}
 	case "run":
-		return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
+		if !containsArg(args[1:], "--background") {
+			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
+		}
 	case "spawn":
 		if !containsArg(args[1:], "--background") {
 			return shellQuoteArgs(append([]string{"safe-ag"}, args...)), true, nil
 		}
 	}
 	return "", false, nil
+}
+
+func validateDashboardCommandArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("args are required")
+	}
+	switch args[0] {
+	case "list", "audit", "cleanup", "setup", "update", "diagnose",
+		"stop", "peek", "logs", "summary", "output", "diff", "review",
+		"replay", "retry", "sessions", "aws-refresh", "cost", "pr":
+		return nil
+	case "checkpoint":
+		if len(args) < 2 {
+			return fmt.Errorf("checkpoint subcommand is required")
+		}
+		switch args[1] {
+		case "create", "list", "restore", "revert":
+			return nil
+		}
+		return fmt.Errorf("checkpoint subcommand %q is not allowed from the dashboard", args[1])
+	case "todo":
+		if len(args) < 2 {
+			return fmt.Errorf("todo subcommand is required")
+		}
+		switch args[1] {
+		case "add", "list", "check", "uncheck":
+			return nil
+		}
+		return fmt.Errorf("todo subcommand %q is not allowed from the dashboard", args[1])
+	case "fleet":
+		if len(args) >= 2 && args[1] == "status" {
+			return nil
+		}
+		return validateDashboardManifestArgs("fleet", args[1:])
+	case "pipeline":
+		return validateDashboardManifestArgs("pipeline", args[1:])
+	case "config":
+		if len(args) < 2 {
+			return fmt.Errorf("config subcommand is required")
+		}
+		switch args[1] {
+		case "show", "get", "set", "reset":
+			return nil
+		}
+		return fmt.Errorf("config subcommand %q is not allowed from the dashboard", args[1])
+	case "template":
+		if len(args) < 2 {
+			return fmt.Errorf("template subcommand is required")
+		}
+		switch args[1] {
+		case "list", "show":
+			return nil
+		}
+		return fmt.Errorf("template subcommand %q is not allowed from the dashboard", args[1])
+	case "cron":
+		if len(args) < 2 {
+			return fmt.Errorf("cron subcommand is required")
+		}
+		switch args[1] {
+		case "add", "list", "remove", "enable", "disable", "run":
+			return nil
+		}
+		return fmt.Errorf("cron subcommand %q is not allowed from the dashboard", args[1])
+	case "vm":
+		if len(args) < 2 {
+			return fmt.Errorf("vm subcommand is required")
+		}
+		switch args[1] {
+		case "start", "stop":
+			return nil
+		}
+		return fmt.Errorf("vm subcommand %q is not allowed from the dashboard", args[1])
+	case "spawn", "run":
+		if !containsArg(args[1:], "--background") {
+			return fmt.Errorf("%s requires --background when run from the dashboard", args[0])
+		}
+		return nil
+	default:
+		return fmt.Errorf("command %q is not allowed from the dashboard", args[0])
+	}
+}
+
+func validateDashboardManifestArgs(kind string, args []string) error {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		_, err := resolveDashboardWorkspacePath(arg, true)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("%s manifest path is required", kind)
 }
 
 func containsArg(args []string, needle string) bool {
