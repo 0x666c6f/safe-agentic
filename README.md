@@ -1,8 +1,8 @@
-# safe-agentic
-
 <p align="center">
   <img src="docs/assets/readme-logo.png" alt="safe-agentic logo" width="220">
 </p>
+
+# safe-agentic
 
 [![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)
