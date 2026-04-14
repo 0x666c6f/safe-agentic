@@ -1,5 +1,9 @@
 # safe-agentic
 
+<p align="center">
+  <img src="docs/assets/readme-logo.png" alt="safe-agentic logo" width="220">
+</p>
+
 [![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)
 [![Go Report](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fsafe-agentic%2Fbadges%2F.github%2Fbadges%2Fgoreport.json)](https://github.com/0x666c6f/safe-agentic/actions/workflows/coverage.yml)
