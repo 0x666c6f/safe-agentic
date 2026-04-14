@@ -509,18 +509,18 @@ func (d *Dashboard) handleAPICommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Dashboard) interactiveCommand(name, kind, server string) (string, error) {
-	agent, ok := d.lookupAgent(name)
-	if !ok {
-		return "", fmt.Errorf("agent %s not found", name)
-	}
-
 	switch kind {
 	case "attach":
-		if containerUsesTmux(name) {
-			return shellQuoteArgs(buildTmuxAttachArgs(name)), nil
+		target := strings.TrimSpace(name)
+		if target == "" {
+			return "", fmt.Errorf("attach target is required")
 		}
-		return shellQuoteArgs(buildAttachArgs(name)), nil
+		return shellQuoteArgs([]string{"safe-ag", "attach", target}), nil
 	case "resume":
+		agent, ok := d.lookupAgent(name)
+		if !ok {
+			return "", fmt.Errorf("agent %s not found", name)
+		}
 		if containerUsesTmux(name) {
 			return shellQuoteArgs(buildTmuxAttachArgs(name)), nil
 		}

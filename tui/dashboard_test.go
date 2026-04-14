@@ -165,8 +165,23 @@ func TestDashboardAgentContentAndInteractive(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("interactive status = %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "agent-beta") {
+	if !strings.Contains(rec.Body.String(), "safe-ag attach agent-beta") {
 		t.Fatalf("interactive body = %q", rec.Body.String())
+	}
+}
+
+func TestDashboardInteractiveCommandFromArgsAttachLatest(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+
+	cmd, ok, err := d.interactiveCommandFromArgs([]string{"attach", "--latest"})
+	if err != nil {
+		t.Fatalf("interactiveCommandFromArgs attach latest error = %v", err)
+	}
+	if !ok {
+		t.Fatal("interactiveCommandFromArgs attach latest should be interactive")
+	}
+	if cmd != "safe-ag attach --latest" {
+		t.Fatalf("interactiveCommandFromArgs attach latest = %q", cmd)
 	}
 }
 
