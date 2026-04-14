@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/readme-logo.png" alt="safe-agentic logo" width="220">
+</p>
+
 # safe-agentic
 
 [![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
