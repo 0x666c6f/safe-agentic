@@ -66,6 +66,13 @@ safe-ag cp api-refactor /workspace/tmp/report.txt ./report.txt
 safe-ag cp --latest /workspace/dist ./dist
 ```
 
+Push files into a container:
+
+```bash
+orb run -m safe-agentic docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
+orb run -m safe-agentic docker cp ./dist/. api-refactor:/workspace/dist
+```
+
 Export session history:
 
 ```bash

@@ -826,7 +826,7 @@ func (ac *Actions) ExportSessions() {
 	}()
 }
 
-// CopyFiles shows a modal form for container path and host path.
+// CopyFiles shows a modal form for pull/push file transfer paths.
 func (ac *Actions) CopyFiles() {
 	agent := ac.selectedOrWarn()
 	if agent == nil {
