@@ -368,7 +368,7 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 	case "checkpoint-list":
 		out, err := d.runCLI("checkpoint", "list", name)
 		d.writeCommandResult(w, out, err, "", false)
-	case "checkpoint-revert":
+	case "checkpoint-restore":
 		var req dashboardCheckpointRevertRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -379,7 +379,7 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "ref is required", http.StatusBadRequest)
 			return
 		}
-		out, err := d.runCLI("checkpoint", "revert", name, ref)
+		out, err := d.runCLI("checkpoint", "restore", name, ref)
 		d.writeCommandResult(w, out, err, "", false)
 	case "sessions":
 		out, err := d.runCLI("sessions", name)

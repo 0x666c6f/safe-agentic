@@ -783,10 +783,10 @@ func TestDet_SafeAgCheckpointWorkflow(t *testing.T) {
 		t.Fatalf("checkpoint list should show 'det-cp':\n%s", out)
 	}
 
-	// Revert checkpoint (pop the stash)
-	out, err = runSafeAg(t, "checkpoint", "revert", detSharedContainer, "0")
+	// Restore checkpoint (pop the stash)
+	out, err = runSafeAg(t, "checkpoint", "restore", detSharedContainer, "0")
 	if err != nil {
-		t.Logf("checkpoint revert: %v\n%s", err, out)
+		t.Logf("checkpoint restore: %v\n%s", err, out)
 	}
 }
 

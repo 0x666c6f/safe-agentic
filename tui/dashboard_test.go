@@ -259,14 +259,14 @@ func TestDashboardCheckpointActions(t *testing.T) {
 		t.Fatalf("checkpoint-list args = %q", strings.Join(gotArgs, " "))
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/checkpoint-revert", strings.NewReader(`{"ref":"stash@{0}"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/checkpoint-restore", strings.NewReader(`{"ref":"stash@{0}"}`))
 	rec = httptest.NewRecorder()
 	d.handleAPIAgent(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("checkpoint-revert status = %d", rec.Code)
+		t.Fatalf("checkpoint-restore status = %d", rec.Code)
 	}
-	if strings.Join(gotArgs, " ") != "checkpoint revert agent-beta stash@{0}" {
-		t.Fatalf("checkpoint-revert args = %q", strings.Join(gotArgs, " "))
+	if strings.Join(gotArgs, " ") != "checkpoint restore agent-beta stash@{0}" {
+		t.Fatalf("checkpoint-restore args = %q", strings.Join(gotArgs, " "))
 	}
 }
 

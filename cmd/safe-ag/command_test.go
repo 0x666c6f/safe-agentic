@@ -1435,9 +1435,9 @@ func TestSetTodoDone_InvalidIndex(t *testing.T) {
 	}
 }
 
-// ─── checkpoint revert ───────────────────────────────────────────────────────
+// ─── checkpoint restore ──────────────────────────────────────────────────────
 
-func TestCheckpointRevert(t *testing.T) {
+func TestCheckpointRestore(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
 
@@ -1446,7 +1446,7 @@ func TestCheckpointRevert(t *testing.T) {
 	fake.SetResponse("docker exec "+containerName+" bash -c", "Changes restored\n")
 
 	output := captureOutput(func() {
-		if err := runCheckpointRevert(checkpointRevertCmd, []string{containerName, "stash@{0}"}); err != nil {
+		if err := runCheckpointRevert(checkpointRestoreCmd, []string{containerName, "stash@{0}"}); err != nil {
 			t.Fatalf("runCheckpointRevert() error = %v", err)
 		}
 	})

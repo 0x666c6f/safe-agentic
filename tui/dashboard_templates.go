@@ -848,7 +848,7 @@ const dashboardHTML = `
                   <button class="btn agent-action-btn warn" type="button" data-action="stop"><strong>Stop agent</strong><small>Stop the selected container immediately.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="checkpoint"><strong>Create checkpoint</strong><small>Capture current workspace state before risky work.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="checkpoint-list"><strong>List checkpoints</strong><small>Show available stash-based checkpoint refs for this agent.</small></button>
-                  <button class="btn agent-action-btn" type="button" data-action="checkpoint-revert"><strong>Restore checkpoint</strong><small>Restore a checkpoint by stash ref such as <code>stash@{0}</code>.</small></button>
+                  <button class="btn agent-action-btn" type="button" data-action="checkpoint-restore"><strong>Restore checkpoint</strong><small>Restore a checkpoint by stash ref such as <code>stash@{0}</code>.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="sessions"><strong>Export sessions</strong><small>Pull session history for offline inspection.</small></button>
                   <button class="btn agent-action-btn" type="button" data-action="pr"><strong>Create PR</strong><small>Open a pull request from the selected agent branch.</small></button>
                 </div>
@@ -1055,7 +1055,7 @@ const dashboardHTML = `
     {id:'pr', group:'agent', title:'pr', description:'Create PR.', fields:[{id:'target', label:'Target', type:'target'},{id:'base', label:'Base', type:'text', placeholder:'main'},{id:'title', label:'Title', type:'text', placeholder:'optional title'}]},
     {id:'checkpoint-create', group:'agent', title:'checkpoint create', description:'Create checkpoint.', fields:[{id:'target', label:'Target', type:'target'},{id:'label', label:'Label', type:'text', placeholder:'optional label'}]},
     {id:'checkpoint-list', group:'agent', title:'checkpoint list', description:'List checkpoints.', fields:[{id:'target', label:'Target', type:'target'}]},
-    {id:'checkpoint-revert', group:'agent', title:'checkpoint revert', description:'Revert to checkpoint ref.', fields:[{id:'target', label:'Target', type:'target'},{id:'ref', label:'Ref', type:'text', placeholder:'checkpoint ref'}]},
+    {id:'checkpoint-restore', group:'agent', title:'checkpoint restore', description:'Restore a checkpoint ref.', fields:[{id:'target', label:'Target', type:'target'},{id:'ref', label:'Ref', type:'text', placeholder:'checkpoint ref'}]},
     {id:'todo-add', group:'agent', title:'todo add', description:'Add merge-gate todo.', fields:[{id:'target', label:'Target', type:'target'},{id:'text', label:'Todo text', type:'textarea', placeholder:'Required'}]},
     {id:'todo-list', group:'agent', title:'todo list', description:'List todos.', fields:[{id:'target', label:'Target', type:'target'}]},
     {id:'todo-check', group:'agent', title:'todo check', description:'Check todo item.', fields:[{id:'target', label:'Target', type:'target'},{id:'index', label:'Index', type:'text', placeholder:'1'}]},
@@ -1450,7 +1450,7 @@ const dashboardHTML = `
         return args;
       }
       case 'checkpoint-list': return pushTarget(['checkpoint', 'list']);
-      case 'checkpoint-revert': return pushTarget(['checkpoint', 'revert']).concat(requiredValue(v.ref));
+      case 'checkpoint-restore': return pushTarget(['checkpoint', 'restore']).concat(requiredValue(v.ref));
       case 'todo-add': return pushTarget(['todo', 'add']).concat(requiredValue(v.text));
       case 'todo-list': return pushTarget(['todo', 'list']);
       case 'todo-check': return pushTarget(['todo', 'check']).concat(requiredValue(v.index));
@@ -1834,7 +1834,7 @@ const dashboardHTML = `
           postAgentAction(action, {label: label || ''});
           return;
         }
-        if (action === 'checkpoint-revert') {
+        if (action === 'checkpoint-restore') {
           const ref = prompt('Checkpoint ref to restore (e.g. stash@{0} or 0):', 'stash@{0}');
           if (!ref) return;
           postAgentAction(action, {ref});
