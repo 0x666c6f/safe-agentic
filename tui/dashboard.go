@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -174,6 +175,36 @@ func resolveDashboardWorkspacePath(raw string, requireYAML bool) (string, error)
 	return candidate, nil
 }
 
+func resolveDashboardContainerWorkspacePath(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("path is required")
+	}
+
+	candidate := value
+	if strings.HasPrefix(value, "/") {
+		candidate = pathpkg.Clean(value)
+	} else {
+		candidate = pathpkg.Join("/workspace", value)
+	}
+	if candidate != "/workspace" && !strings.HasPrefix(candidate, "/workspace/") {
+		return "", fmt.Errorf("path must stay within /workspace")
+	}
+	return candidate, nil
+}
+
+func normalizeDashboardTailLines(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "500"
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 || n > 10000 {
+		return "500"
+	}
+	return strconv.Itoa(n)
+}
+
 func (d *Dashboard) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -304,6 +335,10 @@ func (d *Dashboard) handleAPIStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing agent name", http.StatusBadRequest)
 		return
 	}
+	if _, ok := d.lookupAgent(name); !ok {
+		http.NotFound(w, r)
+		return
+	}
 	out, err := d.runCLI("stop", name)
 	d.writeCommandResult(w, out, err, "", false)
 }
@@ -361,10 +396,7 @@ func (d *Dashboard) handleAPIAgentContent(w http.ResponseWriter, r *http.Request
 	case "preview":
 		content, err = dashboardPreviewContent(name)
 	case "logs":
-		tail := r.URL.Query().Get("tail")
-		if tail == "" {
-			tail = "500"
-		}
+		tail := normalizeDashboardTailLines(r.URL.Query().Get("tail"))
 		content, err = dashboardLogsContent(name, tail)
 	case "describe":
 		content, err = d.prettyInspect(name)
@@ -445,14 +477,18 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		source := strings.TrimSpace(req.Source)
-		destination, err := resolveDashboardWorkspacePath(req.Destination, false)
-		if source == "" || strings.TrimSpace(req.Destination) == "" {
+		source, srcErr := resolveDashboardContainerWorkspacePath(req.Source)
+		destination, dstErr := resolveDashboardWorkspacePath(req.Destination, false)
+		if strings.TrimSpace(req.Source) == "" || strings.TrimSpace(req.Destination) == "" {
 			http.Error(w, "source and destination are required", http.StatusBadRequest)
 			return
 		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if srcErr != nil {
+			http.Error(w, srcErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if dstErr != nil {
+			http.Error(w, dstErr.Error(), http.StatusBadRequest)
 			return
 		}
 		out, err := d.runOrb("docker", "cp", name+":"+source, destination)
@@ -464,13 +500,17 @@ func (d *Dashboard) handleAPIAgentAction(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		source, err := resolveDashboardWorkspacePath(req.Source, false)
-		destination := strings.TrimSpace(req.Destination)
-		if strings.TrimSpace(req.Source) == "" || destination == "" {
+		destination, destErr := resolveDashboardContainerWorkspacePath(req.Destination)
+		if strings.TrimSpace(req.Source) == "" || strings.TrimSpace(req.Destination) == "" {
 			http.Error(w, "source and destination are required", http.StatusBadRequest)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if destErr != nil {
+			http.Error(w, destErr.Error(), http.StatusBadRequest)
 			return
 		}
 		out, err := d.runOrb("docker", "cp", source, name+":"+destination)
@@ -758,7 +798,7 @@ func validateDashboardCommandArgs(args []string) error {
 		return fmt.Errorf("args are required")
 	}
 	switch args[0] {
-	case "list", "audit", "cleanup", "setup", "update", "diagnose",
+	case "list", "audit", "cleanup", "diagnose",
 		"stop", "peek", "logs", "summary", "output", "diff", "review",
 		"replay", "retry", "sessions", "aws-refresh", "cost", "pr":
 		return nil

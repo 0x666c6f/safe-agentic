@@ -99,6 +99,13 @@ func TestDashboardAPIAgentsAndStop(t *testing.T) {
 	if strings.Join(gotArgs, " ") != "stop agent-beta" {
 		t.Fatalf("stop args = %q", strings.Join(gotArgs, " "))
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/stop/--all", nil)
+	rec = httptest.NewRecorder()
+	d.handleAPIStop(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("handleAPIStop --all status = %d", rec.Code)
+	}
 }
 
 func TestFindDashboardAssetDirMissingReturnsEmpty(t *testing.T) {
@@ -269,6 +276,20 @@ func TestDashboardAgentTransferActionsRejectOutsideWorkspace(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("push outside workspace status = %d", rec.Code)
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/copy", strings.NewReader(`{"source":"/home/agent/.claude/.claude.json","destination":"./out.txt"}`))
+	rec = httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("copy outside container workspace status = %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-beta/action/push", strings.NewReader(`{"source":"./in.txt","destination":"/home/agent/.bashrc"}`))
+	rec = httptest.NewRecorder()
+	d.handleAPIAgent(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("push outside container workspace status = %d", rec.Code)
+	}
 }
 
 func TestDashboardCheckpointActions(t *testing.T) {
@@ -363,6 +384,60 @@ func TestDashboardCommandEndpointRejectsDisallowedCommand(t *testing.T) {
 	d.handleAPICommand(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown command status = %d", rec.Code)
+	}
+}
+
+func TestDashboardCommandEndpointRejectsSetupAndUpdate(t *testing.T) {
+	d := NewDashboard("localhost:8420")
+
+	for _, payload := range []string{
+		`{"args":["setup"]}`,
+		`{"args":["update","--full"]}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		d.handleAPICommand(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("payload %s status = %d", payload, rec.Code)
+		}
+	}
+}
+
+func TestNormalizeDashboardTailLines(t *testing.T) {
+	cases := map[string]string{
+		"":          "500",
+		"42":        "42",
+		"-1":        "500",
+		"999999999": "500",
+		"not-a-num": "500",
+		"10000":     "10000",
+	}
+	for in, want := range cases {
+		if got := normalizeDashboardTailLines(in); got != want {
+			t.Fatalf("normalizeDashboardTailLines(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestResolveDashboardContainerWorkspacePath(t *testing.T) {
+	cases := map[string]string{
+		"/workspace/file.txt": "/workspace/file.txt",
+		"dir/file.txt":        "/workspace/dir/file.txt",
+	}
+	for in, want := range cases {
+		got, err := resolveDashboardContainerWorkspacePath(in)
+		if err != nil {
+			t.Fatalf("resolveDashboardContainerWorkspacePath(%q) error = %v", in, err)
+		}
+		if got != want {
+			t.Fatalf("resolveDashboardContainerWorkspacePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, in := range []string{"/home/agent/.bashrc", "../escape", "/workspace/../etc/passwd"} {
+		if _, err := resolveDashboardContainerWorkspacePath(in); err == nil {
+			t.Fatalf("resolveDashboardContainerWorkspacePath(%q) should fail", in)
+		}
 	}
 }
 
