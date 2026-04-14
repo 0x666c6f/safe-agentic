@@ -66,7 +66,7 @@ safe-ag sessions <name> [dest]
 ```bash
 safe-ag checkpoint create <name> [label]
 safe-ag checkpoint list <name>
-safe-ag checkpoint revert <name> <ref>
+safe-ag checkpoint restore <name> <ref>
 
 safe-ag todo add <name> "text"
 safe-ag todo list <name>

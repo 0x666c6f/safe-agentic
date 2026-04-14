@@ -59,6 +59,13 @@ Difference:
 
 ## Export sessions
 
+Push files into a container:
+
+```bash
+orb run -m safe-agentic docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
+orb run -m safe-agentic docker cp ./dist/. api-refactor:/workspace/dist
+```
+
 Export session history:
 
 ```bash

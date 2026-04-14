@@ -110,9 +110,8 @@ The footer has five modes:
 | `s` | stop selected agent |
 | `l` | logs overlay |
 | `d` | inspect overlay |
-| `y` | raw inspect JSON |
 | `e` | export sessions |
-| `c` | copy files |
+| `c` | transfer files |
 | `n` | open spawn form |
 | `p` | toggle preview pane |
 | `f` | diff |
@@ -172,7 +171,7 @@ Current overlay/modal types:
 | help overlay | keybinding help |
 | logs overlay | session/log output |
 | describe overlay | formatted container inspect |
-| copy form | copy files from container to VM path |
+| copy form | transfer files between container and VM |
 | spawn form | spawn a new agent |
 
 ## Spawn form
@@ -202,8 +201,10 @@ Current fields:
 
 | Field | Meaning |
 |---|---|
-| `Container path:` | source path in the container |
-| `VM path (not macOS host):` | destination path in the VM environment |
+| `Agent path:` | source path for pull from the container |
+| `VM path (pull dest):` | pull destination path in the VM environment |
+| `VM source (push):` | source path in the VM environment for push |
+| `Agent path (push dest):` | destination path in the container for push |
 
 ## Table sorting and filtering
 
@@ -242,6 +243,13 @@ Equivalent CLI entrypoint:
 ```bash
 safe-ag dashboard --bind localhost:8420
 ```
+
+Current web dashboard scope:
+- live fleet table with the same core agent metadata as the TUI
+- per-agent tabs for summary, preview, logs, describe, diff, todos, review, and cost
+- browser-triggered actions for stop, checkpoint, export sessions, copy files, PR creation, spawn, fleet, pipeline, audit, and stop-all
+- interactive command helpers for attach, resume, and MCP login
+- generic `safe-ag` command runner for non-interactive subcommands
 
 ## When to use this page
 

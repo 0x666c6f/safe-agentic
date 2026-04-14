@@ -47,6 +47,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
+          track_progress: true
           show_full_output: true
           prompt: |
             Review this PR against CLAUDE.md standards.
@@ -61,19 +62,17 @@ jobs:
             Existing inline comments on this PR (do NOT duplicate these):
             ${{ steps.existing-comments.outputs.comments }}
 
-            After reviewing, for each issue found, post an inline comment on the PR.
+            After reviewing, for each issue found, post an inline comment on the PR using `mcp__github_inline_comment__create_inline_comment` with `confirmed: true`.
             IMPORTANT: Before posting, check if a similar comment already exists at the same file and line. Skip posting if an existing comment already covers the same issue.
 
-            Comment format:
-            ```
-            gh api --method POST /repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
-              -f commit_id="${{ github.event.pull_request.head.sha }}" \
-              -f path="{file}" \
-              -F line={line} \
-              -f body="**[{SEVERITY}] {TITLE}**
-
-            {DESCRIPTION}"
-            ```
+            Inline comment payload requirements:
+            - `owner`: `${{ github.repository_owner }}`
+            - `repo`: `${{ github.event.repository.name }}`
+            - `pullNumber`: `${{ github.event.pull_request.number }}`
+            - `path`: changed file path
+            - `line`: exact review line on the RIGHT side
+            - `body`: use the format below
+            - `confirmed`: `true`
 
             Severity levels: CRITICAL, HIGH, MEDIUM, LOW
 
@@ -83,4 +82,4 @@ jobs:
           claude_args: >-
             --max-turns 120
             --allowedTools
-            Bash(gh api:*),Bash(git diff:*),Bash(git show:*),Bash(grep:*),Bash(rg:*),Bash(sed:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(nl:*),Bash(jq:*),Bash(find:*),Bash(fd:*)
+            mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(grep:*),Bash(rg:*),Bash(sed:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(nl:*),Bash(jq:*),Bash(find:*),Bash(fd:*)

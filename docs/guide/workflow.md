@@ -32,7 +32,7 @@ safe-ag retry --latest --feedback "Focus only on src/ and add tests"
 ```bash
 safe-ag checkpoint create --latest "before big refactor"
 safe-ag checkpoint list --latest
-safe-ag checkpoint revert --latest <ref>
+safe-ag checkpoint restore --latest <ref>
 ```
 
 Use checkpoints when you want a reversible snapshot before the agent makes a risky change.

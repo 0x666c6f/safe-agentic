@@ -45,15 +45,17 @@ func ShowOverlayLive(app *App, name string, title string, content string) *tview
 	return tv
 }
 
-// ShowCopyForm shows a modal form for copying files from a container.
+// ShowCopyForm shows a modal form for transferring files between VM and container.
 func ShowCopyForm(app *App, containerName string) {
 	form := tview.NewForm().
-		AddInputField("Container path:", "/workspace/", 40, nil, nil).
-		AddInputField("VM path (not macOS host):", "./", 40, nil, nil)
+		AddInputField("Agent path:", "/workspace/", 40, nil, nil).
+		AddInputField("VM path (pull dest):", "./", 40, nil, nil).
+		AddInputField("VM source (push):", "./", 40, nil, nil).
+		AddInputField("Agent path (push dest):", "/workspace/", 40, nil, nil)
 
-	form.AddButton("Copy", func() {
-		containerPath := form.GetFormItemByLabel("Container path:").(*tview.InputField).GetText()
-		hostPath := form.GetFormItemByLabel("VM path (not macOS host):").(*tview.InputField).GetText()
+	form.AddButton("Pull", func() {
+		containerPath := form.GetFormItemByLabel("Agent path:").(*tview.InputField).GetText()
+		hostPath := form.GetFormItemByLabel("VM path (pull dest):").(*tview.InputField).GetText()
 
 		app.pages.SwitchToPage("main")
 		app.pages.RemovePage("copy")
@@ -76,6 +78,31 @@ func ShowCopyForm(app *App, containerName string) {
 			})
 		}()
 	})
+	form.AddButton("Push", func() {
+		hostPath := form.GetFormItemByLabel("VM source (push):").(*tview.InputField).GetText()
+		containerPath := form.GetFormItemByLabel("Agent path (push dest):").(*tview.InputField).GetText()
+
+		app.pages.SwitchToPage("main")
+		app.pages.RemovePage("copy")
+		app.tapp.SetFocus(app.table.Table())
+
+		if hostPath == "" || containerPath == "" {
+			app.footer.ShowStatus("Both paths required", true)
+			return
+		}
+
+		app.footer.ShowStatus("Pushing...", false)
+		go func() {
+			out, err := execOrb("docker", "cp", hostPath, containerName+":"+containerPath)
+			app.tapp.QueueUpdateDraw(func() {
+				if err != nil {
+					app.footer.ShowStatus("Push failed: "+string(out), true)
+				} else {
+					app.footer.ShowStatus("Pushed to "+containerPath, false)
+				}
+			})
+		}()
+	})
 
 	form.AddButton("Cancel", func() {
 		app.pages.SwitchToPage("main")
@@ -84,7 +111,7 @@ func ShowCopyForm(app *App, containerName string) {
 	})
 
 	form.SetBorder(true).
-		SetTitle(" Copy from " + containerName + " (Esc to close) ").
+		SetTitle(" File transfer: " + containerName + " (Esc to close) ").
 		SetTitleColor(colorTitle).
 		SetBorderColor(colorBorder).
 		SetBackgroundColor(tcell.ColorDefault)

@@ -387,10 +387,10 @@ safe-ag checkpoint create <name|--latest> [label]
 safe-ag checkpoint list <name|--latest>
 ```
 
-### `checkpoint revert`
+### `checkpoint restore`
 
 ```bash
-safe-ag checkpoint revert <name|--latest> <ref>
+safe-ag checkpoint restore <name|--latest> <ref>
 ```
 
 No additional flags beyond `--help`.

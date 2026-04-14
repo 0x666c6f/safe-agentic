@@ -189,17 +189,18 @@ func runCheckpointList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// checkpoint revert
+// checkpoint restore
 
-var checkpointRevertCmd = &cobra.Command{
-	Use:   "revert <name|--latest> <ref>",
-	Short: "Restore a working tree snapshot",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runCheckpointRevert,
+var checkpointRestoreCmd = &cobra.Command{
+	Use:     "restore <name|--latest> <ref>",
+	Aliases: []string{"revert"},
+	Short:   "Restore a working tree snapshot",
+	Args:    cobra.ExactArgs(2),
+	RunE:    runCheckpointRevert,
 }
 
 func init() {
-	checkpointCmd.AddCommand(checkpointRevertCmd)
+	checkpointCmd.AddCommand(checkpointRestoreCmd)
 }
 
 var validStashRef = regexp.MustCompile(`^(stash@\{\d+\}|\d+)$`)

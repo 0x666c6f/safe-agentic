@@ -400,7 +400,7 @@ Inspect
   x                   Checkpoint create
   t                   Todo list
   e                   Export sessions
-  c                   Copy files to VM path
+  c                   Transfer files VM <-> agent
   $                   Cost estimate
   A                   Audit log
   R                   Code review (safe-ag review)
