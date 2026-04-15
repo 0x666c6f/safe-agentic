@@ -141,10 +141,6 @@ func runConfigReset(cmd *cobra.Command, args []string) error {
 	path := config.ConfigPath()
 	raw, err := config.LoadRawConfig(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Printf("No config file at %s — nothing to reset.\n", path)
-			return nil
-		}
 		return fmt.Errorf("load config: %w", err)
 	}
 	if raw.IsZero() {
@@ -250,7 +246,7 @@ func repoTemplatesDir() string {
 	return ""
 }
 
-// userTemplatesDir returns ~/.config/safe-agentic/templates.
+// userTemplatesDir returns ~/.safe-ag/templates.
 func userTemplatesDir() string {
 	return config.TemplatesDir()
 }

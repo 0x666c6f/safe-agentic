@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestCronConfigPathPrefersXDG(t *testing.T) {
+func TestCronConfigPathUsesSafeAgHome(t *testing.T) {
 	t.Setenv("HOME", "/tmp/safe-agentic-home")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/safe-agentic-config")
 	got := cronConfigPath()

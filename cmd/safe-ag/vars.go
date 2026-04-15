@@ -9,7 +9,7 @@ import (
 )
 
 func parseTemplateVars(assignments []string, repos []string, inferRepo bool) (map[string]string, []string, error) {
-	vars := make(map[string]string, len(assignments)+1)
+	vars := make(map[string]string, len(assignments))
 	for _, assignment := range assignments {
 		key, value, err := splitVarAssignment(assignment)
 		if err != nil {
@@ -26,9 +26,6 @@ func parseTemplateVars(assignments []string, repos []string, inferRepo bool) (ma
 		if inferred, err := inferRepoFromCurrentCheckout(); err == nil && inferred != "" {
 			defaultRepos = []string{inferred}
 		}
-	}
-	if len(defaultRepos) > 0 {
-		vars["repo"] = defaultRepos[0]
 	}
 	return vars, defaultRepos, nil
 }

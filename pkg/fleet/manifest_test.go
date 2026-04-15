@@ -431,3 +431,24 @@ steps:
 		t.Fatalf("err = %v, want unresolved variables", err)
 	}
 }
+
+func TestParsePipelineWithOptions_PreservesManifestRepoVarOnInference(t *testing.T) {
+	p := writeTemp(t, `
+vars:
+  repo: https://github.com/org/from-manifest.git
+steps:
+  - name: review
+    type: claude
+    repo: ${repo}
+    prompt: Review
+`)
+	m, err := ParsePipelineWithOptions(p, ParseOptions{
+		DefaultRepos: []string{"https://github.com/org/inferred.git"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Stages[0].Agents[0].Repo; got != "https://github.com/org/from-manifest.git" {
+		t.Fatalf("Repo = %q, want manifest repo", got)
+	}
+}

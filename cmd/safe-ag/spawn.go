@@ -466,6 +466,11 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 		if err != nil {
 			return err
 		}
+		if len(opts.Repos) > 0 {
+			vars["repo"] = opts.Repos[0]
+		} else if inferred, err := inferRepoFromCurrentCheckout(); err == nil && inferred != "" {
+			vars["repo"] = inferred
+		}
 		templateContent = interpolateString(templateContent, vars)
 		if err := ensureNoUnresolvedVars("template "+opts.Template, templateContent); err != nil {
 			return err

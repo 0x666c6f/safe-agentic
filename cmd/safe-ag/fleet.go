@@ -13,6 +13,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/validate"
 
 	"github.com/spf13/cobra"
 )
@@ -118,9 +119,12 @@ const pipelineDetachedEnv = "SAFE_AGENTIC_PIPELINE_DETACHED"
 var launchDetachedPipeline = launchDetachedPipelineImpl
 
 var pipelineCmd = &cobra.Command{
-	Use:   "pipeline <pipeline.yaml>",
+	Use:   "pipeline <pipeline.yaml|name>",
 	Short: "Run sequential pipeline with dependency ordering",
 	Long: `Run a multi-step pipeline defined in a YAML manifest.
+
+The manifest can be passed as a filesystem path or as a saved pipeline name
+from ~/.safe-ag/pipelines.
 
 Steps can declare dependencies via depends_on, on_failure, retry, when,
 and outputs fields. Stages with no unmet dependencies are spawned first;
@@ -490,6 +494,9 @@ func runPipelineShow(cmd *cobra.Command, args []string) error {
 }
 
 func runPipelineCreate(cmd *cobra.Command, args []string) error {
+	if err := validate.NameComponent(args[0], "pipeline name"); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(config.PipelinesDir(), 0o755); err != nil {
 		return fmt.Errorf("create pipelines dir: %w", err)
 	}
@@ -513,6 +520,9 @@ func resolvePipelineManifest(arg string) (string, error) {
 }
 
 func resolveNamedPipeline(name string) (string, error) {
+	if err := validate.NameComponent(name, "pipeline name"); err != nil {
+		return "", err
+	}
 	candidates := []string{
 		filepath.Join(config.PipelinesDir(), name+".yaml"),
 		filepath.Join(config.PipelinesDir(), name+".yml"),

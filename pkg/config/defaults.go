@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -109,7 +110,15 @@ func Defaults() Config {
 }
 
 func UserDir() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			fmt.Fprintf(os.Stderr, "[safe-ag] warning: resolve home dir: %v; using %s\n", err, filepath.Join(cwd, ".safe-ag"))
+			return filepath.Join(cwd, ".safe-ag")
+		}
+		fmt.Fprintf(os.Stderr, "[safe-ag] warning: resolve home dir: %v; using /.safe-ag\n", err)
+		return filepath.Join(string(os.PathSeparator), ".safe-ag")
+	}
 	return filepath.Join(home, ".safe-ag")
 }
 
@@ -160,7 +169,7 @@ func LoadRawConfig(path string) (FileConfig, error) {
 			keys = append(keys, key.String())
 		}
 		sort.Strings(keys)
-		return raw, fmt.Errorf("unsupported config keys: %s", keys)
+		return raw, fmt.Errorf("unsupported config keys: %s", strings.Join(keys, ", "))
 	}
 	return raw, nil
 }
