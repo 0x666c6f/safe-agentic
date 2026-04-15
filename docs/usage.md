@@ -106,11 +106,9 @@ safe-ag pipeline pipeline.yaml --dry-run
 safe-ag pipeline inspect review
 safe-ag pipeline render review
 safe-ag pipeline validate review
-safe-ag pr-review
-safe-ag pr-fix
 ```
 
-Direct PR review/fix:
+## PR review and fix
 
 ```bash
 safe-ag pr-review

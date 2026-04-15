@@ -97,10 +97,10 @@ Expect:
 ## 5. Review what changed
 
 ```bash
+# inspect what the current agent changed
 safe-ag diff --latest
 safe-ag output --latest
 safe-ag review --latest
-safe-ag pr-review
 ```
 
 Typical loop:
@@ -109,7 +109,7 @@ Typical loop:
 2. `diff` to inspect filesystem changes
 3. `review` before you ship anything
 
-If your current checkout is a GitHub PR branch, you can run a one-shot PR review directly:
+If your current checkout is a GitHub PR branch, you can run a one-shot PR review directly in a separate workflow:
 
 ```bash
 safe-ag pr-review

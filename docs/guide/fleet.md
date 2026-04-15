@@ -37,10 +37,10 @@ Fleet behavior:
 ```bash
 safe-ag pipeline pipeline.yaml
 safe-ag pipeline pipeline.yaml --dry-run
-safe-ag pipeline review/dual
-safe-ag pipeline inspect review/dual
-safe-ag pipeline render review/dual
-safe-ag pipeline validate review/dual
+safe-ag pipeline reviews/dual
+safe-ag pipeline inspect reviews/dual
+safe-ag pipeline render reviews/dual
+safe-ag pipeline validate reviews/dual
 ```
 
 Minimal pipeline:
