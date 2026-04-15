@@ -102,12 +102,19 @@ func ListPipelines() ([]PipelineAsset, error) {
 	if err != nil {
 		return nil, err
 	}
+	legacyUser, err := collectPipelineAssets(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"), SourceUser)
+	if err != nil {
+		return nil, err
+	}
 	builtin, err := collectPipelineAssets(builtinPipelinesDir(), SourceBuiltin)
 	if err != nil {
 		return nil, err
 	}
-	merged := make(map[string]PipelineAsset, len(builtin)+len(user))
+	merged := make(map[string]PipelineAsset, len(builtin)+len(user)+len(legacyUser))
 	for _, asset := range builtin {
+		merged[asset.Manifest.Name] = asset
+	}
+	for _, asset := range legacyUser {
 		merged[asset.Manifest.Name] = asset
 	}
 	for _, asset := range user {
@@ -139,6 +146,13 @@ func ResolvePipeline(ref string) (*PipelineAsset, error) {
 	if userPath != "" {
 		return loadPipelineAsset(userPath, SourceUser, config.PipelinesDir())
 	}
+	legacyPath, err := namedAssetPath(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"), ref, ".yaml", ".yml")
+	if err != nil {
+		return nil, err
+	}
+	if legacyPath != "" {
+		return loadPipelineAsset(legacyPath, SourceUser, filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"))
+	}
 	builtinPath, err := namedAssetPath(builtinPipelinesDir(), ref, ".yaml", ".yml")
 	if err != nil {
 		return nil, err
@@ -158,6 +172,7 @@ func ResolveReviewPreset(name string) (*PipelineAsset, error) {
 		source AssetSource
 	}{
 		{filepath.Join(config.PipelinesDir(), "reviews"), SourceUser},
+		{filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines", "reviews"), SourceUser},
 		{filepath.Join(builtinPipelinesDir(), "reviews"), SourceBuiltin},
 	} {
 		path, err := namedAssetPath(base.dir, name, ".yaml", ".yml")
@@ -238,7 +253,7 @@ func findBuiltinDir(rel string) string {
 
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
-		if err == nil && info.IsDir() {
+		if err == nil && info.IsDir() && looksLikeBuiltinDir(candidate, rel) {
 			return candidate
 		}
 	}
@@ -250,12 +265,19 @@ func listTemplateAssets() ([]TemplateAsset, error) {
 	if err != nil {
 		return nil, err
 	}
+	legacyUser, err := collectTemplateAssets(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "templates"), SourceUser)
+	if err != nil {
+		return nil, err
+	}
 	builtin, err := collectTemplateAssets(builtinTemplatesDir(), SourceBuiltin)
 	if err != nil {
 		return nil, err
 	}
-	merged := make(map[string]TemplateAsset, len(builtin)+len(user))
+	merged := make(map[string]TemplateAsset, len(builtin)+len(user)+len(legacyUser))
 	for _, asset := range builtin {
+		merged[asset.Name] = asset
+	}
+	for _, asset := range legacyUser {
 		merged[asset.Name] = asset
 	}
 	for _, asset := range user {
@@ -399,6 +421,32 @@ func collectFiles(base string, exts ...string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func looksLikeBuiltinDir(candidate, rel string) bool {
+	switch filepath.ToSlash(rel) {
+	case "templates":
+		for _, name := range []string{"security-audit.md", "code-review.md"} {
+			if !assetFileExists(filepath.Join(candidate, name)) {
+				return false
+			}
+		}
+		return true
+	case "templates/pipelines":
+		for _, name := range []string{"reviews/dual.yaml", "reviews/fix.yaml"} {
+			if !assetFileExists(filepath.Join(candidate, filepath.FromSlash(name))) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func assetFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func parseFrontMatter(data []byte) (templateFrontMatter, string, error) {
