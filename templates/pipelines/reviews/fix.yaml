@@ -29,4 +29,4 @@ steps:
 
       Use the pr-fix skill/workflow on PR ${pr}.
       Fetch unresolved review threads, apply the fixes, validate them, push
-      the result, and resolve the fixed threads.
+      the result, reply on the exact fixed threads, and resolve them.

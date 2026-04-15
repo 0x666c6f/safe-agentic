@@ -97,6 +97,7 @@ Expect:
 ## 5. Review what changed
 
 ```bash
+# inspect what the current agent changed
 safe-ag diff --latest
 safe-ag output --latest
 safe-ag review --latest
@@ -107,6 +108,18 @@ Typical loop:
 1. `peek` to see current activity
 2. `diff` to inspect filesystem changes
 3. `review` before you ship anything
+
+If your current checkout is a GitHub PR branch, you can run a one-shot PR review directly in a separate workflow:
+
+```bash
+safe-ag pr-review
+safe-ag pr-review claude
+safe-ag pr-fix
+```
+
+These infer:
+- `${repo}` from `git remote get-url origin`
+- `${pr}` from `gh pr view --json number`
 
 ## 6. Clean up when you are done
 

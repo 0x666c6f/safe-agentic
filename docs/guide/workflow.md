@@ -18,6 +18,25 @@ Typical order:
 3. `diff` for the code change
 4. `review` for an extra review pass
 
+## Review a PR directly
+
+If the current checkout is a PR branch, use the dedicated review workflows:
+
+```bash
+safe-ag pr-review
+safe-ag pr-review claude
+safe-ag pr-review codex
+safe-ag pr-review dual 16
+safe-ag pr-fix
+safe-ag pr-fix 16
+```
+
+Behavior:
+- `pr-review` defaults to the built-in `dual` preset
+- `pr-review` is one-shot only; it does not start the watcher loop
+- both commands infer repo + PR from the current checkout when possible
+- explicit `--repo` or `--var pr=...` still override inference
+
 ## Retry with feedback
 
 ```bash
