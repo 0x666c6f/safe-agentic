@@ -21,7 +21,7 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Manage CLI defaults",
+	Short: "Manage ~/.safe-ag/config.toml defaults",
 }
 
 func init() {
@@ -173,6 +173,11 @@ func configAllowedKeysList() string {
 var templateCmd = &cobra.Command{
 	Use:   "template",
 	Short: "Manage prompt templates",
+	Long: `Manage prompt templates.
+
+Templates are loaded from ~/.safe-ag/templates/ and can override built-in
+templates shipped with safe-agentic. Templates may include YAML front matter
+for description, inputs, examples, and tags.`,
 }
 
 func init() {
@@ -329,6 +334,11 @@ var templateRenderRepos []string
 var templateRenderCmd = &cobra.Command{
 	Use:   "render <name>",
 	Short: "Render a template with inferred and explicit variables",
+	Long: `Render a template with inferred and explicit variables.
+
+${repo} is inferred from the current checkout when possible or can be
+provided explicitly with --repo. Declared template inputs are validated
+before rendering.`,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTemplateRender,
 }

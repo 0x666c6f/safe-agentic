@@ -124,7 +124,8 @@ var pipelineCmd = &cobra.Command{
 	Long: `Run a multi-step pipeline defined in a YAML manifest.
 
 The manifest can be passed as a filesystem path or as a saved pipeline name
-from ~/.safe-ag/pipelines.
+from ~/.safe-ag/pipelines. Built-in review presets are available under
+reviews/ and can be overridden from ~/.safe-ag/pipelines/reviews/.
 
 Steps can declare dependencies via depends_on, on_failure, retry, when,
 and outputs fields. Stages with no unmet dependencies are spawned first;
@@ -135,7 +136,10 @@ Example manifest fields per step:
   on_failure:  <step-name>  # run this step on failure
   retry:       N            # retry up to N times
   when:        <condition>  # skip step if condition not met
-  outputs:     <command>    # command to extract outputs for downstream steps`,
+  outputs:     <command>    # command to extract outputs for downstream steps
+
+Repo defaults are inferred from "git remote get-url origin" when possible.
+Declared inputs may also infer values such as "repo" or "pr".`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPipeline,
 }

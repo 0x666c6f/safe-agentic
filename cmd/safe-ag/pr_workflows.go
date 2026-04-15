@@ -23,6 +23,14 @@ var (
 var prReviewCmd = &cobra.Command{
 	Use:   "pr-review [claude|codex|dual] [pr]",
 	Short: "Run a one-shot PR review workflow",
+	Long: `Run a one-shot PR review workflow.
+
+If no mode is provided, pr-review defaults to "dual".
+If no PR number is provided, the current checkout is inspected with
+"gh pr view --json number" and the active PR is used automatically.
+
+Built-in review presets live under reviews/ and can be overridden by
+user pipelines in ~/.safe-ag/pipelines/reviews/.`,
 	Args:  cobra.RangeArgs(0, 2),
 	RunE:  runPRReview,
 }
@@ -30,6 +38,13 @@ var prReviewCmd = &cobra.Command{
 var prFixCmd = &cobra.Command{
 	Use:   "pr-fix [pr]",
 	Short: "Run the PR fix workflow for the current or specified PR",
+	Long: `Run the PR fix workflow for the current or specified PR.
+
+If no PR number is provided, the current checkout is inspected with
+"gh pr view --json number" and the active PR is used automatically.
+
+The built-in fix preset can be overridden by a user pipeline at
+~/.safe-ag/pipelines/reviews/fix.yaml.`,
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runPRFixWorkflow,
 }
