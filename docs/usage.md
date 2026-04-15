@@ -87,6 +87,7 @@ safe-ag config reset <key>
 
 safe-ag template list
 safe-ag template show <name>
+safe-ag template render <name>
 safe-ag template create <name>
 
 safe-ag mcp-login <service> [container]
@@ -107,6 +108,17 @@ safe-ag pipeline render review
 safe-ag pipeline validate review
 safe-ag pr-review
 safe-ag pr-fix
+```
+
+Direct PR review/fix:
+
+```bash
+safe-ag pr-review
+safe-ag pr-review claude
+safe-ag pr-review codex
+safe-ag pr-review dual 16
+safe-ag pr-fix
+safe-ag pr-fix 16
 ```
 
 ## TUI

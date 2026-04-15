@@ -37,6 +37,10 @@ Fleet behavior:
 ```bash
 safe-ag pipeline pipeline.yaml
 safe-ag pipeline pipeline.yaml --dry-run
+safe-ag pipeline review/dual
+safe-ag pipeline inspect review/dual
+safe-ag pipeline render review/dual
+safe-ag pipeline validate review/dual
 ```
 
 Minimal pipeline:
@@ -61,6 +65,34 @@ Pipeline behavior:
 - stages with satisfied dependencies run
 - model-expanded stages are supported
 - sub-pipelines are supported
+- named pipelines can be loaded from `~/.safe-ag/pipelines/`
+- built-in review presets are available under `reviews/`
+
+## Review presets
+
+Built-in review presets:
+
+```bash
+safe-ag pr-review
+safe-ag pr-review claude
+safe-ag pr-review codex
+safe-ag pr-fix
+```
+
+Equivalent named pipelines:
+
+```bash
+safe-ag pipeline reviews/dual
+safe-ag pipeline reviews/claude
+safe-ag pipeline reviews/codex
+safe-ag pipeline reviews/fix
+```
+
+These presets are metadata-aware and can be overridden by user assets in:
+
+```bash
+~/.safe-ag/pipelines/reviews/
+```
 
 ## Common manifest fields
 
@@ -99,6 +131,7 @@ safe-ag fleet examples/fleet-review-and-fix.yaml
 safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
 safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
 safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
+safe-ag pipeline reviews/dual
 ```
 
 ## Choosing between them
