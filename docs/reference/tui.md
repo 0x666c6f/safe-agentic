@@ -1,6 +1,6 @@
 # TUI Reference
 
-This page is the exhaustive reference for the terminal UI and dashboard.
+This page is the exhaustive reference for the terminal UI.
 
 ## Entry points
 
@@ -8,12 +8,6 @@ Terminal UI:
 
 ```bash
 safe-ag tui
-```
-
-Web dashboard:
-
-```bash
-safe-ag dashboard --bind localhost:8420
 ```
 
 Standalone binary help:
@@ -25,12 +19,12 @@ safe-ag-tui --help
 Current binary usage:
 
 ```text
-Usage: safe-ag-tui [--dashboard [--bind host:port]]
+Usage: safe-ag-tui
 ```
 
 ## Interaction model
 
-The TUI is a polling dashboard backed by the same host-side model as the CLI.
+The TUI is a polling terminal UI backed by the same host-side model as the CLI.
 
 Main pieces:
 - header
@@ -228,28 +222,6 @@ Special states used by the table:
 | `Deleting` | transient overlay while stop/remove is in progress |
 
 Deleting rows also show spinner frames from the internal animation ticker.
-
-## Dashboard mode
-
-The TUI binary can also launch the web dashboard directly:
-
-```bash
-safe-ag-tui --dashboard
-safe-ag-tui --dashboard --bind localhost:8420
-```
-
-Equivalent CLI entrypoint:
-
-```bash
-safe-ag dashboard --bind localhost:8420
-```
-
-Current web dashboard scope:
-- live fleet table with the same core agent metadata as the TUI
-- per-agent tabs for summary, preview, logs, describe, diff, todos, review, and cost
-- browser-triggered actions for stop, checkpoint, export sessions, copy files, PR creation, spawn, fleet, pipeline, audit, and stop-all
-- interactive command helpers for attach, resume, and MCP login
-- generic `safe-ag` command runner for non-interactive subcommands
 
 ## When to use this page
 

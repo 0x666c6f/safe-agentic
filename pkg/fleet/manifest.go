@@ -3,6 +3,7 @@ package fleet
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,6 +44,14 @@ type AgentSpec struct {
 	hasAutoTrust   bool `yaml:"-"`
 	hasBackground  bool `yaml:"-"`
 	hasDocker      bool `yaml:"-"`
+}
+
+type InputSpec struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Required    bool   `yaml:"required"`
+	Default     string `yaml:"default"`
+	Infer       string `yaml:"infer"`
 }
 
 type rawAgentSpec struct {
@@ -120,6 +129,10 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 // FleetManifest is the top-level structure for `agent fleet <manifest.yaml>`.
 type FleetManifest struct {
 	Name        string            `yaml:"name"`
+	Description string            `yaml:"description"`
+	Inputs      []InputSpec       `yaml:"inputs"`
+	Examples    []string          `yaml:"examples"`
+	Tags        []string          `yaml:"tags"`
 	SharedTasks bool              `yaml:"shared_tasks"`
 	Defaults    AgentSpec         `yaml:"defaults"` // inherited by all agents
 	Vars        map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
@@ -151,16 +164,29 @@ type PipelineStage struct {
 // The `defaults` section provides inherited values for all agents.
 // The `vars` section defines variables that are interpolated in prompts (${var}).
 type PipelineManifest struct {
-	Name     string            `yaml:"name"`
-	Defaults AgentSpec         `yaml:"defaults"` // inherited by all agents
-	Vars     map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
-	Stages   []PipelineStage   `yaml:"stages"`
-	Steps    []AgentSpec       `yaml:"steps"`
+	Name        string            `yaml:"name"`
+	Description string            `yaml:"description"`
+	Inputs      []InputSpec       `yaml:"inputs"`
+	Examples    []string          `yaml:"examples"`
+	Tags        []string          `yaml:"tags"`
+	Defaults    AgentSpec         `yaml:"defaults"` // inherited by all agents
+	Vars        map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
+	Stages      []PipelineStage   `yaml:"stages"`
+	Steps       []AgentSpec       `yaml:"steps"`
+}
+
+type ParseOptions struct {
+	Vars         map[string]string
+	DefaultRepos []string
 }
 
 // ParseFleet reads and parses a fleet YAML manifest file.
 // Defaults are merged into agents, vars are interpolated in prompts.
 func ParseFleet(path string) (*FleetManifest, error) {
+	return ParseFleetWithOptions(path, ParseOptions{})
+}
+
+func ParseFleetWithOptions(path string, opts ParseOptions) (*FleetManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read fleet manifest %q: %w", path, err)
@@ -169,11 +195,18 @@ func ParseFleet(path string) (*FleetManifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse fleet manifest %q: %w", path, err)
 	}
-	// Apply defaults and interpolate vars
+	vars := parseOptionVars(m.Vars, opts)
+	vars, err = applyInputSpecs(m.Inputs, vars, opts.DefaultRepos)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
 	for i := range m.Agents {
 		m.Agents[i] = mergeDefaults(m.Defaults, m.Agents[i])
-		if len(m.Vars) > 0 {
-			m.Agents[i].Prompt = interpolateVars(m.Agents[i].Prompt, m.Vars)
+		m.Agents[i] = interpolateAgentSpec(m.Agents[i], vars)
+		m.Agents[i] = applyDefaultRepos(m.Agents[i], opts.DefaultRepos)
+		if err := ensureAgentSpecResolved("agent", m.Agents[i]); err != nil {
+			return nil, err
 		}
 	}
 	return &m, nil
@@ -183,6 +216,10 @@ func ParseFleet(path string) (*FleetManifest, error) {
 // Steps (flat list) are automatically normalized into Stages.
 // Defaults are merged into agents, vars are interpolated in prompts.
 func ParsePipeline(path string) (*PipelineManifest, error) {
+	return ParsePipelineWithOptions(path, ParseOptions{})
+}
+
+func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read pipeline manifest %q: %w", path, err)
@@ -194,8 +231,18 @@ func ParsePipeline(path string) (*PipelineManifest, error) {
 	normalizePipelineSteps(&m)
 	m.Stages = expandPipelineModels(m.Stages)
 	rewriteStageDependencies(m.Stages)
+	vars := parseOptionVars(m.Vars, opts)
+	vars, err = applyInputSpecs(m.Inputs, vars, opts.DefaultRepos)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
 	applyPipelineDefaults(&m)
-	interpolatePipelinePrompts(&m)
+	interpolatePipelineFields(&m, vars, filepath.Dir(path))
+	applyPipelineDefaultRepos(&m, opts.DefaultRepos)
+	if err := ensurePipelineResolved(&m); err != nil {
+		return nil, err
+	}
 	return &m, nil
 }
 
@@ -329,13 +376,17 @@ func applyPipelineDefaults(m *PipelineManifest) {
 	}
 }
 
-func interpolatePipelinePrompts(m *PipelineManifest) {
-	if len(m.Vars) == 0 {
-		return
-	}
+func interpolatePipelineFields(m *PipelineManifest, vars map[string]string, baseDir string) {
 	for i, stage := range m.Stages {
+		if stage.Pipeline != "" {
+			stage.Pipeline = interpolateVars(stage.Pipeline, vars)
+			if stage.Pipeline != "" && !filepath.IsAbs(stage.Pipeline) {
+				stage.Pipeline = filepath.Join(baseDir, stage.Pipeline)
+			}
+			m.Stages[i].Pipeline = stage.Pipeline
+		}
 		for j := range stage.Agents {
-			m.Stages[i].Agents[j].Prompt = interpolateVars(m.Stages[i].Agents[j].Prompt, m.Vars)
+			m.Stages[i].Agents[j] = interpolateAgentSpec(m.Stages[i].Agents[j], vars)
 		}
 	}
 }
@@ -367,4 +418,120 @@ func interpolateVars(s string, vars map[string]string) string {
 		s = strings.ReplaceAll(s, "${"+k+"}", v)
 	}
 	return s
+}
+
+func mergedVars(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	vars := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		vars[k] = v
+	}
+	for k, v := range override {
+		vars[k] = v
+	}
+	return vars
+}
+
+func parseOptionVars(base map[string]string, opts ParseOptions) map[string]string {
+	vars := mergedVars(base, opts.Vars)
+	if len(opts.DefaultRepos) > 0 {
+		if vars == nil {
+			vars = make(map[string]string, 1)
+		}
+		if _, exists := vars["repo"]; !exists {
+			vars["repo"] = opts.DefaultRepos[0]
+		}
+	}
+	return vars
+}
+
+func applyInputSpecs(inputs []InputSpec, vars map[string]string, defaultRepos []string) (map[string]string, error) {
+	if len(inputs) == 0 {
+		return vars, nil
+	}
+	if vars == nil {
+		vars = make(map[string]string, len(inputs))
+	}
+	for _, input := range inputs {
+		if vars[input.Name] == "" && input.Default != "" {
+			vars[input.Name] = input.Default
+		}
+		if input.Name == "repo" && vars[input.Name] == "" && len(defaultRepos) > 0 {
+			vars[input.Name] = defaultRepos[0]
+		}
+		if input.Required && vars[input.Name] == "" {
+			return nil, fmt.Errorf("missing required input %q", input.Name)
+		}
+	}
+	return vars, nil
+}
+
+func interpolateAgentSpec(spec AgentSpec, vars map[string]string) AgentSpec {
+	if len(vars) == 0 {
+		return spec
+	}
+	spec.Repo = interpolateVars(spec.Repo, vars)
+	for i := range spec.Repos {
+		spec.Repos[i] = interpolateVars(spec.Repos[i], vars)
+	}
+	spec.Prompt = interpolateVars(spec.Prompt, vars)
+	return spec
+}
+
+func applyDefaultRepos(spec AgentSpec, defaultRepos []string) AgentSpec {
+	if spec.Repo != "" || len(spec.Repos) > 0 || len(defaultRepos) == 0 {
+		return spec
+	}
+	if len(defaultRepos) == 1 {
+		spec.Repo = defaultRepos[0]
+		return spec
+	}
+	spec.Repos = append([]string{}, defaultRepos...)
+	return spec
+}
+
+func applyPipelineDefaultRepos(m *PipelineManifest, defaultRepos []string) {
+	for i := range m.Stages {
+		for j := range m.Stages[i].Agents {
+			m.Stages[i].Agents[j] = applyDefaultRepos(m.Stages[i].Agents[j], defaultRepos)
+		}
+	}
+}
+
+func ensurePipelineResolved(m *PipelineManifest) error {
+	for _, stage := range m.Stages {
+		if err := ensureResolvedField("stage pipeline", stage.Pipeline); err != nil {
+			return err
+		}
+		for _, agent := range stage.Agents {
+			if err := ensureAgentSpecResolved("agent", agent); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func ensureAgentSpecResolved(kind string, spec AgentSpec) error {
+	if err := ensureResolvedField(kind+" repo", spec.Repo); err != nil {
+		return err
+	}
+	for _, repo := range spec.Repos {
+		if err := ensureResolvedField(kind+" repos", repo); err != nil {
+			return err
+		}
+	}
+	if err := ensureResolvedField(kind+" prompt", spec.Prompt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureResolvedField(label, value string) error {
+	if strings.Contains(value, "${") {
+		return fmt.Errorf("%s contains unresolved variables: %s", label, value)
+	}
+	return nil
 }

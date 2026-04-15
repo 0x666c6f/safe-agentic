@@ -102,13 +102,17 @@ safe-ag fleet status
 
 safe-ag pipeline pipeline.yaml
 safe-ag pipeline pipeline.yaml --dry-run
+safe-ag pipeline inspect review
+safe-ag pipeline render review
+safe-ag pipeline validate review
+safe-ag pr-review
+safe-ag pr-fix
 ```
 
-## TUI and dashboard
+## TUI
 
 ```bash
 safe-ag tui
-safe-ag dashboard --bind localhost:8420
 ```
 
 ## High-signal examples

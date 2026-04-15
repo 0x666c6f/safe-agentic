@@ -485,24 +485,14 @@ var diagnoseCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(tuiCmd)
-	dashboardCmd.Flags().StringVar(&dashboardBind, "bind", "localhost:8420", "Bind address for web dashboard")
-	rootCmd.AddCommand(dashboardCmd)
 }
 
-// ─── tui / dashboard ──────────────────────────────────────────────────────
+// ─── tui ──────────────────────────────────────────────────────────────
 
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
-	Short: "Launch interactive TUI dashboard",
+	Short: "Launch interactive TUI",
 	RunE:  runTUI,
-}
-
-var dashboardBind string
-
-var dashboardCmd = &cobra.Command{
-	Use:   "dashboard",
-	Short: "Start web dashboard",
-	RunE:  runDashboard,
 }
 
 func findTUIBinary() (string, error) {
@@ -524,14 +514,6 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("safe-ag-tui not found. Build with: make build-tui")
 	}
 	return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
-}
-
-func runDashboard(cmd *cobra.Command, args []string) error {
-	bin, err := findTUIBinary()
-	if err != nil {
-		return fmt.Errorf("safe-ag-tui not found. Build with: make build-tui")
-	}
-	return syscall.Exec(bin, []string{bin, "--dashboard", "--bind", dashboardBind}, os.Environ())
 }
 
 func runDiagnose(cmd *cobra.Command, args []string) error {

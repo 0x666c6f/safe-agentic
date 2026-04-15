@@ -3,304 +3,182 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func writeTemp(t *testing.T, content string) string {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "defaults-*.sh")
-	if err != nil {
-		t.Fatalf("create temp file: %v", err)
-	}
-	if _, err := f.WriteString(content); err != nil {
-		t.Fatalf("write temp file: %v", err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("close temp file: %v", err)
-	}
-	return f.Name()
-}
-
 func TestDefaults(t *testing.T) {
-	d := Defaults()
-	if d.CPUs != "4" {
-		t.Errorf("default CPUs should be '4', got %q", d.CPUs)
+	cfg := Defaults()
+	if cfg.Defaults.CPUs != "4" {
+		t.Fatalf("CPUs = %q, want 4", cfg.Defaults.CPUs)
 	}
-	if d.Memory != "8g" {
-		t.Errorf("default Memory should be '8g', got %q", d.Memory)
+	if cfg.Defaults.Memory != "8g" {
+		t.Fatalf("Memory = %q, want 8g", cfg.Defaults.Memory)
 	}
-	if d.PIDsLimit != "512" {
-		t.Errorf("default PIDsLimit should be '512', got %q", d.PIDsLimit)
+	if cfg.Defaults.PIDsLimit != 512 {
+		t.Fatalf("PIDsLimit = %d, want 512", cfg.Defaults.PIDsLimit)
 	}
 }
 
-func TestLoadDefaults_MissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nonexistent.sh")
+func TestPathsUseSafeAgHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if got := UserDir(); got != filepath.Join(home, ".safe-ag") {
+		t.Fatalf("UserDir() = %q", got)
+	}
+	if got := ConfigPath(); got != filepath.Join(home, ".safe-ag", "config.toml") {
+		t.Fatalf("ConfigPath() = %q", got)
+	}
+	if got := TemplatesDir(); got != filepath.Join(home, ".safe-ag", "templates") {
+		t.Fatalf("TemplatesDir() = %q", got)
+	}
+	if got := PipelinesDir(); got != filepath.Join(home, ".safe-ag", "pipelines") {
+		t.Fatalf("PipelinesDir() = %q", got)
+	}
+	if got := CronPath(); got != filepath.Join(home, ".safe-ag", "cron.json") {
+		t.Fatalf("CronPath() = %q", got)
+	}
+	if got := AuditPath(); got != filepath.Join(home, ".safe-ag", "state", "audit.jsonl") {
+		t.Fatalf("AuditPath() = %q", got)
+	}
+	if got := EventsPath(); got != filepath.Join(home, ".safe-ag", "state", "events.jsonl") {
+		t.Fatalf("EventsPath() = %q", got)
+	}
+	if got := PipelineLogsDir(); got != filepath.Join(home, ".safe-ag", "state", "pipelines") {
+		t.Fatalf("PipelineLogsDir() = %q", got)
+	}
+}
+
+func TestLoadDefaultsMissingFile(t *testing.T) {
+	cfg, err := LoadDefaults(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("LoadDefaults() error = %v", err)
+	}
+	if cfg.Defaults.Memory != "8g" {
+		t.Fatalf("Memory = %q, want 8g", cfg.Defaults.Memory)
+	}
+}
+
+func TestLoadDefaultsMergesSparseToml(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `version = 1
+
+[defaults]
+memory = "16g"
+reuse_auth = true
+
+[git]
+author_name = "Agent Bot"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
 	cfg, err := LoadDefaults(path)
 	if err != nil {
-		t.Fatalf("LoadDefaults with missing file should return no error, got: %v", err)
+		t.Fatalf("LoadDefaults() error = %v", err)
 	}
-	// Missing file returns hardcoded defaults
-	if cfg.CPUs != "4" {
-		t.Errorf("expected default CPUs '4' for missing file, got %q", cfg.CPUs)
+	if cfg.Defaults.Memory != "16g" {
+		t.Fatalf("Memory = %q, want 16g", cfg.Defaults.Memory)
+	}
+	if cfg.Defaults.CPUs != "4" {
+		t.Fatalf("CPUs = %q, want 4", cfg.Defaults.CPUs)
+	}
+	if !cfg.Defaults.ReuseAuth {
+		t.Fatal("ReuseAuth = false, want true")
+	}
+	if cfg.Git.AuthorName != "Agent Bot" {
+		t.Fatalf("AuthorName = %q", cfg.Git.AuthorName)
 	}
 }
 
-func TestLoadDefaults_Values(t *testing.T) {
-	content := `
-SAFE_AGENTIC_DEFAULT_CPUS=8
-SAFE_AGENTIC_DEFAULT_MEMORY=16g
-SAFE_AGENTIC_DEFAULT_PIDS_LIMIT=1024
-SAFE_AGENTIC_DEFAULT_SSH=true
-SAFE_AGENTIC_DEFAULT_NETWORK=agent-net
-GIT_AUTHOR_NAME="Agent Bot"
-GIT_AUTHOR_EMAIL=bot@example.com
-GIT_COMMITTER_NAME="Agent Bot"
-GIT_COMMITTER_EMAIL=bot@example.com
+func TestLoadRawConfigRejectsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `version = 1
+
+[defaults]
+memory = "16g"
+bogus = true
 `
-	path := writeTemp(t, content)
-	cfg, err := LoadDefaults(path)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := LoadRawConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "unsupported config keys") {
+		t.Fatalf("LoadRawConfig() error = %v, want unsupported config keys", err)
+	}
+}
+
+func TestSetValueAndSaveRawConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	var raw FileConfig
+	if err := SetValue(&raw, "defaults.memory", "16g"); err != nil {
+		t.Fatalf("SetValue memory: %v", err)
+	}
+	if err := SetValue(&raw, "SAFE_AGENTIC_DEFAULT_REUSE_AUTH", "true"); err != nil {
+		t.Fatalf("SetValue alias: %v", err)
+	}
+	if err := SetValue(&raw, "git.author_name", "Agent Bot"); err != nil {
+		t.Fatalf("SetValue git: %v", err)
+	}
+	if err := SaveRawConfig(path, raw); err != nil {
+		t.Fatalf("SaveRawConfig() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("read config: %v", err)
 	}
-	if cfg.CPUs != "8" {
-		t.Errorf("CPUs = %q, want %q", cfg.CPUs, "8")
+	text := string(data)
+	if !strings.Contains(text, `memory = "16g"`) {
+		t.Fatalf("config missing memory:\n%s", text)
 	}
-	if cfg.Memory != "16g" {
-		t.Errorf("Memory = %q, want %q", cfg.Memory, "16g")
+	if !strings.Contains(text, "reuse_auth = true") {
+		t.Fatalf("config missing reuse_auth:\n%s", text)
 	}
-	if cfg.PIDsLimit != "1024" {
-		t.Errorf("PIDsLimit = %q, want %q", cfg.PIDsLimit, "1024")
-	}
-	if cfg.SSH != "true" {
-		t.Errorf("SSH = %q, want %q", cfg.SSH, "true")
-	}
-	if cfg.Network != "agent-net" {
-		t.Errorf("Network = %q, want %q", cfg.Network, "agent-net")
-	}
-	if cfg.GitAuthorName != "Agent Bot" {
-		t.Errorf("GitAuthorName = %q, want %q", cfg.GitAuthorName, "Agent Bot")
-	}
-	if cfg.GitAuthorEmail != "bot@example.com" {
-		t.Errorf("GitAuthorEmail = %q, want %q", cfg.GitAuthorEmail, "bot@example.com")
-	}
-	if cfg.GitCommitterName != "Agent Bot" {
-		t.Errorf("GitCommitterName = %q, want %q", cfg.GitCommitterName, "Agent Bot")
-	}
-	if cfg.GitCommitterEmail != "bot@example.com" {
-		t.Errorf("GitCommitterEmail = %q, want %q", cfg.GitCommitterEmail, "bot@example.com")
+	if !strings.Contains(text, `author_name = "Agent Bot"`) {
+		t.Fatalf("config missing author_name:\n%s", text)
 	}
 }
 
-func TestLoadDefaults_QuotedValues(t *testing.T) {
-	content := `
-SAFE_AGENTIC_DEFAULT_MEMORY="16g"
-SAFE_AGENTIC_DEFAULT_IDENTITY='Agent Bot <bot@example.com>'
-GIT_AUTHOR_NAME="Agent \"Bot\""
-`
-	path := writeTemp(t, content)
-	cfg, err := LoadDefaults(path)
+func TestResetValueDeletesEmptyConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	var raw FileConfig
+	if err := SetValue(&raw, "defaults.memory", "16g"); err != nil {
+		t.Fatalf("SetValue: %v", err)
+	}
+	if err := SaveRawConfig(path, raw); err != nil {
+		t.Fatalf("SaveRawConfig: %v", err)
+	}
+	if err := ResetValue(&raw, "defaults.memory"); err != nil {
+		t.Fatalf("ResetValue: %v", err)
+	}
+	if err := SaveRawConfig(path, raw); err != nil {
+		t.Fatalf("SaveRawConfig after reset: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("config file still exists: %v", err)
+	}
+}
+
+func TestGetValueSupportsAliases(t *testing.T) {
+	cfg := Defaults()
+	cfg.Defaults.Memory = "32g"
+	got, err := GetValue(cfg, "SAFE_AGENTIC_DEFAULT_MEMORY")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("GetValue() error = %v", err)
 	}
-	if cfg.Memory != "16g" {
-		t.Errorf("Memory = %q, want %q", cfg.Memory, "16g")
-	}
-	if cfg.Identity != "Agent Bot <bot@example.com>" {
-		t.Errorf("Identity = %q, want %q", cfg.Identity, "Agent Bot <bot@example.com>")
-	}
-	if cfg.GitAuthorName != `Agent "Bot"` {
-		t.Errorf("GitAuthorName = %q, want %q", cfg.GitAuthorName, `Agent "Bot"`)
+	if got != "32g" {
+		t.Fatalf("GetValue() = %q, want 32g", got)
 	}
 }
 
-func TestLoadDefaults_CommentsAndBlanks(t *testing.T) {
-	content := `
-# This is a comment
-# SAFE_AGENTIC_DEFAULT_CPUS=ignored
-
-SAFE_AGENTIC_DEFAULT_CPUS=4
-
-# another comment
-SAFE_AGENTIC_DEFAULT_MEMORY=8g
-`
-	path := writeTemp(t, content)
-	cfg, err := LoadDefaults(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestSetValueRejectsBadTypes(t *testing.T) {
+	var raw FileConfig
+	if err := SetValue(&raw, "defaults.pids_limit", "nope"); err == nil {
+		t.Fatal("expected integer parse error")
 	}
-	if cfg.CPUs != "4" {
-		t.Errorf("CPUs = %q, want %q", cfg.CPUs, "4")
-	}
-	if cfg.Memory != "8g" {
-		t.Errorf("Memory = %q, want %q", cfg.Memory, "8g")
-	}
-}
-
-func TestLoadDefaults_ExportPrefix(t *testing.T) {
-	content := `export SAFE_AGENTIC_DEFAULT_CPUS=6
-export GIT_AUTHOR_NAME="Exported Bot"
-`
-	path := writeTemp(t, content)
-	cfg, err := LoadDefaults(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.CPUs != "6" {
-		t.Errorf("CPUs = %q, want %q", cfg.CPUs, "6")
-	}
-	if cfg.GitAuthorName != "Exported Bot" {
-		t.Errorf("GitAuthorName = %q, want %q", cfg.GitAuthorName, "Exported Bot")
-	}
-}
-
-func TestLoadDefaults_UnknownKeyRejected(t *testing.T) {
-	content := `UNKNOWN_KEY=value
-`
-	path := writeTemp(t, content)
-	_, err := LoadDefaults(path)
-	if err == nil {
-		t.Error("expected error for unknown key, got nil")
-	}
-}
-
-func TestLoadDefaults_WhitespaceInBareValue(t *testing.T) {
-	content := `SAFE_AGENTIC_DEFAULT_CPUS=has space
-`
-	path := writeTemp(t, content)
-	_, err := LoadDefaults(path)
-	if err == nil {
-		t.Error("expected error for bare value with whitespace, got nil")
-	}
-}
-
-func TestLoadDefaults_NoEqualsSign(t *testing.T) {
-	// A line with no '=' sign should return an error.
-	content := "SAFE_AGENTIC_DEFAULT_CPUS\n"
-	path := writeTemp(t, content)
-	_, err := LoadDefaults(path)
-	if err == nil {
-		t.Error("expected error for line without '=', got nil")
-	}
-}
-
-func TestLoadDefaults_OpenError(t *testing.T) {
-	// Create a file and remove read permission so Open fails with a non-IsNotExist error.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "defaults.sh")
-	if err := os.WriteFile(path, []byte("SAFE_AGENTIC_DEFAULT_CPUS=4\n"), 0o000); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
-	_, err := LoadDefaults(path)
-	if err == nil {
-		t.Error("expected error opening unreadable file, got nil")
-	}
-}
-
-func TestKeyAllowed(t *testing.T) {
-	allowed := []string{
-		"SAFE_AGENTIC_DEFAULT_CPUS",
-		"SAFE_AGENTIC_DEFAULT_MEMORY",
-		"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT",
-		"SAFE_AGENTIC_DEFAULT_SSH",
-		"SAFE_AGENTIC_DEFAULT_DOCKER",
-		"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET",
-		"SAFE_AGENTIC_DEFAULT_REUSE_AUTH",
-		"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH",
-		"SAFE_AGENTIC_DEFAULT_NETWORK",
-		"SAFE_AGENTIC_DEFAULT_IDENTITY",
-		"GIT_AUTHOR_NAME",
-		"GIT_AUTHOR_EMAIL",
-		"GIT_COMMITTER_NAME",
-		"GIT_COMMITTER_EMAIL",
-	}
-	for _, k := range allowed {
-		if !KeyAllowed(k) {
-			t.Errorf("KeyAllowed(%q) = false, want true", k)
-		}
-	}
-
-	notAllowed := []string{
-		"",
-		"SAFE_AGENTIC_DEFAULT_UNKNOWN",
-		"HOME",
-		"PATH",
-		"GIT_AUTHOR_UNKNOWN",
-		"SOME_RANDOM_KEY",
-	}
-	for _, k := range notAllowed {
-		if KeyAllowed(k) {
-			t.Errorf("KeyAllowed(%q) = true, want false", k)
-		}
-	}
-}
-
-func TestDefaultsPath(t *testing.T) {
-	// Test with explicit XDG_CONFIG_HOME
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := DefaultsPath()
-	expected := filepath.Join(dir, "safe-agentic", "defaults.sh")
-	if path != expected {
-		t.Errorf("DefaultsPath() = %q, want %q", path, expected)
-	}
-}
-
-func TestDefaultsPath_FallbackToHome(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
-	path := DefaultsPath()
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".config", "safe-agentic", "defaults.sh")
-	if path != expected {
-		t.Errorf("DefaultsPath() = %q, want %q", path, expected)
-	}
-}
-
-func TestLoadDefaults_AllDefaultKeys(t *testing.T) {
-	content := `SAFE_AGENTIC_DEFAULT_CPUS=2
-SAFE_AGENTIC_DEFAULT_MEMORY=4g
-SAFE_AGENTIC_DEFAULT_PIDS_LIMIT=512
-SAFE_AGENTIC_DEFAULT_SSH=false
-SAFE_AGENTIC_DEFAULT_DOCKER=true
-SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET=false
-SAFE_AGENTIC_DEFAULT_REUSE_AUTH=true
-SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=false
-SAFE_AGENTIC_DEFAULT_NETWORK=my-net
-SAFE_AGENTIC_DEFAULT_IDENTITY='Bot <bot@example.com>'
-`
-	path := writeTemp(t, content)
-	cfg, err := LoadDefaults(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.CPUs != "2" {
-		t.Errorf("CPUs = %q, want %q", cfg.CPUs, "2")
-	}
-	if cfg.Memory != "4g" {
-		t.Errorf("Memory = %q, want %q", cfg.Memory, "4g")
-	}
-	if cfg.PIDsLimit != "512" {
-		t.Errorf("PIDsLimit = %q, want %q", cfg.PIDsLimit, "512")
-	}
-	if cfg.SSH != "false" {
-		t.Errorf("SSH = %q, want %q", cfg.SSH, "false")
-	}
-	if cfg.Docker != "true" {
-		t.Errorf("Docker = %q, want %q", cfg.Docker, "true")
-	}
-	if cfg.DockerSocket != "false" {
-		t.Errorf("DockerSocket = %q, want %q", cfg.DockerSocket, "false")
-	}
-	if cfg.ReuseAuth != "true" {
-		t.Errorf("ReuseAuth = %q, want %q", cfg.ReuseAuth, "true")
-	}
-	if cfg.ReuseGHAuth != "false" {
-		t.Errorf("ReuseGHAuth = %q, want %q", cfg.ReuseGHAuth, "false")
-	}
-	if cfg.Network != "my-net" {
-		t.Errorf("Network = %q, want %q", cfg.Network, "my-net")
-	}
-	if cfg.Identity != "Bot <bot@example.com>" {
-		t.Errorf("Identity = %q, want %q", cfg.Identity, "Bot <bot@example.com>")
+	if err := SetValue(&raw, "defaults.reuse_auth", "nope"); err == nil {
+		t.Fatal("expected bool parse error")
 	}
 }

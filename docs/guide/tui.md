@@ -44,16 +44,7 @@ safe-ag tui
 - filtering is case-insensitive
 - narrow terminals automatically hide lower-priority columns
 
-## Dashboard
-
-There is also a web dashboard:
-
-```bash
-safe-ag dashboard --bind localhost:8420
-```
-
-Use the TUI when you want keyboard-first local control. Use the dashboard when you want a browser view.
-The dashboard now covers the same broad operator surface as the TUI for non-interactive work: inspect tabs, review/cost/audit views, pull/push file transfer, spawn/fleet/pipeline forms, and action buttons backed by the same `safe-ag` commands.
+Use the TUI when you want keyboard-first local control.
 
 ## Spawn form
 

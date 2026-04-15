@@ -1,0 +1,71 @@
+name: dual
+description: Deep one-shot Claude + Codex PR review, then reconcile and fix.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repository.
+    required: true
+    infer: repo
+  - name: pr
+    description: Pull request number to review.
+    required: true
+    infer: pr
+examples:
+  - safe-ag pr-review
+  - safe-ag pr-review dual 16
+tags:
+  - review
+  - pr
+  - dual
+stages:
+  - name: review
+    agents:
+      - name: claude-review
+        type: claude
+        repo: ${repo}
+        ssh: true
+        reuse_auth: true
+        reuse_gh_auth: true
+        background: true
+        prompt: |
+          Review PR ${pr} in one-shot mode.
+
+          Use the pr-review skill/workflow for the initial deep review only.
+          Do Steps 1-5 from that workflow.
+          Do NOT create the continuous watcher / cron loop.
+          Do NOT babysit future commits.
+
+          Post actionable inline review comments only.
+      - name: codex-review
+        type: codex
+        repo: ${repo}
+        ssh: true
+        reuse_auth: true
+        reuse_gh_auth: true
+        background: true
+        prompt: |
+          Review PR ${pr} in one-shot mode.
+
+          Use the pr-review skill/workflow for the initial deep review only.
+          Do Steps 1-5 from that workflow.
+          Do NOT create the continuous watcher / cron loop.
+          Do NOT babysit future commits.
+
+          Post actionable inline review comments only.
+  - name: reconcile-fix
+    depends_on:
+      - review
+    agents:
+      - name: reconcile-fix
+        type: codex
+        repo: ${repo}
+        ssh: true
+        reuse_auth: true
+        reuse_gh_auth: true
+        background: true
+        prompt: |
+          Reconcile and fix PR ${pr}.
+
+          Use the pr-fix skill/workflow on PR ${pr}.
+          Fetch unresolved review threads, deduplicate overlapping findings,
+          apply the fixes, validate them, push the result, and resolve the
+          fixed threads.

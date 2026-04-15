@@ -1167,26 +1167,6 @@ func TestRunAWSRefresh_WritesCredentialsAsAgentUser(t *testing.T) {
 	}
 }
 
-// ─── quoteValue ───────────────────────────────────────────────────────────────
-
-func TestQuoteValue(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"simple", "simple"},
-		{"has space", `"has space"`},
-		{"has\ttab", `"has	tab"`},
-		{"nospace", "nospace"},
-	}
-	for _, tt := range tests {
-		got := quoteValue(tt.input)
-		if got != tt.want {
-			t.Errorf("quoteValue(%q) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-}
-
 // ─── config key validation ────────────────────────────────────────────────────
 
 func TestConfigKeyAllowed(t *testing.T) {
@@ -1231,20 +1211,24 @@ func TestConfigAllowedKeysList(t *testing.T) {
 
 func TestConfigGetField(t *testing.T) {
 	cfg := config.Config{
-		CPUs:              "4",
-		Memory:            "8g",
-		PIDsLimit:         "512",
-		SSH:               "true",
-		Docker:            "false",
-		DockerSocket:      "false",
-		ReuseAuth:         "true",
-		ReuseGHAuth:       "false",
-		Network:           "mynet",
-		Identity:          "Alice <alice@example.com>",
-		GitAuthorName:     "Alice",
-		GitAuthorEmail:    "alice@example.com",
-		GitCommitterName:  "Alice",
-		GitCommitterEmail: "alice@example.com",
+		Defaults: config.DefaultsSection{
+			CPUs:         "4",
+			Memory:       "8g",
+			PIDsLimit:    512,
+			SSH:          true,
+			Docker:       false,
+			DockerSocket: false,
+			ReuseAuth:    true,
+			ReuseGHAuth:  false,
+			Network:      "mynet",
+			Identity:     "Alice <alice@example.com>",
+		},
+		Git: config.GitSection{
+			AuthorName:     "Alice",
+			AuthorEmail:    "alice@example.com",
+			CommitterName:  "Alice",
+			CommitterEmail: "alice@example.com",
+		},
 	}
 
 	tests := []struct {
@@ -1265,30 +1249,39 @@ func TestConfigGetField(t *testing.T) {
 		{"GIT_AUTHOR_EMAIL", "alice@example.com"},
 		{"GIT_COMMITTER_NAME", "Alice"},
 		{"GIT_COMMITTER_EMAIL", "alice@example.com"},
-		{"UNKNOWN_KEY", ""},
 	}
 
 	for _, tt := range tests {
-		got := configGetField(cfg, tt.key)
+		got, err := config.GetValue(cfg, tt.key)
+		if err != nil {
+			t.Fatalf("GetValue(%q) error = %v", tt.key, err)
+		}
 		if got != tt.want {
-			t.Errorf("configGetField(%q) = %q, want %q", tt.key, got, tt.want)
+			t.Errorf("GetValue(%q) = %q, want %q", tt.key, got, tt.want)
 		}
 	}
 }
 
 // ─── config show/set/get/reset ───────────────────────────────────────────────
 
-// setXDGConfigHome sets XDG_CONFIG_HOME to a temp dir and returns cleanup func.
+// setXDGConfigHome keeps the old helper name but now points HOME at a temp dir.
 func setXDGConfigHome(t *testing.T) (string, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	orig := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	origHome := os.Getenv("HOME")
+	origXDG := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("HOME", tmpDir)
+	os.Unsetenv("XDG_CONFIG_HOME")
 	return tmpDir, func() {
-		if orig == "" {
+		if origHome == "" {
+			os.Unsetenv("HOME")
+		} else {
+			os.Setenv("HOME", origHome)
+		}
+		if origXDG == "" {
 			os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			os.Setenv("XDG_CONFIG_HOME", origXDG)
 		}
 	}
 }
@@ -1303,8 +1296,8 @@ func TestConfigShow_NoFile(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "No defaults file found") {
-		t.Errorf("expected 'No defaults file found', got: %s", output)
+	if !strings.Contains(output, "No config file found") {
+		t.Errorf("expected 'No config file found', got: %s", output)
 	}
 }
 
@@ -1328,18 +1321,18 @@ func TestConfigSet_ValidKey(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "Set SAFE_AGENTIC_DEFAULT_MEMORY=16g") {
+	if !strings.Contains(output, "Set defaults.memory=16g") {
 		t.Errorf("expected set confirmation, got: %s", output)
 	}
 
 	// Verify file was written at expected location
-	path := filepath.Join(xdgDir, "safe-agentic", "defaults.sh")
+	path := filepath.Join(xdgDir, ".safe-ag", "config.toml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
-	if !strings.Contains(string(data), "SAFE_AGENTIC_DEFAULT_MEMORY=16g") {
-		t.Errorf("expected key=value in file, got: %s", string(data))
+	if !strings.Contains(string(data), `memory = "16g"`) {
+		t.Errorf("expected TOML value in file, got: %s", string(data))
 	}
 }
 
@@ -1348,9 +1341,9 @@ func TestConfigSet_UpdateExisting(t *testing.T) {
 	defer xdgCleanup()
 
 	// Pre-populate
-	dir := filepath.Join(xdgDir, "safe-agentic")
+	dir := filepath.Join(xdgDir, ".safe-ag")
 	os.MkdirAll(dir, 0755)
-	os.WriteFile(filepath.Join(dir, "defaults.sh"), []byte("SAFE_AGENTIC_DEFAULT_MEMORY=8g\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[defaults]\nmemory = \"8g\"\n"), 0644)
 
 	captureOutput(func() {
 		if err := runConfigSet(configSetCmd, []string{"SAFE_AGENTIC_DEFAULT_MEMORY", "32g"}); err != nil {
@@ -1358,11 +1351,11 @@ func TestConfigSet_UpdateExisting(t *testing.T) {
 		}
 	})
 
-	data, _ := os.ReadFile(filepath.Join(dir, "defaults.sh"))
-	if strings.Contains(string(data), "8g") {
+	data, _ := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if strings.Contains(string(data), `memory = "8g"`) {
 		t.Errorf("old value should be replaced, got: %s", string(data))
 	}
-	if !strings.Contains(string(data), "32g") {
+	if !strings.Contains(string(data), `memory = "32g"`) {
 		t.Errorf("new value should be present, got: %s", string(data))
 	}
 }
@@ -1376,9 +1369,9 @@ func TestConfigGet_NotSet(t *testing.T) {
 			t.Fatalf("runConfigGet() error = %v", err)
 		}
 	})
-	// Without a defaults file, the value comes from Defaults() which sets Memory="8g"
-	// so we just check no error and some output exists
-	_ = output
+	if !strings.Contains(output, "defaults.memory=8g") {
+		t.Fatalf("expected defaults.memory=8g, got: %s", output)
+	}
 }
 
 func TestConfigGet_InvalidKey(t *testing.T) {
@@ -1406,10 +1399,10 @@ func TestConfigReset_RemovesKey(t *testing.T) {
 	xdgDir, xdgCleanup := setXDGConfigHome(t)
 	defer xdgCleanup()
 
-	dir := filepath.Join(xdgDir, "safe-agentic")
+	dir := filepath.Join(xdgDir, ".safe-ag")
 	os.MkdirAll(dir, 0755)
-	path := filepath.Join(dir, "defaults.sh")
-	os.WriteFile(path, []byte("SAFE_AGENTIC_DEFAULT_MEMORY=8g\nSAFE_AGENTIC_DEFAULT_CPUS=4\n"), 0644)
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte("[defaults]\nmemory = \"8g\"\ncpus = \"4\"\n"), 0644)
 
 	captureOutput(func() {
 		if err := runConfigReset(configResetCmd, []string{"SAFE_AGENTIC_DEFAULT_MEMORY"}); err != nil {
@@ -1418,10 +1411,10 @@ func TestConfigReset_RemovesKey(t *testing.T) {
 	})
 
 	data, _ := os.ReadFile(path)
-	if strings.Contains(string(data), "SAFE_AGENTIC_DEFAULT_MEMORY") {
+	if strings.Contains(string(data), "memory") {
 		t.Errorf("key should be removed, got: %s", string(data))
 	}
-	if !strings.Contains(string(data), "SAFE_AGENTIC_DEFAULT_CPUS") {
+	if !strings.Contains(string(data), `cpus = "4"`) {
 		t.Errorf("other keys should remain, got: %s", string(data))
 	}
 }
@@ -1716,11 +1709,11 @@ func TestUserTemplatesDir(t *testing.T) {
 	defer xdgCleanup()
 
 	got := userTemplatesDir()
-	if !strings.HasPrefix(got, xdgDir) {
-		t.Errorf("userTemplatesDir() = %q, expected prefix %q", got, xdgDir)
+	if !strings.HasPrefix(got, filepath.Join(xdgDir, ".safe-ag")) {
+		t.Errorf("userTemplatesDir() = %q, expected prefix %q", got, filepath.Join(xdgDir, ".safe-ag"))
 	}
-	if !strings.Contains(got, "safe-agentic") {
-		t.Errorf("userTemplatesDir() should contain 'safe-agentic', got: %q", got)
+	if !strings.Contains(got, ".safe-ag") {
+		t.Errorf("userTemplatesDir() should contain '.safe-ag', got: %q", got)
 	}
 	if !strings.HasSuffix(got, "templates") {
 		t.Errorf("userTemplatesDir() should end with 'templates', got: %q", got)
@@ -1741,10 +1734,6 @@ func TestRepoTemplatesDir(t *testing.T) {
 }
 
 func TestTemplateList_FromSymlinkedBinary(t *testing.T) {
-	xdgDir, xdgCleanup := setXDGConfigHome(t)
-	defer xdgCleanup()
-	_ = xdgDir
-
 	tmp := t.TempDir()
 	libexecDir := filepath.Join(tmp, "libexec")
 	binDir := filepath.Join(tmp, "bin")
@@ -1807,7 +1796,7 @@ func TestTemplateList_NoTemplates(t *testing.T) {
 	defer xdgCleanup()
 
 	// Ensure user templates dir is empty
-	os.MkdirAll(filepath.Join(xdgDir, "safe-agentic", "templates"), 0755)
+	os.MkdirAll(filepath.Join(xdgDir, ".safe-ag", "templates"), 0755)
 
 	output := captureOutput(func() {
 		// Will find built-in templates if running from repo, but won't fail
@@ -1821,7 +1810,7 @@ func TestFindTemplate_NotFound(t *testing.T) {
 	xdgDir, xdgCleanup := setXDGConfigHome(t)
 	defer xdgCleanup()
 
-	os.MkdirAll(filepath.Join(xdgDir, "safe-agentic", "templates"), 0755)
+	os.MkdirAll(filepath.Join(xdgDir, ".safe-ag", "templates"), 0755)
 
 	_, err := findTemplate("nonexistent-template-xyz")
 	if err == nil {
@@ -1837,7 +1826,7 @@ func TestFindTemplate_UserTemplate(t *testing.T) {
 	defer xdgCleanup()
 
 	// Create a user template
-	dir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	dir := filepath.Join(xdgDir, ".safe-ag", "templates")
 	os.MkdirAll(dir, 0755)
 	tplPath := filepath.Join(dir, "my-template.md")
 	os.WriteFile(tplPath, []byte("# My Template\n\nDo something."), 0644)
@@ -1855,7 +1844,7 @@ func TestTemplateList_WithUserTemplate(t *testing.T) {
 	xdgDir, xdgCleanup := setXDGConfigHome(t)
 	defer xdgCleanup()
 
-	dir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	dir := filepath.Join(xdgDir, ".safe-ag", "templates")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "custom-tpl.md"), []byte("# custom"), 0644)
 
@@ -1876,7 +1865,7 @@ func TestTemplateList_WithUserTemplate(t *testing.T) {
 func TestTemplateShow_NotFound(t *testing.T) {
 	xdgDir, xdgCleanup := setXDGConfigHome(t)
 	defer xdgCleanup()
-	os.MkdirAll(filepath.Join(xdgDir, "safe-agentic", "templates"), 0755)
+	os.MkdirAll(filepath.Join(xdgDir, ".safe-ag", "templates"), 0755)
 
 	err := runTemplateShow(templateShowCmd, []string{"nonexistent-xyz"})
 	if err == nil {
@@ -1888,7 +1877,7 @@ func TestTemplateShow_Existing(t *testing.T) {
 	xdgDir, xdgCleanup := setXDGConfigHome(t)
 	defer xdgCleanup()
 
-	dir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	dir := filepath.Join(xdgDir, ".safe-ag", "templates")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "show-test.md"), []byte("Template content here"), 0644)
 
@@ -2103,7 +2092,7 @@ func TestRunTemplateCreate(t *testing.T) {
 	}
 
 	// Verify file was created
-	tplPath := filepath.Join(xdgDir, "safe-agentic", "templates", "my-new-template.md")
+	tplPath := filepath.Join(xdgDir, ".safe-ag", "templates", "my-new-template.md")
 	if _, err := os.Stat(tplPath); os.IsNotExist(err) {
 		t.Errorf("template file not created at %s", tplPath)
 	}
@@ -2114,7 +2103,7 @@ func TestRunTemplateCreate_AlreadyExists(t *testing.T) {
 	defer xdgCleanup()
 
 	// Pre-create the template
-	dir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	dir := filepath.Join(xdgDir, ".safe-ag", "templates")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "existing.md"), []byte("# existing"), 0644)
 
@@ -2124,6 +2113,19 @@ func TestRunTemplateCreate_AlreadyExists(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected 'already exists' in error, got: %v", err)
+	}
+}
+
+func TestRunTemplateCreate_RejectsPathTraversal(t *testing.T) {
+	_, xdgCleanup := setXDGConfigHome(t)
+	defer xdgCleanup()
+
+	err := runTemplateCreate(templateCreateCmd, []string{"../escape"})
+	if err == nil {
+		t.Fatal("expected error for invalid template name")
+	}
+	if !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "relative") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -2801,8 +2803,8 @@ func TestSpawnWithTemplate(t *testing.T) {
 	defer cleanup()
 
 	xdgDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdgDir)
-	templateDir := filepath.Join(xdgDir, "safe-agentic", "templates")
+	t.Setenv("HOME", xdgDir)
+	templateDir := filepath.Join(xdgDir, ".safe-ag", "templates")
 	if err := os.MkdirAll(templateDir, 0o755); err != nil {
 		t.Fatalf("mkdir template dir: %v", err)
 	}

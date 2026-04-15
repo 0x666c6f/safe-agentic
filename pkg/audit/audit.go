@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 )
 
 type Entry struct {
@@ -21,12 +23,7 @@ type Logger struct {
 }
 
 func DefaultPath() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = home + "/.config"
-	}
-	return filepath.Join(dir, "safe-agentic", "audit.jsonl")
+	return config.AuditPath()
 }
 
 func (l *Logger) Log(action, container string, details map[string]string) error {

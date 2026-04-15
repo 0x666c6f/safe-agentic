@@ -1241,7 +1241,7 @@ func (ac *Actions) Fleet(manifestPath string) {
 // Pipeline runs a multi-step agent pipeline (entered via command bar).
 func (ac *Actions) Pipeline(pipelinePath string) {
 	if pipelinePath == "" {
-		ac.app.footer.ShowStatus("Usage: :pipeline <pipeline.yaml>", true)
+		ac.app.footer.ShowStatus("Usage: :pipeline <pipeline.yaml|name>", true)
 		return
 	}
 	ac.app.footer.ShowStatus("Running pipeline from "+pipelinePath+"...", false)
@@ -1254,6 +1254,46 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 				ac.app.footer.ShowStatus("Pipeline failed: "+strings.TrimSpace(string(out)), true)
 			} else {
 				ac.app.footer.ShowStatus("Pipeline complete", false)
+			}
+		})
+	}()
+}
+
+// PRReview runs the dedicated PR review workflow.
+func (ac *Actions) PRReview(arg string) {
+	ac.app.footer.ShowStatus("Running pr-review "+strings.TrimSpace(arg)+"...", false)
+	go func() {
+		args := []string{"pr-review"}
+		if strings.TrimSpace(arg) != "" {
+			args = append(args, strings.Fields(arg)...)
+		}
+		out, err := newCLICmd(args...).CombinedOutput()
+		ac.app.poller.ForceRefresh()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("pr-review failed: "+strings.TrimSpace(string(out)), true)
+			} else {
+				ac.app.footer.ShowStatus("pr-review complete", false)
+			}
+		})
+	}()
+}
+
+// PRFix runs the dedicated PR fix workflow.
+func (ac *Actions) PRFix(arg string) {
+	ac.app.footer.ShowStatus("Running pr-fix "+strings.TrimSpace(arg)+"...", false)
+	go func() {
+		args := []string{"pr-fix"}
+		if strings.TrimSpace(arg) != "" {
+			args = append(args, strings.Fields(arg)...)
+		}
+		out, err := newCLICmd(args...).CombinedOutput()
+		ac.app.poller.ForceRefresh()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("pr-fix failed: "+strings.TrimSpace(string(out)), true)
+			} else {
+				ac.app.footer.ShowStatus("pr-fix complete", false)
 			}
 		})
 	}()

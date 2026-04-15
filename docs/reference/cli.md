@@ -33,7 +33,6 @@ Top-level commands:
 | `config` | manage persistent defaults |
 | `cost` | estimate API cost from session data |
 | `cron` | manage scheduled jobs |
-| `dashboard` | start the web dashboard |
 | `diagnose` | run environment health checks |
 | `diff` | show git diff from an agent workspace |
 | `fleet` | spawn agents from a fleet manifest |
@@ -44,6 +43,8 @@ Top-level commands:
 | `peek` | show the latest visible output |
 | `pipeline` | run staged pipelines |
 | `pr` | create a GitHub PR from agent work |
+| `pr-fix` | fix review feedback on the current or given PR |
+| `pr-review` | run a one-shot PR review workflow |
 | `replay` | replay a session event log |
 | `retry` | retry a failed agent with the same config |
 | `review` | run an AI review over the diff |
@@ -55,7 +56,7 @@ Top-level commands:
 | `summary` | show a compact agent summary |
 | `template` | manage prompt templates |
 | `todo` | manage merge-gate todos |
-| `tui` | launch the terminal dashboard |
+| `tui` | launch the terminal UI |
 | `update` | rebuild the image |
 | `vm` | manage the OrbStack VM |
 
@@ -125,6 +126,7 @@ Flags:
 | `--reuse-gh-auth` | bool | reuse GitHub CLI auth |
 | `--ssh` | bool | enable SSH agent forwarding |
 | `--template` | string | prompt template name |
+| `--var` | strings | template variable assignment `key=value`; repeatable |
 
 ## `run`
 
@@ -150,6 +152,7 @@ Flags:
 | `--name` | string | container name |
 | `--network` | string | custom Docker network |
 | `--template` | string | prompt template |
+| `--var` | strings | template variable assignment `key=value`; repeatable |
 
 ## `list`
 
@@ -439,6 +442,8 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--dry-run` | bool | print what would run without executing |
+| `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
+| `--var` | strings | manifest variable assignment `key=value`; repeatable |
 
 Subcommands:
 
@@ -453,14 +458,25 @@ safe-ag fleet status
 Usage:
 
 ```bash
-safe-ag pipeline <pipeline.yaml> [flags]
+safe-ag pipeline <pipeline.yaml|name> [flags]
+safe-ag pipeline list
+safe-ag pipeline show <name>
+safe-ag pipeline inspect <name>
+safe-ag pipeline render <name>
+safe-ag pipeline validate <name>
+safe-ag pipeline create <name>
 ```
 
 Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
+| `--background` | bool | run the pipeline in the background and return immediately |
 | `--dry-run` | bool | print the execution plan without running |
+| `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
+| `--var` | strings | manifest variable assignment `key=value`; repeatable |
+
+Saved user pipelines live in `~/.safe-ag/pipelines/`. Built-in review presets ship under the same catalog surface.
 
 ## `config`
 
@@ -472,16 +488,32 @@ Subcommands:
 safe-ag config show
 ```
 
+Reads `~/.safe-ag/config.toml`.
+
 ### `config get`
 
 ```bash
 safe-ag config get <key>
 ```
 
+Examples:
+
+```bash
+safe-ag config get defaults.memory
+safe-ag config get SAFE_AGENTIC_DEFAULT_MEMORY
+```
+
 ### `config set`
 
 ```bash
 safe-ag config set <key> <value>
+```
+
+Examples:
+
+```bash
+safe-ag config set defaults.memory 16g
+safe-ag config set defaults.identity "Your Name <you@example.com>"
 ```
 
 ### `config reset`
@@ -502,10 +534,18 @@ Subcommands:
 safe-ag template list
 ```
 
+User templates live in `~/.safe-ag/templates/`.
+
 ### `template show`
 
 ```bash
 safe-ag template show <name>
+```
+
+### `template render`
+
+```bash
+safe-ag template render <name>
 ```
 
 ### `template create`
@@ -515,6 +555,47 @@ safe-ag template create <name>
 ```
 
 No additional flags beyond `--help`.
+
+## `pipeline` saved catalog
+
+Saved user pipelines live in `~/.safe-ag/pipelines/`.
+
+## `pr-review`
+
+Usage:
+
+```bash
+safe-ag pr-review [claude|codex|dual] [pr]
+```
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--dry-run` | bool | print the resolved review pipeline without running |
+| `--repo` | strings | default repo URL; inferred from current checkout when omitted |
+| `--var` | strings | workflow variable assignment `key=value`; repeatable |
+
+Behavior:
+- defaults to `dual`
+- infers current PR via `gh pr view --json number` when omitted
+- runs one-shot review presets without the watcher loop
+
+## `pr-fix`
+
+Usage:
+
+```bash
+safe-ag pr-fix [pr]
+```
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--dry-run` | bool | print the resolved fix pipeline without running |
+| `--repo` | strings | default repo URL; inferred from current checkout when omitted |
+| `--var` | strings | workflow variable assignment `key=value`; repeatable |
 
 ## `mcp-login`
 
@@ -580,20 +661,6 @@ safe-ag cron daemon
 ```
 
 No additional flags beyond `--help`.
-
-## `dashboard`
-
-Usage:
-
-```bash
-safe-ag dashboard [flags]
-```
-
-Flags:
-
-| Flag | Type | Meaning |
-|---|---|---|
-| `--bind` | string | bind address; default `localhost:8420` |
 
 ## `tui`
 

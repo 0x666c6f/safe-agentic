@@ -9,15 +9,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // ─── fleet ──────────────────────────────────────────────────────────────────
 
 var fleetDryRun bool
+var fleetManifestRepos []string
+var fleetManifestVars []string
 
 var fleetCmd = &cobra.Command{
 	Use:   "fleet <manifest.yaml>",
@@ -28,12 +33,21 @@ var fleetCmd = &cobra.Command{
 
 func init() {
 	fleetCmd.Flags().BoolVar(&fleetDryRun, "dry-run", false, "Print what would run without executing")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestVars, "var", nil, "Manifest variable assignment (key=value)")
 	fleetCmd.AddCommand(fleetStatusCmd)
 	rootCmd.AddCommand(fleetCmd)
 }
 
 func runFleet(cmd *cobra.Command, args []string) error {
-	m, err := fleet.ParseFleet(args[0])
+	vars, repos, err := parseTemplateVars(fleetManifestVars, fleetManifestRepos, true)
+	if err != nil {
+		return err
+	}
+	m, err := fleet.ParseFleetWithOptions(args[0], fleet.ParseOptions{
+		Vars:         vars,
+		DefaultRepos: repos,
+	})
 	if err != nil {
 		return err
 	}
@@ -97,15 +111,20 @@ func runFleetStatus(cmd *cobra.Command, args []string) error {
 
 var pipelineDryRun bool
 var pipelineBackground bool
+var pipelineManifestRepos []string
+var pipelineManifestVars []string
 
 const pipelineDetachedEnv = "SAFE_AGENTIC_PIPELINE_DETACHED"
 
 var launchDetachedPipeline = launchDetachedPipelineImpl
 
 var pipelineCmd = &cobra.Command{
-	Use:   "pipeline <pipeline.yaml>",
+	Use:   "pipeline <pipeline.yaml|name>",
 	Short: "Run sequential pipeline with dependency ordering",
 	Long: `Run a multi-step pipeline defined in a YAML manifest.
+
+The manifest can be passed as a filesystem path or as a saved pipeline name
+from ~/.safe-ag/pipelines.
 
 Steps can declare dependencies via depends_on, on_failure, retry, when,
 and outputs fields. Stages with no unmet dependencies are spawned first;
@@ -124,11 +143,22 @@ Example manifest fields per step:
 func init() {
 	pipelineCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "Print execution plan without running")
 	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Run the pipeline in the background and return immediately")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestVars, "var", nil, "Manifest variable assignment (key=value)")
+	pipelineCmd.AddCommand(pipelineListCmd, pipelineShowCmd, pipelineInspectCmd, pipelineRenderCmd, pipelineValidateCmd, pipelineCreateCmd)
 	rootCmd.AddCommand(pipelineCmd)
 }
 
 func runPipeline(cmd *cobra.Command, args []string) error {
-	m, err := fleet.ParsePipeline(args[0])
+	manifestPath, err := resolvePipelineManifest(args[0])
+	if err != nil {
+		return err
+	}
+	parseOpts, err := pipelineParseOptions()
+	if err != nil {
+		return err
+	}
+	m, err := fleet.ParsePipelineWithOptions(manifestPath, parseOpts)
 	if err != nil {
 		return err
 	}
@@ -140,7 +170,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 
 	name := m.Name
 	if name == "" {
-		name = args[0]
+		name = manifestPath
 	}
 
 	if pipelineDryRun {
@@ -149,13 +179,13 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	}
 
 	if pipelineBackground && os.Getenv(pipelineDetachedEnv) != "1" {
-		return launchDetachedPipeline(args[0])
+		return launchDetachedPipeline(manifestPath)
 	}
 
 	ctx := context.Background()
 	exec := newExecutor()
 	timestamp := time.Now().Format("20060102-150405")
-	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp, "", nil)
+	return runPipelineManifest(ctx, exec, m, parseOpts, pipelineDryRun, timestamp, "", nil)
 }
 
 func launchDetachedPipelineImpl(manifestPath string) error {
@@ -166,14 +196,9 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 
 	stateHome := os.Getenv("XDG_STATE_HOME")
 	if stateHome == "" {
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil {
-			return fmt.Errorf("resolve home dir: %w", homeErr)
-		}
-		stateHome = filepath.Join(home, ".local", "state")
+		stateHome = config.StateDir()
 	}
-
-	logDir := filepath.Join(stateHome, "safe-agentic", "pipelines")
+	logDir := filepath.Join(stateHome, "pipelines")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return fmt.Errorf("create pipeline log dir: %w", err)
 	}
@@ -186,6 +211,12 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 	}
 
 	childArgs := []string{"pipeline", manifestPath, "--background"}
+	for _, repo := range pipelineManifestRepos {
+		childArgs = append(childArgs, "--repo", repo)
+	}
+	for _, variable := range pipelineManifestVars {
+		childArgs = append(childArgs, "--var", variable)
+	}
 	cmd := exec.Command(self, childArgs...)
 	cmd.Env = append(os.Environ(), pipelineDetachedEnv+"=1")
 	cmd.Stdout = logFile
@@ -203,7 +234,7 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
-func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
+func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, parseOpts fleet.ParseOptions, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
 	name, rootLabel, currentPath := pipelineContext(m, timestamp, rootLabel, parentPath)
 	completed := make(map[string]bool)
 	remaining := append([]fleet.PipelineStage{}, m.Stages...)
@@ -213,7 +244,7 @@ func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.Pipeli
 		if err != nil {
 			return err
 		}
-		containerNames, err := runReadyStages(ctx, exec, ready, dryRun, timestamp, rootLabel, currentPath)
+		containerNames, err := runReadyStages(ctx, exec, ready, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 		if err != nil {
 			return err
 		}
@@ -359,10 +390,10 @@ func stageNames(stages []fleet.PipelineStage) []string {
 	return names
 }
 
-func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	var containerNames []string
 	for _, stage := range ready {
-		names, err := runPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+		names, err := runPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 		if err != nil {
 			return nil, err
 		}
@@ -371,23 +402,251 @@ func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.Pipeli
 	return containerNames, nil
 }
 
-func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	fmt.Printf("Running stage: %s\n", stage.Name)
 	if stage.Pipeline != "" {
-		return nil, runSubPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+		return nil, runSubPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 	}
 	return spawnPipelineStageAgents(stage, rootLabel, currentPath)
 }
 
-func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
+func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
 	fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
-	subManifest, err := fleet.ParsePipeline(stage.Pipeline)
+	subManifest, err := fleet.ParsePipelineWithOptions(stage.Pipeline, parseOpts)
 	if err != nil {
 		return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
-	if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp, rootLabel, currentPath); err != nil {
+	if err := runPipelineManifest(ctx, exec, subManifest, parseOpts, dryRun, timestamp, rootLabel, currentPath); err != nil {
 		return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
+	return nil
+}
+
+var pipelineListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List saved user pipelines",
+	RunE:  runPipelineList,
+}
+
+var pipelineShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Display a saved pipeline",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineShow,
+}
+
+var pipelineCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a new saved pipeline",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineCreate,
+}
+
+var pipelineInspectCmd = &cobra.Command{
+	Use:   "inspect <name|path>",
+	Short: "Show pipeline metadata and resolved inputs",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineInspect,
+}
+
+var pipelineRenderCmd = &cobra.Command{
+	Use:   "render <name|path>",
+	Short: "Render the fully resolved pipeline manifest",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineRender,
+}
+
+var pipelineValidateCmd = &cobra.Command{
+	Use:   "validate <name|path>",
+	Short: "Validate a pipeline without running it",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineValidate,
+}
+
+func runPipelineList(cmd *cobra.Command, args []string) error {
+	entries, err := catalog.ListPipelines()
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println("No pipelines found.")
+		return nil
+	}
+	fmt.Printf("%-28s  %-10s  %s\n", "NAME", "SOURCE", "DESCRIPTION")
+	fmt.Println(strings.Repeat("─", 88))
+	for _, asset := range entries {
+		fmt.Printf("%-28s  %-10s  %s\n", asset.Manifest.Name, asset.Source, asset.Manifest.Description)
+	}
+	return nil
+}
+
+func runPipelineShow(cmd *cobra.Command, args []string) error {
+	asset, err := catalog.ResolvePipeline(args[0])
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(asset.Path)
+	if err != nil {
+		return fmt.Errorf("read pipeline: %w", err)
+	}
+	fmt.Printf("Name: %s\nSource: %s\nPath: %s\n", asset.Manifest.Name, asset.Source, asset.Path)
+	if asset.Manifest.Description != "" {
+		fmt.Printf("Description: %s\n", asset.Manifest.Description)
+	}
+	fmt.Println()
+	fmt.Print(string(data))
+	return nil
+}
+
+func runPipelineCreate(cmd *cobra.Command, args []string) error {
+	if err := catalog.ValidateAssetName(args[0]); err != nil {
+		return err
+	}
+	path := filepath.Join(config.PipelinesDir(), filepath.FromSlash(args[0])+".yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create pipelines dir: %w", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("pipeline %q already exists at %s", args[0], path)
+	}
+	starter := fmt.Sprintf(`name: %s
+description: Describe what this pipeline does.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repo.
+    infer: repo
+  - name: pr
+    description: Pull request number when relevant.
+    infer: pr
+examples:
+  - safe-ag pipeline %s
+tags:
+  - custom
+steps:
+  - name: review
+    type: claude
+    repo: ${repo}
+    prompt: Review this repository and summarize actionable findings.
+`, args[0], args[0])
+	if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {
+		return fmt.Errorf("create pipeline file: %w", err)
+	}
+	fmt.Printf("Created pipeline: %s\n", path)
+	return nil
+}
+
+func resolvePipelineManifest(arg string) (string, error) {
+	asset, err := catalog.ResolvePipeline(arg)
+	if err != nil {
+		return "", err
+	}
+	return asset.Path, nil
+}
+
+func resolveNamedPipeline(name string) (string, error) {
+	return resolvePipelineManifest(name)
+}
+
+func pipelineNameFromFile(name string) string {
+	switch {
+	case strings.HasSuffix(name, ".yaml"):
+		return strings.TrimSuffix(name, ".yaml")
+	case strings.HasSuffix(name, ".yml"):
+		return strings.TrimSuffix(name, ".yml")
+	default:
+		return ""
+	}
+}
+
+func pipelineParseOptions() (fleet.ParseOptions, error) {
+	vars, repos, err := parseTemplateVars(pipelineManifestVars, pipelineManifestRepos, true)
+	if err != nil {
+		return fleet.ParseOptions{}, err
+	}
+	return fleet.ParseOptions{
+		Vars:         vars,
+		DefaultRepos: repos,
+	}, nil
+}
+
+func runPipelineInspect(cmd *cobra.Command, args []string) error {
+	asset, err := catalog.ResolvePipeline(args[0])
+	if err != nil {
+		return err
+	}
+	parseOpts, err := pipelineParseOptions()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Name: %s\nSource: %s\nPath: %s\n", asset.Manifest.Name, asset.Source, asset.Path)
+	if asset.Manifest.Description != "" {
+		fmt.Printf("Description: %s\n", asset.Manifest.Description)
+	}
+	if len(asset.Manifest.Inputs) > 0 {
+		fmt.Println("Inputs:")
+		for _, input := range asset.Manifest.Inputs {
+			status := "optional"
+			if input.Required {
+				status = "required"
+			}
+			value := input.Default
+			if parseOpts.Vars[input.Name] != "" {
+				value = parseOpts.Vars[input.Name]
+			} else if input.Name == "repo" && len(parseOpts.DefaultRepos) > 0 {
+				value = parseOpts.DefaultRepos[0]
+			}
+			if input.Infer != "" {
+				status += ", infer=" + input.Infer
+			}
+			if value != "" {
+				status += ", value=" + value
+			}
+			fmt.Printf("  - %s (%s)\n", input.Name, status)
+		}
+	}
+	if len(asset.Manifest.Examples) > 0 {
+		fmt.Println("Examples:")
+		for _, example := range asset.Manifest.Examples {
+			fmt.Printf("  - %s\n", example)
+		}
+	}
+	return nil
+}
+
+func runPipelineRender(cmd *cobra.Command, args []string) error {
+	manifestPath, err := resolvePipelineManifest(args[0])
+	if err != nil {
+		return err
+	}
+	parseOpts, err := pipelineParseOptions()
+	if err != nil {
+		return err
+	}
+	m, err := fleet.ParsePipelineWithOptions(manifestPath, parseOpts)
+	if err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal pipeline: %w", err)
+	}
+	fmt.Print(string(data))
+	return nil
+}
+
+func runPipelineValidate(cmd *cobra.Command, args []string) error {
+	manifestPath, err := resolvePipelineManifest(args[0])
+	if err != nil {
+		return err
+	}
+	parseOpts, err := pipelineParseOptions()
+	if err != nil {
+		return err
+	}
+	if _, err := fleet.ParsePipelineWithOptions(manifestPath, parseOpts); err != nil {
+		return err
+	}
+	fmt.Printf("Pipeline %s is valid.\n", args[0])
 	return nil
 }
 

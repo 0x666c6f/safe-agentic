@@ -92,12 +92,16 @@ safe-ag spawn claude --repo ... --prompt "Fix the flaky tests"
 safe-ag spawn claude --repo ... --instructions "Only touch docs and tests"
 safe-ag spawn claude --repo ... --instructions-file ./role.md
 safe-ag spawn claude --repo ... --template security-audit
+safe-ag spawn claude --repo ... --template security-audit --var area=payments
 ```
 
 Use:
 - `--prompt` for the task
 - `--instructions` for role/constraints
 - `--template` for a reusable built-in prompt
+- `--var key=value` for template placeholders
+
+Templates can reference `${repo}`. If `--repo` is omitted, `safe-ag` tries to infer it from the current checkout's `origin` remote.
 
 ## Runtime and network options
 

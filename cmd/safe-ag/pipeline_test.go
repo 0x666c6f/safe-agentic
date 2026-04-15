@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
@@ -111,5 +114,145 @@ func TestWaitForContainers_FetchesExitCodeOnceOnSuccess(t *testing.T) {
 	}
 	if got := len(fake.CommandsMatching("docker inspect --format {{.State.ExitCode}} agent-1")); got != 1 {
 		t.Fatalf("exit code inspected %d times, want 1", got)
+	}
+}
+
+func TestResolvePipelineManifestFromUserCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(config.PipelinesDir(), 0o755); err != nil {
+		t.Fatalf("mkdir pipelines dir: %v", err)
+	}
+	want := filepath.Join(config.PipelinesDir(), "review.yaml")
+	if err := os.WriteFile(want, []byte("steps: []\n"), 0o644); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+	got, err := resolvePipelineManifest("review")
+	if err != nil {
+		t.Fatalf("resolvePipelineManifest() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunPipelineCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	output := captureOutput(func() {
+		if err := runPipelineCreate(pipelineCreateCmd, []string{"review"}); err != nil {
+			t.Fatalf("runPipelineCreate() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "Created pipeline:") {
+		t.Fatalf("unexpected output: %s", output)
+	}
+	data, err := os.ReadFile(filepath.Join(config.PipelinesDir(), "review.yaml"))
+	if err != nil {
+		t.Fatalf("read created pipeline: %v", err)
+	}
+	if !strings.Contains(string(data), "repo: ${repo}") {
+		t.Fatalf("starter pipeline missing ${repo}:\n%s", data)
+	}
+}
+
+func TestSpawnTemplateInterpolatesVars(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(config.TemplatesDir(), 0o755); err != nil {
+		t.Fatalf("mkdir templates dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(config.TemplatesDir(), "review.md"), []byte("Review ${repo} for ${topic}."), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType:    "claude",
+			Repos:        []string{"https://github.com/org/repo.git"},
+			Template:     "review",
+			TemplateVars: []string{"topic=security"},
+			DryRun:       true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, `safe-agentic.prompt=Review https://github.com/org/repo.git for security.`) {
+		t.Fatalf("dry-run missing interpolated prompt:\n%s", output)
+	}
+}
+
+func TestParseTemplateVarsInfersPR(t *testing.T) {
+	origRepo := inferRepoFromCurrent
+	origPR := inferPRFromCurrent
+	defer func() {
+		inferRepoFromCurrent = origRepo
+		inferPRFromCurrent = origPR
+	}()
+
+	inferRepoFromCurrent = func() (string, error) {
+		return "https://github.com/org/repo.git", nil
+	}
+	inferPRFromCurrent = func() (string, error) {
+		return "16", nil
+	}
+
+	vars, repos, err := parseTemplateVars(nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseTemplateVars() error = %v", err)
+	}
+	if got := repos[0]; got != "https://github.com/org/repo.git" {
+		t.Fatalf("repos[0] = %q", got)
+	}
+	if got := vars["pr"]; got != "16" {
+		t.Fatalf("vars[pr] = %q", got)
+	}
+}
+
+func TestParseTemplateVarsExplicitPROverridesInference(t *testing.T) {
+	origPR := inferPRFromCurrent
+	defer func() { inferPRFromCurrent = origPR }()
+	inferPRFromCurrent = func() (string, error) {
+		return "16", nil
+	}
+
+	vars, _, err := parseTemplateVars([]string{"pr=99"}, nil, false)
+	if err != nil {
+		t.Fatalf("parseTemplateVars() error = %v", err)
+	}
+	if got := vars["pr"]; got != "99" {
+		t.Fatalf("vars[pr] = %q", got)
+	}
+}
+
+func TestParsePRReviewArgs(t *testing.T) {
+	mode, pr, err := parsePRReviewArgs(nil)
+	if err != nil || mode != "dual" || pr != "" {
+		t.Fatalf("default parse = (%q,%q,%v)", mode, pr, err)
+	}
+	mode, pr, err = parsePRReviewArgs([]string{"claude", "16"})
+	if err != nil || mode != "claude" || pr != "16" {
+		t.Fatalf("explicit parse = (%q,%q,%v)", mode, pr, err)
+	}
+	mode, pr, err = parsePRReviewArgs([]string{"17"})
+	if err != nil || mode != "dual" || pr != "17" {
+		t.Fatalf("implicit pr parse = (%q,%q,%v)", mode, pr, err)
+	}
+}
+
+func TestResolveBuiltinReviewPreset(t *testing.T) {
+	asset, err := catalog.ResolveReviewPreset("dual")
+	if err != nil {
+		t.Fatalf("ResolveReviewPreset() error = %v", err)
+	}
+	if asset.Manifest.Name != "dual" {
+		t.Fatalf("preset name = %q", asset.Manifest.Name)
+	}
+	if asset.Source != catalog.SourceBuiltin {
+		t.Fatalf("preset source = %q", asset.Source)
 	}
 }

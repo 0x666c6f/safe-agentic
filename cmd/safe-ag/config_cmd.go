@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -9,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/validate"
 
 	"github.com/spf13/cobra"
 )
@@ -42,15 +41,15 @@ var configShowCmd = &cobra.Command{
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) error {
-	path := config.DefaultsPath()
+	path := config.ConfigPath()
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		fmt.Println("# No defaults file found at", path)
+		fmt.Println("# No config file found at", path)
 		fmt.Println("# Use: safe-ag config set <key> <value>")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read defaults: %w", err)
+		return fmt.Errorf("read config: %w", err)
 	}
 	fmt.Printf("# %s\n", path)
 	fmt.Print(string(data))
@@ -70,64 +69,23 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	value := args[1]
 
-	// Validate key using the same allowlist as the config package.
-	if !config.KeyAllowed(key) {
-		return fmt.Errorf("unsupported key %q\n\nValid keys:\n%s", key, configAllowedKeysList())
+	canonical, err := config.ResolveKey(key)
+	if err != nil {
+		return fmt.Errorf("%w\n\nValid keys:\n%s", err, configAllowedKeysList())
 	}
-
-	path := config.DefaultsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	path := config.ConfigPath()
+	raw, err := config.LoadRawConfig(path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
 	}
-
-	// Read existing lines.
-	var lines []string
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read defaults: %w", err)
+	if err := config.SetValue(&raw, canonical, value); err != nil {
+		return err
 	}
-	if err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(data)))
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
+	if err := config.SaveRawConfig(path, raw); err != nil {
+		return err
 	}
-
-	// Find and replace or append.
-	newLine := key + "=" + quoteValue(value)
-	found := false
-	for i, line := range lines {
-		stripped := strings.TrimSpace(line)
-		stripped = strings.TrimPrefix(stripped, "export ")
-		stripped = strings.TrimSpace(stripped)
-		if strings.HasPrefix(stripped, key+"=") {
-			lines[i] = newLine
-			found = true
-			break
-		}
-	}
-	if !found {
-		lines = append(lines, newLine)
-	}
-
-	content := strings.Join(lines, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write defaults: %w", err)
-	}
-
-	fmt.Printf("Set %s=%s in %s\n", key, value, path)
+	fmt.Printf("Set %s=%s in %s\n", canonical, value, path)
 	return nil
-}
-
-// quoteValue wraps a value in double quotes if it contains whitespace.
-func quoteValue(v string) string {
-	if strings.ContainsAny(v, " \t") {
-		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
-	}
-	return v
 }
 
 // config get
@@ -141,21 +99,25 @@ var configGetCmd = &cobra.Command{
 
 func runConfigGet(cmd *cobra.Command, args []string) error {
 	key := args[0]
-	if !config.KeyAllowed(key) {
-		return fmt.Errorf("unsupported key %q", key)
+	canonical, err := config.ResolveKey(key)
+	if err != nil {
+		return err
 	}
 
-	path := config.DefaultsPath()
+	path := config.ConfigPath()
 	cfg, err := config.LoadDefaults(path)
 	if err != nil {
-		return fmt.Errorf("load defaults: %w", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	value := configGetField(cfg, key)
+	value, err := config.GetValue(cfg, canonical)
+	if err != nil {
+		return err
+	}
 	if value == "" {
-		fmt.Printf("%s is not set\n", key)
+		fmt.Printf("%s is not set\n", canonical)
 	} else {
-		fmt.Printf("%s=%s\n", key, value)
+		fmt.Printf("%s=%s\n", canonical, value)
 	}
 	return nil
 }
@@ -171,104 +133,39 @@ var configResetCmd = &cobra.Command{
 
 func runConfigReset(cmd *cobra.Command, args []string) error {
 	key := args[0]
-	if !config.KeyAllowed(key) {
-		return fmt.Errorf("unsupported key %q", key)
+	canonical, err := config.ResolveKey(key)
+	if err != nil {
+		return err
 	}
 
-	path := config.DefaultsPath()
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		fmt.Printf("No defaults file at %s — nothing to reset.\n", path)
+	path := config.ConfigPath()
+	raw, err := config.LoadRawConfig(path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if raw.IsZero() {
+		fmt.Printf("No config file at %s — nothing to reset.\n", path)
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("read defaults: %w", err)
+	if err := config.ResetValue(&raw, canonical); err != nil {
+		return err
+	}
+	if err := config.SaveRawConfig(path, raw); err != nil {
+		return err
 	}
 
-	var lines []string
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		stripped := strings.TrimSpace(line)
-		stripped = strings.TrimPrefix(stripped, "export ")
-		stripped = strings.TrimSpace(stripped)
-		if strings.HasPrefix(stripped, key+"=") {
-			continue // drop this line
-		}
-		lines = append(lines, line)
-	}
-
-	content := strings.Join(lines, "\n")
-	if len(lines) > 0 && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write defaults: %w", err)
-	}
-
-	fmt.Printf("Removed %s from %s\n", key, path)
+	fmt.Printf("Removed %s from %s\n", canonical, path)
 	return nil
 }
 
 func configAllowedKeysList() string {
-	keys := []string{
-		"SAFE_AGENTIC_DEFAULT_CPUS",
-		"SAFE_AGENTIC_DEFAULT_MEMORY",
-		"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT",
-		"SAFE_AGENTIC_DEFAULT_SSH",
-		"SAFE_AGENTIC_DEFAULT_DOCKER",
-		"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET",
-		"SAFE_AGENTIC_DEFAULT_REUSE_AUTH",
-		"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH",
-		"SAFE_AGENTIC_DEFAULT_NETWORK",
-		"SAFE_AGENTIC_DEFAULT_IDENTITY",
-		"GIT_AUTHOR_NAME",
-		"GIT_AUTHOR_EMAIL",
-		"GIT_COMMITTER_NAME",
-		"GIT_COMMITTER_EMAIL",
-	}
 	var sb strings.Builder
-	for _, k := range keys {
+	for _, k := range config.AllowedKeys() {
 		sb.WriteString("  ")
 		sb.WriteString(k)
 		sb.WriteString("\n")
 	}
 	return sb.String()
-}
-
-// configGetField maps an allowed key back to the Config field value.
-func configGetField(cfg config.Config, key string) string {
-	switch key {
-	case "SAFE_AGENTIC_DEFAULT_CPUS":
-		return cfg.CPUs
-	case "SAFE_AGENTIC_DEFAULT_MEMORY":
-		return cfg.Memory
-	case "SAFE_AGENTIC_DEFAULT_PIDS_LIMIT":
-		return cfg.PIDsLimit
-	case "SAFE_AGENTIC_DEFAULT_SSH":
-		return cfg.SSH
-	case "SAFE_AGENTIC_DEFAULT_DOCKER":
-		return cfg.Docker
-	case "SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET":
-		return cfg.DockerSocket
-	case "SAFE_AGENTIC_DEFAULT_REUSE_AUTH":
-		return cfg.ReuseAuth
-	case "SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH":
-		return cfg.ReuseGHAuth
-	case "SAFE_AGENTIC_DEFAULT_NETWORK":
-		return cfg.Network
-	case "SAFE_AGENTIC_DEFAULT_IDENTITY":
-		return cfg.Identity
-	case "GIT_AUTHOR_NAME":
-		return cfg.GitAuthorName
-	case "GIT_AUTHOR_EMAIL":
-		return cfg.GitAuthorEmail
-	case "GIT_COMMITTER_NAME":
-		return cfg.GitCommitterName
-	case "GIT_COMMITTER_EMAIL":
-		return cfg.GitCommitterEmail
-	}
-	return ""
 }
 
 // ─── template ──────────────────────────────────────────────────────────────
@@ -281,6 +178,7 @@ var templateCmd = &cobra.Command{
 func init() {
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateShowCmd)
+	templateCmd.AddCommand(templateRenderCmd)
 	templateCmd.AddCommand(templateCreateCmd)
 	rootCmd.AddCommand(templateCmd)
 }
@@ -349,14 +247,9 @@ func repoTemplatesDir() string {
 	return ""
 }
 
-// userTemplatesDir returns ~/.config/safe-agentic/templates.
+// userTemplatesDir returns ~/.safe-ag/templates.
 func userTemplatesDir() string {
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	if xdg == "" {
-		home, _ := os.UserHomeDir()
-		xdg = filepath.Join(home, ".config")
-	}
-	return filepath.Join(xdg, "safe-agentic", "templates")
+	return config.TemplatesDir()
 }
 
 // template list
@@ -368,47 +261,19 @@ var templateListCmd = &cobra.Command{
 }
 
 func runTemplateList(cmd *cobra.Command, args []string) error {
-	type tplEntry struct {
-		name   string
-		source string
+	templates, err := catalog.ListTemplates()
+	if err != nil {
+		return err
 	}
-	var templates []tplEntry
-
-	// Collect built-in templates.
-	if dir := repoTemplatesDir(); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-					name := strings.TrimSuffix(e.Name(), ".md")
-					templates = append(templates, tplEntry{name, "built-in"})
-				}
-			}
-		}
-	}
-
-	// Collect user templates.
-	if dir := userTemplatesDir(); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-					name := strings.TrimSuffix(e.Name(), ".md")
-					templates = append(templates, tplEntry{name, "user"})
-				}
-			}
-		}
-	}
-
 	if len(templates) == 0 {
 		fmt.Println("No templates found.")
 		return nil
 	}
 
-	fmt.Printf("%-30s  %s\n", "NAME", "SOURCE")
-	fmt.Println(strings.Repeat("─", 45))
+	fmt.Printf("%-30s  %-10s  %s\n", "NAME", "SOURCE", "DESCRIPTION")
+	fmt.Println(strings.Repeat("─", 80))
 	for _, t := range templates {
-		fmt.Printf("%-30s  %s\n", t.name, t.source)
+		fmt.Printf("%-30s  %-10s  %s\n", t.Name, t.Source, t.Description)
 	}
 	return nil
 }
@@ -423,48 +288,74 @@ var templateShowCmd = &cobra.Command{
 }
 
 func runTemplateShow(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	path, err := findTemplate(name)
+	asset, err := catalog.ResolveTemplate(args[0])
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read template: %w", err)
+	fmt.Printf("Name: %s\nSource: %s\nPath: %s\n", asset.Name, asset.Source, asset.Path)
+	if asset.Description != "" {
+		fmt.Printf("Description: %s\n", asset.Description)
 	}
-	fmt.Print(string(data))
+	if len(asset.Inputs) > 0 {
+		fmt.Println("Inputs:")
+		for _, input := range asset.Inputs {
+			status := "optional"
+			if input.Required {
+				status = "required"
+			}
+			if input.Infer != "" {
+				status += ", infer=" + input.Infer
+			}
+			fmt.Printf("  - %s (%s)\n", input.Name, status)
+		}
+	}
+	fmt.Println()
+	fmt.Print(asset.Body)
 	return nil
 }
 
 // findTemplate searches user then built-in dirs for a template by name.
 func findTemplate(name string) (string, error) {
-	if err := validate.NameComponent(name, "template name"); err != nil {
+	asset, err := catalog.ResolveTemplate(name)
+	if err != nil {
 		return "", err
 	}
+	return asset.Path, nil
+}
 
-	candidates := []string{}
+var templateRenderVars []string
+var templateRenderRepos []string
 
-	// User dir takes precedence.
-	userDir := userTemplatesDir()
-	candidates = append(candidates,
-		filepath.Join(userDir, name+".md"),
-		filepath.Join(userDir, name),
-	)
+var templateRenderCmd = &cobra.Command{
+	Use:   "render <name>",
+	Short: "Render a template with inferred and explicit variables",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTemplateRender,
+}
 
-	// Built-in dir.
-	if repoDir := repoTemplatesDir(); repoDir != "" {
-		candidates = append(candidates,
-			filepath.Join(repoDir, name+".md"),
-			filepath.Join(repoDir, name),
-		)
+func init() {
+	templateRenderCmd.Flags().StringSliceVar(&templateRenderVars, "var", nil, "Template variable assignment (key=value)")
+	templateRenderCmd.Flags().StringSliceVar(&templateRenderRepos, "repo", nil, "Repo URL for ${repo}; repeatable")
+}
+
+func runTemplateRender(cmd *cobra.Command, args []string) error {
+	asset, err := catalog.ResolveTemplate(args[0])
+	if err != nil {
+		return err
 	}
-
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
-		}
+	vars, repos, err := parseTemplateVars(templateRenderVars, templateRenderRepos, true)
+	if err != nil {
+		return err
 	}
-	return "", fmt.Errorf("template %q not found (checked user and built-in dirs)", name)
+	if err := applyInputValues(asset.Inputs, vars, repos); err != nil {
+		return err
+	}
+	body := interpolateString(asset.Body, vars)
+	if err := ensureNoUnresolvedVars("template "+asset.Name, body); err != nil {
+		return err
+	}
+	fmt.Print(body)
+	return nil
 }
 
 // template create
@@ -478,6 +369,9 @@ var templateCreateCmd = &cobra.Command{
 
 func runTemplateCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	if err := catalog.ValidateAssetName(name); err != nil {
+		return err
+	}
 	dir := userTemplatesDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
@@ -488,8 +382,20 @@ func runTemplateCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("template %q already exists at %s", name, path)
 	}
 
-	// Write a starter template.
-	starter := fmt.Sprintf("# %s\n\nDescribe what this template should do.\n", name)
+	// Write a starter template with explicit metadata.
+	starter := fmt.Sprintf(`---
+name: %s
+description: Describe what this template should do.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repo.
+    infer: repo
+examples:
+  - safe-ag spawn claude --template %s
+---
+
+Write the reusable prompt body here.
+`, name, name)
 	if err := os.WriteFile(path, []byte(starter), 0644); err != nil {
 		return fmt.Errorf("create template file: %w", err)
 	}

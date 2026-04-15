@@ -1,0 +1,32 @@
+name: fix
+description: Fix and resolve current PR review feedback using the pr-fix workflow.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repository.
+    required: true
+    infer: repo
+  - name: pr
+    description: Pull request number to fix.
+    required: true
+    infer: pr
+examples:
+  - safe-ag pr-fix
+  - safe-ag pr-fix 16
+tags:
+  - review
+  - pr
+  - fix
+steps:
+  - name: pr-fix
+    type: codex
+    repo: ${repo}
+    ssh: true
+    reuse_auth: true
+    reuse_gh_auth: true
+    background: true
+    prompt: |
+      Fix PR ${pr}.
+
+      Use the pr-fix skill/workflow on PR ${pr}.
+      Fetch unresolved review threads, apply the fixes, validate them, push
+      the result, and resolve the fixed threads.
