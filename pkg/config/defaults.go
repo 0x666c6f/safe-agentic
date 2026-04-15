@@ -135,28 +135,22 @@ func PipelinesDir() string {
 }
 
 func CronPath() string {
-	return preferredPath(filepath.Join(UserDir(), "cron.json"), filepath.Join(legacyConfigDir(), "cron.json"))
+	return filepath.Join(UserDir(), "cron.json")
 }
 
 func StateDir() string {
-	if legacy := legacyStateDir(); dirExists(legacy) && !dirExists(filepath.Join(UserDir(), "state")) {
-		return legacy
-	}
 	return filepath.Join(UserDir(), "state")
 }
 
 func AuditPath() string {
-	return preferredPath(filepath.Join(UserDir(), "state", "audit.jsonl"), filepath.Join(legacyConfigDir(), "audit.jsonl"))
+	return filepath.Join(UserDir(), "state", "audit.jsonl")
 }
 
 func EventsPath() string {
-	return preferredPath(filepath.Join(UserDir(), "state", "events.jsonl"), filepath.Join(legacyConfigDir(), "events.jsonl"))
+	return filepath.Join(UserDir(), "state", "events.jsonl")
 }
 
 func PipelineLogsDir() string {
-	if legacy := filepath.Join(legacyStateDir(), "pipelines"); dirExists(legacy) && !dirExists(filepath.Join(UserDir(), "state", "pipelines")) {
-		return legacy
-	}
 	return filepath.Join(UserDir(), "state", "pipelines")
 }
 
@@ -169,13 +163,6 @@ func LoadDefaults(path string) (Config, error) {
 	raw, err := LoadRawConfig(path)
 	if err != nil {
 		return Config{}, err
-	}
-	if raw.IsZero() {
-		if legacy, err := LoadLegacyDefaults(LegacyDefaultsPath()); err != nil {
-			return Config{}, err
-		} else if legacy != nil {
-			return legacy.Effective(), nil
-		}
 	}
 	return raw.Effective(), nil
 }
@@ -223,87 +210,6 @@ func SaveRawConfig(path string, raw FileConfig) error {
 		return fmt.Errorf("write config file: %w", err)
 	}
 	return nil
-}
-
-func LegacyDefaultsPath() string {
-	return filepath.Join(legacyConfigDir(), "defaults.sh")
-}
-
-func LoadLegacyDefaults(path string) (*FileConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read legacy defaults: %w", err)
-	}
-	raw := &FileConfig{}
-	for lineNo, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "export") {
-			rest := strings.TrimPrefix(line, "export")
-			if len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
-				line = strings.TrimSpace(rest)
-			}
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, fmt.Errorf("%s:%d: unsupported line", path, lineNo+1)
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if len(value) >= 2 {
-			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
-			}
-		}
-		if err := SetValue(raw, key, value); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", path, lineNo+1, err)
-		}
-	}
-	raw.Version = 1
-	return raw, nil
-}
-
-func legacyConfigDir() string {
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	if xdg == "" {
-		home, _ := os.UserHomeDir()
-		xdg = filepath.Join(home, ".config")
-	}
-	return filepath.Join(xdg, "safe-agentic")
-}
-
-func legacyStateDir() string {
-	xdg := os.Getenv("XDG_STATE_HOME")
-	if xdg == "" {
-		home, _ := os.UserHomeDir()
-		xdg = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(xdg, "safe-agentic")
-}
-
-func preferredPath(primary, legacy string) string {
-	if fileExists(primary) {
-		return primary
-	}
-	if fileExists(legacy) {
-		return legacy
-	}
-	return primary
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 func (raw FileConfig) Effective() Config {

@@ -102,19 +102,12 @@ func ListPipelines() ([]PipelineAsset, error) {
 	if err != nil {
 		return nil, err
 	}
-	legacyUser, err := collectPipelineAssets(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"), SourceUser)
-	if err != nil {
-		return nil, err
-	}
 	builtin, err := collectPipelineAssets(builtinPipelinesDir(), SourceBuiltin)
 	if err != nil {
 		return nil, err
 	}
-	merged := make(map[string]PipelineAsset, len(builtin)+len(user)+len(legacyUser))
+	merged := make(map[string]PipelineAsset, len(builtin)+len(user))
 	for _, asset := range builtin {
-		merged[asset.Manifest.Name] = asset
-	}
-	for _, asset := range legacyUser {
 		merged[asset.Manifest.Name] = asset
 	}
 	for _, asset := range user {
@@ -146,13 +139,6 @@ func ResolvePipeline(ref string) (*PipelineAsset, error) {
 	if userPath != "" {
 		return loadPipelineAsset(userPath, SourceUser, config.PipelinesDir())
 	}
-	legacyPath, err := namedAssetPath(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"), ref, ".yaml", ".yml")
-	if err != nil {
-		return nil, err
-	}
-	if legacyPath != "" {
-		return loadPipelineAsset(legacyPath, SourceUser, filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines"))
-	}
 	builtinPath, err := namedAssetPath(builtinPipelinesDir(), ref, ".yaml", ".yml")
 	if err != nil {
 		return nil, err
@@ -172,7 +158,6 @@ func ResolveReviewPreset(name string) (*PipelineAsset, error) {
 		source AssetSource
 	}{
 		{filepath.Join(config.PipelinesDir(), "reviews"), SourceUser},
-		{filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "pipelines", "reviews"), SourceUser},
 		{filepath.Join(builtinPipelinesDir(), "reviews"), SourceBuiltin},
 	} {
 		path, err := namedAssetPath(base.dir, name, ".yaml", ".yml")
@@ -265,19 +250,12 @@ func listTemplateAssets() ([]TemplateAsset, error) {
 	if err != nil {
 		return nil, err
 	}
-	legacyUser, err := collectTemplateAssets(filepath.Join(filepath.Dir(config.LegacyDefaultsPath()), "templates"), SourceUser)
-	if err != nil {
-		return nil, err
-	}
 	builtin, err := collectTemplateAssets(builtinTemplatesDir(), SourceBuiltin)
 	if err != nil {
 		return nil, err
 	}
-	merged := make(map[string]TemplateAsset, len(builtin)+len(user)+len(legacyUser))
+	merged := make(map[string]TemplateAsset, len(builtin)+len(user))
 	for _, asset := range builtin {
-		merged[asset.Name] = asset
-	}
-	for _, asset := range legacyUser {
 		merged[asset.Name] = asset
 	}
 	for _, asset := range user {
