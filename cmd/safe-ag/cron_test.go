@@ -10,16 +10,18 @@ import (
 )
 
 func TestCronConfigPathPrefersXDG(t *testing.T) {
+	t.Setenv("HOME", "/tmp/safe-agentic-home")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/safe-agentic-config")
 	got := cronConfigPath()
-	want := "/tmp/safe-agentic-config/safe-agentic/cron.json"
+	want := "/tmp/safe-agentic-home/.safe-ag/cron.json"
 	if got != want {
 		t.Fatalf("cronConfigPath() = %q, want %q", got, want)
 	}
 }
 
 func TestLoadSaveCronConfigRoundTrip(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	want := &CronConfig{
 		Jobs: []CronJob{{
@@ -106,7 +108,8 @@ func TestShouldRun(t *testing.T) {
 }
 
 func TestRunCronLifecycleCommands(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	addOut := captureOutput(func() {
 		if err := runCronAdd(cronAddCmd, []string{"nightly", "every 1h", "pipeline", "nightly.yaml"}); err != nil {
@@ -168,7 +171,8 @@ func TestRunCronLifecycleCommands(t *testing.T) {
 }
 
 func TestRunCronRunAndRemoveErrors(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	if err := runCronRemove(cronRemoveCmd, []string{"missing"}); err == nil || !strings.Contains(err.Error(), `job "missing" not found`) {
 		t.Fatalf("runCronRemove() error = %v", err)
@@ -182,7 +186,8 @@ func TestRunCronRunAndRemoveErrors(t *testing.T) {
 }
 
 func TestRunCronAddRejectsInvalidSchedule(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	err := runCronAdd(cronAddCmd, []string{"too-fast", "every 30s", "pipeline", "nightly.yaml"})
 	if err == nil || !strings.Contains(err.Error(), `invalid schedule "every 30s"`) {
@@ -195,7 +200,7 @@ func TestCronConfigPathFallsBackToHome(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	got := cronConfigPath()
-	want := filepath.Join(home, ".config", "safe-agentic", "cron.json")
+	want := filepath.Join(home, ".safe-ag", "cron.json")
 	if got != want {
 		t.Fatalf("cronConfigPath() fallback = %q, want %q", got, want)
 	}

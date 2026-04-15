@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 
@@ -18,6 +20,8 @@ import (
 // ─── fleet ──────────────────────────────────────────────────────────────────
 
 var fleetDryRun bool
+var fleetManifestRepos []string
+var fleetManifestVars []string
 
 var fleetCmd = &cobra.Command{
 	Use:   "fleet <manifest.yaml>",
@@ -28,12 +32,21 @@ var fleetCmd = &cobra.Command{
 
 func init() {
 	fleetCmd.Flags().BoolVar(&fleetDryRun, "dry-run", false, "Print what would run without executing")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestVars, "var", nil, "Manifest variable assignment (key=value)")
 	fleetCmd.AddCommand(fleetStatusCmd)
 	rootCmd.AddCommand(fleetCmd)
 }
 
 func runFleet(cmd *cobra.Command, args []string) error {
-	m, err := fleet.ParseFleet(args[0])
+	vars, repos, err := parseTemplateVars(fleetManifestVars, fleetManifestRepos, true)
+	if err != nil {
+		return err
+	}
+	m, err := fleet.ParseFleetWithOptions(args[0], fleet.ParseOptions{
+		Vars:         vars,
+		DefaultRepos: repos,
+	})
 	if err != nil {
 		return err
 	}
@@ -97,6 +110,8 @@ func runFleetStatus(cmd *cobra.Command, args []string) error {
 
 var pipelineDryRun bool
 var pipelineBackground bool
+var pipelineManifestRepos []string
+var pipelineManifestVars []string
 
 const pipelineDetachedEnv = "SAFE_AGENTIC_PIPELINE_DETACHED"
 
@@ -124,11 +139,26 @@ Example manifest fields per step:
 func init() {
 	pipelineCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "Print execution plan without running")
 	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Run the pipeline in the background and return immediately")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestVars, "var", nil, "Manifest variable assignment (key=value)")
+	pipelineCmd.AddCommand(pipelineListCmd, pipelineShowCmd, pipelineCreateCmd)
 	rootCmd.AddCommand(pipelineCmd)
 }
 
 func runPipeline(cmd *cobra.Command, args []string) error {
-	m, err := fleet.ParsePipeline(args[0])
+	manifestPath, err := resolvePipelineManifest(args[0])
+	if err != nil {
+		return err
+	}
+	vars, repos, err := parseTemplateVars(pipelineManifestVars, pipelineManifestRepos, true)
+	if err != nil {
+		return err
+	}
+	parseOpts := fleet.ParseOptions{
+		Vars:         vars,
+		DefaultRepos: repos,
+	}
+	m, err := fleet.ParsePipelineWithOptions(manifestPath, parseOpts)
 	if err != nil {
 		return err
 	}
@@ -140,7 +170,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 
 	name := m.Name
 	if name == "" {
-		name = args[0]
+		name = manifestPath
 	}
 
 	if pipelineDryRun {
@@ -149,13 +179,13 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	}
 
 	if pipelineBackground && os.Getenv(pipelineDetachedEnv) != "1" {
-		return launchDetachedPipeline(args[0])
+		return launchDetachedPipeline(manifestPath)
 	}
 
 	ctx := context.Background()
 	exec := newExecutor()
 	timestamp := time.Now().Format("20060102-150405")
-	return runPipelineManifest(ctx, exec, m, pipelineDryRun, timestamp, "", nil)
+	return runPipelineManifest(ctx, exec, m, parseOpts, pipelineDryRun, timestamp, "", nil)
 }
 
 func launchDetachedPipelineImpl(manifestPath string) error {
@@ -186,6 +216,12 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 	}
 
 	childArgs := []string{"pipeline", manifestPath, "--background"}
+	for _, repo := range pipelineManifestRepos {
+		childArgs = append(childArgs, "--repo", repo)
+	}
+	for _, variable := range pipelineManifestVars {
+		childArgs = append(childArgs, "--var", variable)
+	}
 	cmd := exec.Command(self, childArgs...)
 	cmd.Env = append(os.Environ(), pipelineDetachedEnv+"=1")
 	cmd.Stdout = logFile
@@ -203,7 +239,7 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
-func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
+func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, parseOpts fleet.ParseOptions, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
 	name, rootLabel, currentPath := pipelineContext(m, timestamp, rootLabel, parentPath)
 	completed := make(map[string]bool)
 	remaining := append([]fleet.PipelineStage{}, m.Stages...)
@@ -213,7 +249,7 @@ func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.Pipeli
 		if err != nil {
 			return err
 		}
-		containerNames, err := runReadyStages(ctx, exec, ready, dryRun, timestamp, rootLabel, currentPath)
+		containerNames, err := runReadyStages(ctx, exec, ready, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 		if err != nil {
 			return err
 		}
@@ -359,10 +395,10 @@ func stageNames(stages []fleet.PipelineStage) []string {
 	return names
 }
 
-func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	var containerNames []string
 	for _, stage := range ready {
-		names, err := runPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+		names, err := runPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 		if err != nil {
 			return nil, err
 		}
@@ -371,24 +407,133 @@ func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.Pipeli
 	return containerNames, nil
 }
 
-func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	fmt.Printf("Running stage: %s\n", stage.Name)
 	if stage.Pipeline != "" {
-		return nil, runSubPipelineStage(ctx, exec, stage, dryRun, timestamp, rootLabel, currentPath)
+		return nil, runSubPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 	}
 	return spawnPipelineStageAgents(stage, rootLabel, currentPath)
 }
 
-func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
+func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
 	fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
-	subManifest, err := fleet.ParsePipeline(stage.Pipeline)
+	subManifest, err := fleet.ParsePipelineWithOptions(stage.Pipeline, parseOpts)
 	if err != nil {
 		return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
-	if err := runPipelineManifest(ctx, exec, subManifest, dryRun, timestamp, rootLabel, currentPath); err != nil {
+	if err := runPipelineManifest(ctx, exec, subManifest, parseOpts, dryRun, timestamp, rootLabel, currentPath); err != nil {
 		return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
 	return nil
+}
+
+var pipelineListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List saved user pipelines",
+	RunE:  runPipelineList,
+}
+
+var pipelineShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Display a saved pipeline",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineShow,
+}
+
+var pipelineCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a new saved pipeline",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPipelineCreate,
+}
+
+func runPipelineList(cmd *cobra.Command, args []string) error {
+	entries, err := os.ReadDir(config.PipelinesDir())
+	if os.IsNotExist(err) {
+		fmt.Println("No pipelines found.")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read pipelines dir: %w", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if name := pipelineNameFromFile(entry.Name()); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		fmt.Println("No pipelines found.")
+		return nil
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Println(name)
+	}
+	return nil
+}
+
+func runPipelineShow(cmd *cobra.Command, args []string) error {
+	path, err := resolveNamedPipeline(args[0])
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read pipeline: %w", err)
+	}
+	fmt.Print(string(data))
+	return nil
+}
+
+func runPipelineCreate(cmd *cobra.Command, args []string) error {
+	if err := os.MkdirAll(config.PipelinesDir(), 0o755); err != nil {
+		return fmt.Errorf("create pipelines dir: %w", err)
+	}
+	path := filepath.Join(config.PipelinesDir(), args[0]+".yaml")
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("pipeline %q already exists at %s", args[0], path)
+	}
+	starter := fmt.Sprintf("name: %s\nsteps:\n  - name: review\n    type: claude\n    repo: ${repo}\n    prompt: Review this repository and summarize actionable findings.\n", args[0])
+	if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {
+		return fmt.Errorf("create pipeline file: %w", err)
+	}
+	fmt.Printf("Created pipeline: %s\n", path)
+	return nil
+}
+
+func resolvePipelineManifest(arg string) (string, error) {
+	if info, err := os.Stat(arg); err == nil && !info.IsDir() {
+		return arg, nil
+	}
+	return resolveNamedPipeline(arg)
+}
+
+func resolveNamedPipeline(name string) (string, error) {
+	candidates := []string{
+		filepath.Join(config.PipelinesDir(), name+".yaml"),
+		filepath.Join(config.PipelinesDir(), name+".yml"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("pipeline %q not found in %s", name, config.PipelinesDir())
+}
+
+func pipelineNameFromFile(name string) string {
+	switch {
+	case strings.HasSuffix(name, ".yaml"):
+		return strings.TrimSuffix(name, ".yaml")
+	case strings.HasSuffix(name, ".yml"):
+		return strings.TrimSuffix(name, ".yml")
+	default:
+		return ""
+	}
 }
 
 func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, currentPath []string) ([]string, error) {

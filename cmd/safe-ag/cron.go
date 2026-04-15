@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -102,12 +103,7 @@ func init() {
 }
 
 func cronConfigPath() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = home + "/.config"
-	}
-	return filepath.Join(dir, "safe-agentic", "cron.json")
+	return config.CronPath()
 }
 
 func loadCronConfig() (*CronConfig, error) {

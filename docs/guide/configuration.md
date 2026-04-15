@@ -3,40 +3,61 @@
 Configuration falls into four buckets:
 - persistent defaults
 - templates
+- pipelines
 - auth helpers
 - VM/image maintenance
 
-## Defaults file
+## Config home
 
 Path:
 
 ```bash
-${XDG_CONFIG_HOME:-~/.config}/safe-agentic/defaults.sh
+~/.safe-ag/
+```
+
+Layout:
+
+```bash
+~/.safe-ag/config.toml
+~/.safe-ag/templates/
+~/.safe-ag/pipelines/
+~/.safe-ag/cron.json
+```
+
+## Preferences file
+
+Path:
+
+```bash
+~/.safe-ag/config.toml
 ```
 
 Format:
 
-```bash
-SAFE_AGENTIC_DEFAULT_MEMORY=16g
-SAFE_AGENTIC_DEFAULT_CPUS=8
-SAFE_AGENTIC_DEFAULT_REUSE_AUTH=false
-SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH=false
-SAFE_AGENTIC_DEFAULT_SSH=false
-SAFE_AGENTIC_DEFAULT_NETWORK=my-net
-SAFE_AGENTIC_DEFAULT_IDENTITY="Your Name <you@example.com>"
-```
+```toml
+version = 1
 
-This is parsed as `KEY=value`, not sourced as a shell script.
+[defaults]
+memory = "16g"
+cpus = "8"
+reuse_auth = false
+reuse_gh_auth = false
+ssh = false
+network = "my-net"
+identity = "Your Name <you@example.com>"
+```
 
 ## `safe-ag config`
 
 ```bash
 safe-ag config show
-safe-ag config get SAFE_AGENTIC_DEFAULT_MEMORY
-safe-ag config set SAFE_AGENTIC_DEFAULT_MEMORY 16g
-safe-ag config set SAFE_AGENTIC_DEFAULT_IDENTITY "Your Name <you@example.com>"
-safe-ag config reset SAFE_AGENTIC_DEFAULT_MEMORY
+safe-ag config get defaults.memory
+safe-ag config set defaults.memory 16g
+safe-ag config set defaults.identity "Your Name <you@example.com>"
+safe-ag config reset defaults.memory
 ```
+
+Legacy env-style keys still work as aliases for `get`, `set`, and `reset`.
 
 ## Templates
 
@@ -50,6 +71,19 @@ Use templates at spawn time:
 
 ```bash
 safe-ag spawn claude --repo ... --template security-audit
+safe-ag spawn claude --repo ... --template security-audit --var area=payments
+```
+
+If `--repo` is omitted, `safe-ag` tries to infer `${repo}` from the current checkout's `origin` remote.
+
+## Pipelines
+
+```bash
+safe-ag pipeline list
+safe-ag pipeline show review
+safe-ag pipeline create review
+safe-ag pipeline review --repo git@github.com:org/repo.git
+safe-ag pipeline review --repo git@github.com:org/repo.git --var topic=security
 ```
 
 ## Auth helpers

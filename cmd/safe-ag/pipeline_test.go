@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
 )
@@ -111,5 +113,74 @@ func TestWaitForContainers_FetchesExitCodeOnceOnSuccess(t *testing.T) {
 	}
 	if got := len(fake.CommandsMatching("docker inspect --format {{.State.ExitCode}} agent-1")); got != 1 {
 		t.Fatalf("exit code inspected %d times, want 1", got)
+	}
+}
+
+func TestResolvePipelineManifestFromUserCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(config.PipelinesDir(), 0o755); err != nil {
+		t.Fatalf("mkdir pipelines dir: %v", err)
+	}
+	want := filepath.Join(config.PipelinesDir(), "review.yaml")
+	if err := os.WriteFile(want, []byte("steps: []\n"), 0o644); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+	got, err := resolvePipelineManifest("review")
+	if err != nil {
+		t.Fatalf("resolvePipelineManifest() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunPipelineCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	output := captureOutput(func() {
+		if err := runPipelineCreate(pipelineCreateCmd, []string{"review"}); err != nil {
+			t.Fatalf("runPipelineCreate() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "Created pipeline:") {
+		t.Fatalf("unexpected output: %s", output)
+	}
+	data, err := os.ReadFile(filepath.Join(config.PipelinesDir(), "review.yaml"))
+	if err != nil {
+		t.Fatalf("read created pipeline: %v", err)
+	}
+	if !strings.Contains(string(data), "repo: ${repo}") {
+		t.Fatalf("starter pipeline missing ${repo}:\n%s", data)
+	}
+}
+
+func TestSpawnTemplateInterpolatesVars(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(config.TemplatesDir(), 0o755); err != nil {
+		t.Fatalf("mkdir templates dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(config.TemplatesDir(), "review.md"), []byte("Review ${repo} for ${topic}."), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType:    "claude",
+			Repos:        []string{"https://github.com/org/repo.git"},
+			Template:     "review",
+			TemplateVars: []string{"topic=security"},
+			DryRun:       true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, `safe-agentic.prompt=Review https://github.com/org/repo.git for security.`) {
+		t.Fatalf("dry-run missing interpolated prompt:\n%s", output)
 	}
 }

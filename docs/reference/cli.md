@@ -125,6 +125,7 @@ Flags:
 | `--reuse-gh-auth` | bool | reuse GitHub CLI auth |
 | `--ssh` | bool | enable SSH agent forwarding |
 | `--template` | string | prompt template name |
+| `--var` | strings | template variable assignment `key=value`; repeatable |
 
 ## `run`
 
@@ -150,6 +151,7 @@ Flags:
 | `--name` | string | container name |
 | `--network` | string | custom Docker network |
 | `--template` | string | prompt template |
+| `--var` | strings | template variable assignment `key=value`; repeatable |
 
 ## `list`
 
@@ -439,6 +441,8 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--dry-run` | bool | print what would run without executing |
+| `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
+| `--var` | strings | manifest variable assignment `key=value`; repeatable |
 
 Subcommands:
 
@@ -453,14 +457,20 @@ safe-ag fleet status
 Usage:
 
 ```bash
-safe-ag pipeline <pipeline.yaml> [flags]
+safe-ag pipeline <pipeline.yaml|name> [flags]
+safe-ag pipeline list
+safe-ag pipeline show <name>
+safe-ag pipeline create <name>
 ```
 
 Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
+| `--background` | bool | run the pipeline in the background and return immediately |
 | `--dry-run` | bool | print the execution plan without running |
+| `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
+| `--var` | strings | manifest variable assignment `key=value`; repeatable |
 
 ## `config`
 
@@ -472,16 +482,32 @@ Subcommands:
 safe-ag config show
 ```
 
+Reads `~/.safe-ag/config.toml`.
+
 ### `config get`
 
 ```bash
 safe-ag config get <key>
 ```
 
+Examples:
+
+```bash
+safe-ag config get defaults.memory
+safe-ag config get SAFE_AGENTIC_DEFAULT_MEMORY
+```
+
 ### `config set`
 
 ```bash
 safe-ag config set <key> <value>
+```
+
+Examples:
+
+```bash
+safe-ag config set defaults.memory 16g
+safe-ag config set defaults.identity "Your Name <you@example.com>"
 ```
 
 ### `config reset`
@@ -502,6 +528,8 @@ Subcommands:
 safe-ag template list
 ```
 
+User templates live in `~/.safe-ag/templates/`.
+
 ### `template show`
 
 ```bash
@@ -515,6 +543,10 @@ safe-ag template create <name>
 ```
 
 No additional flags beyond `--help`.
+
+## `pipeline` saved catalog
+
+Saved user pipelines live in `~/.safe-ag/pipelines/`.
 
 ## `mcp-login`
 

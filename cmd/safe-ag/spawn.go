@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +28,7 @@ type SpawnOpts struct {
 	Name              string
 	Prompt            string
 	Template          string
+	TemplateVars      []string
 	Instructions      string
 	InstructionsFile  string
 	SSH               bool
@@ -78,6 +78,7 @@ func init() {
 	f.StringVar(&spawnOpts.Name, "name", "", "Container name")
 	f.StringVar(&spawnOpts.Prompt, "prompt", "", "Initial prompt")
 	f.StringVar(&spawnOpts.Template, "template", "", "Prompt template name")
+	f.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable assignment (key=value)")
 	f.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
 	f.StringVar(&spawnOpts.InstructionsFile, "instructions-file", "", "Instructions from file")
 	f.BoolVar(&spawnOpts.SSH, "ssh", false, "Enable SSH agent forwarding")
@@ -110,6 +111,7 @@ func init() {
 	rf.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit")
 	rf.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget")
 	rf.StringVar(&spawnOpts.Template, "template", "", "Prompt template")
+	rf.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable assignment (key=value)")
 	rf.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
 	rf.BoolVar(&spawnOpts.Background, "background", false, "Background mode")
 	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
@@ -270,23 +272,19 @@ func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
 
 	resolved := spawnResolved{
 		Config:        cfg,
-		Memory:        coalesce(opts.Memory, cfg.Memory),
-		CPUs:          coalesce(opts.CPUs, cfg.CPUs),
+		Memory:        coalesce(opts.Memory, cfg.Defaults.Memory),
+		CPUs:          coalesce(opts.CPUs, cfg.Defaults.CPUs),
 		PIDsLimit:     opts.PIDsLimit,
 		ContainerName: resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos),
 		ImageName:     "safe-agentic:latest",
 	}
-	if resolved.PIDsLimit == 0 && cfg.PIDsLimit != "" {
-		v, err := strconv.Atoi(cfg.PIDsLimit)
-		if err != nil {
-			return spawnResolved{}, fmt.Errorf("parse configured PIDs limit %q: %w", cfg.PIDsLimit, err)
-		}
-		resolved.PIDsLimit = v
+	if resolved.PIDsLimit == 0 && cfg.Defaults.PIDsLimit > 0 {
+		resolved.PIDsLimit = cfg.Defaults.PIDsLimit
 	}
 
 	identity := opts.Identity
 	if identity == "" {
-		identity = cfg.Identity
+		identity = cfg.Defaults.Identity
 	}
 	if identity == "" {
 		identity = config.DetectGitIdentity()
@@ -305,7 +303,7 @@ func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
 func prepareSpawnNetwork(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved *spawnResolved) error {
 	customNetwork := opts.Network
 	if customNetwork == "" {
-		customNetwork = resolved.Config.Network
+		customNetwork = resolved.Config.Defaults.Network
 	}
 	networkName, networkMode, err := docker.PrepareNetwork(ctx, exec, resolved.ContainerName, customNetwork, opts.DryRun)
 	if err != nil {
@@ -464,6 +462,14 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 			return fmt.Errorf("read template: %w", err)
 		}
 		templateContent = strings.TrimSpace(string(data))
+		vars, _, err := parseTemplateVars(opts.TemplateVars, opts.Repos, true)
+		if err != nil {
+			return err
+		}
+		templateContent = interpolateString(templateContent, vars)
+		if err := ensureNoUnresolvedVars("template "+opts.Template, templateContent); err != nil {
+			return err
+		}
 	}
 
 	instructions := opts.Instructions

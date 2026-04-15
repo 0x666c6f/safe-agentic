@@ -3,6 +3,7 @@ package fleet
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -355,5 +356,78 @@ func TestParsePipeline_MissingFile(t *testing.T) {
 	_, err := ParsePipeline("/nonexistent/file.yaml")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestParsePipelineWithOptions_InterpolatesReposAndPrompt(t *testing.T) {
+	p := writeTemp(t, `
+steps:
+  - name: review
+    type: claude
+    repo: ${repo}
+    prompt: Review ${topic}
+`)
+	m, err := ParsePipelineWithOptions(p, ParseOptions{
+		Vars:         map[string]string{"topic": "the API"},
+		DefaultRepos: []string{"https://github.com/org/repo.git"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Stages[0].Agents[0].Repo; got != "https://github.com/org/repo.git" {
+		t.Fatalf("Repo = %q", got)
+	}
+	if got := m.Stages[0].Agents[0].Prompt; got != "Review the API" {
+		t.Fatalf("Prompt = %q", got)
+	}
+}
+
+func TestParsePipelineWithOptions_AppliesDefaultRepos(t *testing.T) {
+	p := writeTemp(t, `
+steps:
+  - name: review
+    type: claude
+    prompt: Review
+`)
+	m, err := ParsePipelineWithOptions(p, ParseOptions{
+		DefaultRepos: []string{"https://github.com/org/repo.git"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Stages[0].Agents[0].Repo; got != "https://github.com/org/repo.git" {
+		t.Fatalf("Repo = %q", got)
+	}
+}
+
+func TestParsePipelineWithOptions_ResolvesNestedPipelineRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "child.yaml")
+	if err := os.WriteFile(child, []byte("steps:\n  - name: noop\n    type: claude\n    prompt: ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(dir, "parent.yaml")
+	if err := os.WriteFile(parent, []byte("stages:\n  - name: nested\n    pipeline: child.yaml\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ParsePipelineWithOptions(parent, ParseOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Stages[0].Pipeline; got != child {
+		t.Fatalf("Pipeline = %q, want %q", got, child)
+	}
+}
+
+func TestParsePipelineWithOptions_UnresolvedVarFails(t *testing.T) {
+	p := writeTemp(t, `
+steps:
+  - name: review
+    type: claude
+    prompt: Review ${missing}
+`)
+	_, err := ParsePipelineWithOptions(p, ParseOptions{})
+	if err == nil || !strings.Contains(err.Error(), "unresolved variables") {
+		t.Fatalf("err = %v, want unresolved variables", err)
 	}
 }
