@@ -2116,6 +2116,19 @@ func TestRunTemplateCreate_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestRunTemplateCreate_RejectsPathTraversal(t *testing.T) {
+	_, xdgCleanup := setXDGConfigHome(t)
+	defer xdgCleanup()
+
+	err := runTemplateCreate(templateCreateCmd, []string{"../escape"})
+	if err == nil {
+		t.Fatal("expected error for invalid template name")
+	}
+	if !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "relative") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // ─── runCostHistory ──────────────────────────────────────────────────────────
 
 func TestRunCostHistory(t *testing.T) {

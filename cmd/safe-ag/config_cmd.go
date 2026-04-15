@@ -369,6 +369,9 @@ var templateCreateCmd = &cobra.Command{
 
 func runTemplateCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	if err := catalog.ValidateAssetName(name); err != nil {
+		return err
+	}
 	dir := userTemplatesDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
