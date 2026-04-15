@@ -1,0 +1,34 @@
+name: codex
+description: One-shot Codex PR review using the pr-review workflow.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repository.
+    required: true
+    infer: repo
+  - name: pr
+    description: Pull request number to review.
+    required: true
+    infer: pr
+examples:
+  - safe-ag pr-review codex
+  - safe-ag pr-review codex 16
+tags:
+  - review
+  - pr
+  - codex
+steps:
+  - name: codex-review
+    type: codex
+    repo: ${repo}
+    ssh: true
+    reuse_auth: true
+    reuse_gh_auth: true
+    background: true
+    prompt: |
+      Review PR ${pr} in one-shot mode.
+
+      Use the pr-review skill/workflow for the initial review only.
+      Do Steps 1-5 from that workflow.
+      Do NOT create the continuous watcher / cron loop.
+
+      Post actionable inline review comments only.

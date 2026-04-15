@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/validate"
 
 	"github.com/spf13/cobra"
 )
@@ -178,6 +178,7 @@ var templateCmd = &cobra.Command{
 func init() {
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateShowCmd)
+	templateCmd.AddCommand(templateRenderCmd)
 	templateCmd.AddCommand(templateCreateCmd)
 	rootCmd.AddCommand(templateCmd)
 }
@@ -260,47 +261,19 @@ var templateListCmd = &cobra.Command{
 }
 
 func runTemplateList(cmd *cobra.Command, args []string) error {
-	type tplEntry struct {
-		name   string
-		source string
+	templates, err := catalog.ListTemplates()
+	if err != nil {
+		return err
 	}
-	var templates []tplEntry
-
-	// Collect built-in templates.
-	if dir := repoTemplatesDir(); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-					name := strings.TrimSuffix(e.Name(), ".md")
-					templates = append(templates, tplEntry{name, "built-in"})
-				}
-			}
-		}
-	}
-
-	// Collect user templates.
-	if dir := userTemplatesDir(); dir != "" {
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-					name := strings.TrimSuffix(e.Name(), ".md")
-					templates = append(templates, tplEntry{name, "user"})
-				}
-			}
-		}
-	}
-
 	if len(templates) == 0 {
 		fmt.Println("No templates found.")
 		return nil
 	}
 
-	fmt.Printf("%-30s  %s\n", "NAME", "SOURCE")
-	fmt.Println(strings.Repeat("─", 45))
+	fmt.Printf("%-30s  %-10s  %s\n", "NAME", "SOURCE", "DESCRIPTION")
+	fmt.Println(strings.Repeat("─", 80))
 	for _, t := range templates {
-		fmt.Printf("%-30s  %s\n", t.name, t.source)
+		fmt.Printf("%-30s  %-10s  %s\n", t.Name, t.Source, t.Description)
 	}
 	return nil
 }
@@ -315,48 +288,74 @@ var templateShowCmd = &cobra.Command{
 }
 
 func runTemplateShow(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	path, err := findTemplate(name)
+	asset, err := catalog.ResolveTemplate(args[0])
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read template: %w", err)
+	fmt.Printf("Name: %s\nSource: %s\nPath: %s\n", asset.Name, asset.Source, asset.Path)
+	if asset.Description != "" {
+		fmt.Printf("Description: %s\n", asset.Description)
 	}
-	fmt.Print(string(data))
+	if len(asset.Inputs) > 0 {
+		fmt.Println("Inputs:")
+		for _, input := range asset.Inputs {
+			status := "optional"
+			if input.Required {
+				status = "required"
+			}
+			if input.Infer != "" {
+				status += ", infer=" + input.Infer
+			}
+			fmt.Printf("  - %s (%s)\n", input.Name, status)
+		}
+	}
+	fmt.Println()
+	fmt.Print(asset.Body)
 	return nil
 }
 
 // findTemplate searches user then built-in dirs for a template by name.
 func findTemplate(name string) (string, error) {
-	if err := validate.NameComponent(name, "template name"); err != nil {
+	asset, err := catalog.ResolveTemplate(name)
+	if err != nil {
 		return "", err
 	}
+	return asset.Path, nil
+}
 
-	candidates := []string{}
+var templateRenderVars []string
+var templateRenderRepos []string
 
-	// User dir takes precedence.
-	userDir := userTemplatesDir()
-	candidates = append(candidates,
-		filepath.Join(userDir, name+".md"),
-		filepath.Join(userDir, name),
-	)
+var templateRenderCmd = &cobra.Command{
+	Use:   "render <name>",
+	Short: "Render a template with inferred and explicit variables",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTemplateRender,
+}
 
-	// Built-in dir.
-	if repoDir := repoTemplatesDir(); repoDir != "" {
-		candidates = append(candidates,
-			filepath.Join(repoDir, name+".md"),
-			filepath.Join(repoDir, name),
-		)
+func init() {
+	templateRenderCmd.Flags().StringSliceVar(&templateRenderVars, "var", nil, "Template variable assignment (key=value)")
+	templateRenderCmd.Flags().StringSliceVar(&templateRenderRepos, "repo", nil, "Repo URL for ${repo}; repeatable")
+}
+
+func runTemplateRender(cmd *cobra.Command, args []string) error {
+	asset, err := catalog.ResolveTemplate(args[0])
+	if err != nil {
+		return err
 	}
-
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
-		}
+	vars, repos, err := parseTemplateVars(templateRenderVars, templateRenderRepos, true)
+	if err != nil {
+		return err
 	}
-	return "", fmt.Errorf("template %q not found (checked user and built-in dirs)", name)
+	if err := applyInputValues(asset.Inputs, vars, repos); err != nil {
+		return err
+	}
+	body := interpolateString(asset.Body, vars)
+	if err := ensureNoUnresolvedVars("template "+asset.Name, body); err != nil {
+		return err
+	}
+	fmt.Print(body)
+	return nil
 }
 
 // template create
@@ -380,8 +379,20 @@ func runTemplateCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("template %q already exists at %s", name, path)
 	}
 
-	// Write a starter template.
-	starter := fmt.Sprintf("# %s\n\nDescribe what this template should do.\n", name)
+	// Write a starter template with explicit metadata.
+	starter := fmt.Sprintf(`---
+name: %s
+description: Describe what this template should do.
+inputs:
+  - name: repo
+    description: Repository URL or current checkout repo.
+    infer: repo
+examples:
+  - safe-ag spawn claude --template %s
+---
+
+Write the reusable prompt body here.
+`, name, name)
 	if err := os.WriteFile(path, []byte(starter), 0644); err != nil {
 		return fmt.Errorf("create template file: %w", err)
 	}

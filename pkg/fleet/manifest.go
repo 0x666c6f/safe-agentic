@@ -46,6 +46,14 @@ type AgentSpec struct {
 	hasDocker      bool `yaml:"-"`
 }
 
+type InputSpec struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Required    bool   `yaml:"required"`
+	Default     string `yaml:"default"`
+	Infer       string `yaml:"infer"`
+}
+
 type rawAgentSpec struct {
 	Name        string   `yaml:"name"`
 	Type        string   `yaml:"type"`
@@ -121,6 +129,10 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 // FleetManifest is the top-level structure for `agent fleet <manifest.yaml>`.
 type FleetManifest struct {
 	Name        string            `yaml:"name"`
+	Description string            `yaml:"description"`
+	Inputs      []InputSpec       `yaml:"inputs"`
+	Examples    []string          `yaml:"examples"`
+	Tags        []string          `yaml:"tags"`
 	SharedTasks bool              `yaml:"shared_tasks"`
 	Defaults    AgentSpec         `yaml:"defaults"` // inherited by all agents
 	Vars        map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
@@ -152,11 +164,15 @@ type PipelineStage struct {
 // The `defaults` section provides inherited values for all agents.
 // The `vars` section defines variables that are interpolated in prompts (${var}).
 type PipelineManifest struct {
-	Name     string            `yaml:"name"`
-	Defaults AgentSpec         `yaml:"defaults"` // inherited by all agents
-	Vars     map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
-	Stages   []PipelineStage   `yaml:"stages"`
-	Steps    []AgentSpec       `yaml:"steps"`
+	Name        string            `yaml:"name"`
+	Description string            `yaml:"description"`
+	Inputs      []InputSpec       `yaml:"inputs"`
+	Examples    []string          `yaml:"examples"`
+	Tags        []string          `yaml:"tags"`
+	Defaults    AgentSpec         `yaml:"defaults"` // inherited by all agents
+	Vars        map[string]string `yaml:"vars"`     // ${key} interpolated in prompts
+	Stages      []PipelineStage   `yaml:"stages"`
+	Steps       []AgentSpec       `yaml:"steps"`
 }
 
 type ParseOptions struct {
@@ -180,6 +196,10 @@ func ParseFleetWithOptions(path string, opts ParseOptions) (*FleetManifest, erro
 		return nil, fmt.Errorf("parse fleet manifest %q: %w", path, err)
 	}
 	vars := parseOptionVars(m.Vars, opts)
+	vars, err = applyInputSpecs(m.Inputs, vars, opts.DefaultRepos)
+	if err != nil {
+		return nil, err
+	}
 	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
 	for i := range m.Agents {
 		m.Agents[i] = mergeDefaults(m.Defaults, m.Agents[i])
@@ -212,6 +232,10 @@ func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest
 	m.Stages = expandPipelineModels(m.Stages)
 	rewriteStageDependencies(m.Stages)
 	vars := parseOptionVars(m.Vars, opts)
+	vars, err = applyInputSpecs(m.Inputs, vars, opts.DefaultRepos)
+	if err != nil {
+		return nil, err
+	}
 	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
 	applyPipelineDefaults(&m)
 	interpolatePipelineFields(&m, vars, filepath.Dir(path))
@@ -421,6 +445,27 @@ func parseOptionVars(base map[string]string, opts ParseOptions) map[string]strin
 		}
 	}
 	return vars
+}
+
+func applyInputSpecs(inputs []InputSpec, vars map[string]string, defaultRepos []string) (map[string]string, error) {
+	if len(inputs) == 0 {
+		return vars, nil
+	}
+	if vars == nil {
+		vars = make(map[string]string, len(inputs))
+	}
+	for _, input := range inputs {
+		if vars[input.Name] == "" && input.Default != "" {
+			vars[input.Name] = input.Default
+		}
+		if input.Name == "repo" && vars[input.Name] == "" && len(defaultRepos) > 0 {
+			vars[input.Name] = defaultRepos[0]
+		}
+		if input.Required && vars[input.Name] == "" {
+			return nil, fmt.Errorf("missing required input %q", input.Name)
+		}
+	}
+	return vars, nil
 }
 
 func interpolateAgentSpec(spec AgentSpec, vars map[string]string) AgentSpec {

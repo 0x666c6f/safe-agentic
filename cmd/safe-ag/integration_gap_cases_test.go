@@ -4,11 +4,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,53 +56,6 @@ func dockerInspectTmpfsJSON(t *testing.T, name string) string {
 	return dockerInspectField(t, name, "{{json .HostConfig.Tmpfs}}")
 }
 
-func ensureTUIBinary(t *testing.T) string {
-	t.Helper()
-	tuiPath := filepath.Join(filepath.Dir(binaryPath), "safe-ag-tui")
-	if _, err := os.Stat(tuiPath); err == nil {
-		return tuiPath
-	}
-	build := exec.Command("go", "build", "-o", "../../bin/safe-ag-tui", "../../tui")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build safe-ag-tui failed: %v\n%s", err, out)
-	}
-	return tuiPath
-}
-
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen for free port: %v", err)
-	}
-	defer ln.Close()
-	return ln.Addr().String()
-}
-
-func waitHTTPContains(t *testing.T, url, needle string) string {
-	t.Helper()
-	client := &http.Client{Timeout: 2 * time.Second}
-	var body string
-	for i := 0; i < 30; i++ {
-		resp, err := client.Get(url)
-		if err == nil {
-			data, _ := ioReadAllAndClose(resp)
-			body = string(data)
-			if strings.Contains(body, needle) {
-				return body
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatalf("url %s never contained %q; last body:\n%s", url, needle, body)
-	return ""
-}
-
-func ioReadAllAndClose(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
-}
-
 func waitForDockerLogs(t *testing.T, name, needle string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -121,52 +70,6 @@ func waitForDockerLogs(t *testing.T, name, needle string) string {
 	}
 	t.Fatalf("docker logs for %s never contained %q:\n%s", name, needle, logs)
 	return ""
-}
-
-func TestE2E_DashboardHTTPListsAndStopsAgent(t *testing.T) {
-	requireDeepIntegration(t)
-	ensureTUIBinary(t)
-	tempName := "agent-shell-e2e-dashboard"
-	startTempShellContainer(t, tempName)
-	defer orbExec.Run(context.Background(), "docker", "rm", "-f", tempName)
-
-	addr := freeAddr(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cmd := exec.CommandContext(ctx, binaryPath, "dashboard", "--bind", addr)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start dashboard: %v", err)
-	}
-	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-	}()
-
-	apiURL := "http://" + addr + "/api/agents"
-	body := waitHTTPContains(t, apiURL, tempName)
-	var agents []map[string]any
-	if err := json.Unmarshal([]byte(body), &agents); err != nil {
-		t.Fatalf("dashboard api json: %v\n%s", err, body)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/api/agents/stop/"+tempName, nil)
-	if err != nil {
-		t.Fatalf("build stop request: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST stop via dashboard: %v", err)
-	}
-	resp.Body.Close()
-	for i := 0; i < 20; i++ {
-		if state := dockerInspectField(t, tempName, "{{.State.Status}}"); state != "running" {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatalf("dashboard stop should stop agent")
 }
 
 func TestE2E_SpawnInjectsHostConfigsAndAuthMounts(t *testing.T) {

@@ -83,11 +83,10 @@ stopped -> stop -> removed
 
 Containers are intentionally persistent until you stop or clean them up.
 
-## TUI and dashboard
+## TUI
 
 ```bash
 safe-ag tui
-safe-ag dashboard --bind localhost:8420
 ```
 
 Use these when you want:

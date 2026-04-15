@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 )
 
 type Event struct {
@@ -37,10 +39,5 @@ func Emit(path, eventType string, payload map[string]string) error {
 }
 
 func DefaultEventsPath() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = home + "/.config"
-	}
-	return filepath.Join(dir, "safe-agentic", "events.jsonl")
+	return config.EventsPath()
 }

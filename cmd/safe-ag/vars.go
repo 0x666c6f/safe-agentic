@@ -1,12 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
 )
+
+var inferRepoFromCurrent = inferRepoFromCurrentCheckout
+var inferPRFromCurrent = inferPRFromCurrentCheckout
 
 func parseTemplateVars(assignments []string, repos []string, inferRepo bool) (map[string]string, []string, error) {
 	vars := make(map[string]string, len(assignments))
@@ -23,8 +28,13 @@ func parseTemplateVars(assignments []string, repos []string, inferRepo bool) (ma
 
 	defaultRepos := append([]string{}, repos...)
 	if len(defaultRepos) == 0 && inferRepo {
-		if inferred, err := inferRepoFromCurrentCheckout(); err == nil && inferred != "" {
+		if inferred, err := inferRepoFromCurrent(); err == nil && inferred != "" {
 			defaultRepos = []string{inferred}
+		}
+	}
+	if _, exists := vars["pr"]; !exists {
+		if inferred, err := inferPRFromCurrent(); err == nil && inferred != "" {
+			vars["pr"] = inferred
 		}
 	}
 	return vars, defaultRepos, nil
@@ -61,4 +71,39 @@ func inferRepoFromCurrentCheckout() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func inferPRFromCurrentCheckout() (string, error) {
+	out, err := exec.Command("gh", "pr", "view", "--json", "number").Output()
+	if err != nil {
+		return "", err
+	}
+	var payload struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return "", err
+	}
+	if payload.Number == 0 {
+		return "", fmt.Errorf("no current PR number")
+	}
+	return fmt.Sprintf("%d", payload.Number), nil
+}
+
+func applyInputValues(inputs []fleet.InputSpec, vars map[string]string, repos []string) error {
+	if vars["repo"] == "" && len(repos) > 0 {
+		vars["repo"] = repos[0]
+	}
+	for _, input := range inputs {
+		if vars[input.Name] == "" && input.Default != "" {
+			vars[input.Name] = input.Default
+		}
+		if input.Name == "repo" && vars[input.Name] == "" && len(repos) > 0 {
+			vars[input.Name] = repos[0]
+		}
+		if input.Required && vars[input.Name] == "" {
+			return fmt.Errorf("missing required input %q", input.Name)
+		}
+	}
+	return nil
 }

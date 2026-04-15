@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -27,10 +26,6 @@ func configuredVMName() string {
 }
 
 func main() {
-	if handleDashboardMode() {
-		return
-	}
-
 	if handleHelpMode() {
 		return
 	}
@@ -56,46 +51,13 @@ func main() {
 	execAfterExit(app)
 }
 
-func handleDashboardMode() bool {
-	if !wantsDashboard(os.Args[1:]) {
-		return false
-	}
-	if err := preflight(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	log.Fatal(NewDashboard(dashboardBind(os.Args[1:])).Start())
-	return true
-}
-
-func wantsDashboard(args []string) bool {
-	for _, arg := range args {
-		if arg == "--dashboard" || arg == "dashboard" {
-			return true
-		}
-	}
-	return false
-}
-
-func dashboardBind(args []string) string {
-	bind := "localhost:8420"
-	for i, arg := range args {
-		if arg == "--bind" && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return bind
-}
-
 func handleHelpMode() bool {
 	if len(os.Args) <= 1 || (os.Args[1] != "-h" && os.Args[1] != "--help") {
 		return false
 	}
-	fmt.Println("Usage: safe-ag-tui [--dashboard [--bind host:port]]")
+	fmt.Println("Usage: safe-ag-tui")
 	fmt.Println()
 	fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
-	fmt.Println("  --dashboard    Start web dashboard instead of TUI")
-	fmt.Println("  --bind         Bind address (default: localhost:8420)")
 	fmt.Println()
 	fmt.Println("Keybindings: a=attach s=stop l=logs d=describe n=new q=quit")
 	os.Exit(0)

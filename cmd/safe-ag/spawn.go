@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/events"
@@ -453,28 +454,22 @@ func appendAWSConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 	templateContent := ""
 	if opts.Template != "" {
-		path, err := findTemplate(opts.Template)
+		asset, err := catalog.ResolveTemplate(opts.Template)
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read template: %w", err)
-		}
-		templateContent = strings.TrimSpace(string(data))
-		vars, _, err := parseTemplateVars(opts.TemplateVars, opts.Repos, true)
+		vars, repos, err := parseTemplateVars(opts.TemplateVars, opts.Repos, true)
 		if err != nil {
 			return err
 		}
-		if len(opts.Repos) > 0 {
-			vars["repo"] = opts.Repos[0]
-		} else if inferred, err := inferRepoFromCurrentCheckout(); err == nil && inferred != "" {
-			vars["repo"] = inferred
+		if err := applyInputValues(asset.Inputs, vars, repos); err != nil {
+			return err
 		}
-		templateContent = interpolateString(templateContent, vars)
+		templateContent = interpolateString(asset.Body, vars)
 		if err := ensureNoUnresolvedVars("template "+opts.Template, templateContent); err != nil {
 			return err
 		}
+		templateContent = strings.TrimSpace(templateContent)
 	}
 
 	instructions := opts.Instructions

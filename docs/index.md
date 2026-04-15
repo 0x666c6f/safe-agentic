@@ -59,7 +59,7 @@ safe-ag setup
 
 -   :material-source-fork: __Parallel and staged workflows__
 
-    Use fleet manifests, pipelines, retries, and dashboard tooling for multi-agent work.
+    Use fleet manifests, pipelines, retries, and TUI tooling for multi-agent work.
 
     [Open Fleet Guide](guide/fleet.md)
 
@@ -91,7 +91,7 @@ safe-ag setup
   </a>
   <a class="landing-panel" href="guide/tui/">
     <span class="landing-panel-kicker">Observe</span>
-    <strong>Use the TUI and dashboard to monitor live sessions without dropping into Docker.</strong>
+    <strong>Use the TUI to monitor live sessions without dropping into Docker.</strong>
     <code>safe-ag tui</code>
   </a>
 </div>

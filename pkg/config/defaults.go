@@ -138,6 +138,22 @@ func CronPath() string {
 	return filepath.Join(UserDir(), "cron.json")
 }
 
+func StateDir() string {
+	return filepath.Join(UserDir(), "state")
+}
+
+func AuditPath() string {
+	return filepath.Join(StateDir(), "audit.jsonl")
+}
+
+func EventsPath() string {
+	return filepath.Join(StateDir(), "events.jsonl")
+}
+
+func PipelineLogsDir() string {
+	return filepath.Join(StateDir(), "pipelines")
+}
+
 // DefaultsPath kept as a compatibility name for existing callers.
 func DefaultsPath() string {
 	return ConfigPath()

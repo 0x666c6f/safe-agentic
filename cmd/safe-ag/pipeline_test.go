@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
@@ -182,5 +183,76 @@ func TestSpawnTemplateInterpolatesVars(t *testing.T) {
 	})
 	if !strings.Contains(output, `safe-agentic.prompt=Review https://github.com/org/repo.git for security.`) {
 		t.Fatalf("dry-run missing interpolated prompt:\n%s", output)
+	}
+}
+
+func TestParseTemplateVarsInfersPR(t *testing.T) {
+	origRepo := inferRepoFromCurrent
+	origPR := inferPRFromCurrent
+	defer func() {
+		inferRepoFromCurrent = origRepo
+		inferPRFromCurrent = origPR
+	}()
+
+	inferRepoFromCurrent = func() (string, error) {
+		return "https://github.com/org/repo.git", nil
+	}
+	inferPRFromCurrent = func() (string, error) {
+		return "16", nil
+	}
+
+	vars, repos, err := parseTemplateVars(nil, nil, true)
+	if err != nil {
+		t.Fatalf("parseTemplateVars() error = %v", err)
+	}
+	if got := repos[0]; got != "https://github.com/org/repo.git" {
+		t.Fatalf("repos[0] = %q", got)
+	}
+	if got := vars["pr"]; got != "16" {
+		t.Fatalf("vars[pr] = %q", got)
+	}
+}
+
+func TestParseTemplateVarsExplicitPROverridesInference(t *testing.T) {
+	origPR := inferPRFromCurrent
+	defer func() { inferPRFromCurrent = origPR }()
+	inferPRFromCurrent = func() (string, error) {
+		return "16", nil
+	}
+
+	vars, _, err := parseTemplateVars([]string{"pr=99"}, nil, false)
+	if err != nil {
+		t.Fatalf("parseTemplateVars() error = %v", err)
+	}
+	if got := vars["pr"]; got != "99" {
+		t.Fatalf("vars[pr] = %q", got)
+	}
+}
+
+func TestParsePRReviewArgs(t *testing.T) {
+	mode, pr, err := parsePRReviewArgs(nil)
+	if err != nil || mode != "dual" || pr != "" {
+		t.Fatalf("default parse = (%q,%q,%v)", mode, pr, err)
+	}
+	mode, pr, err = parsePRReviewArgs([]string{"claude", "16"})
+	if err != nil || mode != "claude" || pr != "16" {
+		t.Fatalf("explicit parse = (%q,%q,%v)", mode, pr, err)
+	}
+	mode, pr, err = parsePRReviewArgs([]string{"17"})
+	if err != nil || mode != "dual" || pr != "17" {
+		t.Fatalf("implicit pr parse = (%q,%q,%v)", mode, pr, err)
+	}
+}
+
+func TestResolveBuiltinReviewPreset(t *testing.T) {
+	asset, err := catalog.ResolveReviewPreset("dual")
+	if err != nil {
+		t.Fatalf("ResolveReviewPreset() error = %v", err)
+	}
+	if asset.Manifest.Name != "dual" {
+		t.Fatalf("preset name = %q", asset.Manifest.Name)
+	}
+	if asset.Source != catalog.SourceBuiltin {
+		t.Fatalf("preset source = %q", asset.Source)
 	}
 }

@@ -128,16 +128,18 @@ func TestLogDetailsWithSpecialCharacters(t *testing.T) {
 	}
 }
 
-func TestDefaultPath_WithXDGConfigHome(t *testing.T) {
+func TestDefaultPath_UsesSafeAgStateHome(t *testing.T) {
+	t.Setenv("HOME", "/custom/home")
 	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	path := DefaultPath()
-	expected := "/custom/config/safe-agentic/audit.jsonl"
+	expected := "/custom/home/.safe-ag/state/audit.jsonl"
 	if path != expected {
 		t.Errorf("DefaultPath = %q, want %q", path, expected)
 	}
 }
 
 func TestDefaultPath_WithoutXDGConfigHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 	path := DefaultPath()
 	if path == "" {
@@ -146,8 +148,8 @@ func TestDefaultPath_WithoutXDGConfigHome(t *testing.T) {
 	if filepath.Base(path) != "audit.jsonl" {
 		t.Errorf("expected basename audit.jsonl, got %q", filepath.Base(path))
 	}
-	if filepath.Base(filepath.Dir(path)) != "safe-agentic" {
-		t.Errorf("expected parent dir safe-agentic, got %q", filepath.Base(filepath.Dir(path)))
+	if filepath.Base(filepath.Dir(path)) != "state" {
+		t.Errorf("expected parent dir state, got %q", filepath.Base(filepath.Dir(path)))
 	}
 }
 

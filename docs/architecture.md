@@ -16,7 +16,7 @@ macOS host
 | Component | Role |
 |---|---|
 | `safe-ag` | CLI entrypoint |
-| `safe-ag-tui` | TUI/dashboard entrypoint |
+| `safe-ag-tui` | TUI entrypoint |
 | `vm/setup.sh` | VM bootstrap and hardening |
 | `entrypoint.sh` | container boot and repo clone flow |
 | `cmd/safe-ag` | command implementations |

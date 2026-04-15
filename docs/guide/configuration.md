@@ -22,6 +22,7 @@ Layout:
 ~/.safe-ag/templates/
 ~/.safe-ag/pipelines/
 ~/.safe-ag/cron.json
+~/.safe-ag/state/
 ```
 
 ## Preferences file

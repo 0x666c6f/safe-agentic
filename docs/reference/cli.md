@@ -33,7 +33,6 @@ Top-level commands:
 | `config` | manage persistent defaults |
 | `cost` | estimate API cost from session data |
 | `cron` | manage scheduled jobs |
-| `dashboard` | start the web dashboard |
 | `diagnose` | run environment health checks |
 | `diff` | show git diff from an agent workspace |
 | `fleet` | spawn agents from a fleet manifest |
@@ -44,6 +43,8 @@ Top-level commands:
 | `peek` | show the latest visible output |
 | `pipeline` | run staged pipelines |
 | `pr` | create a GitHub PR from agent work |
+| `pr-fix` | fix review feedback on the current or given PR |
+| `pr-review` | run a one-shot PR review workflow |
 | `replay` | replay a session event log |
 | `retry` | retry a failed agent with the same config |
 | `review` | run an AI review over the diff |
@@ -55,7 +56,7 @@ Top-level commands:
 | `summary` | show a compact agent summary |
 | `template` | manage prompt templates |
 | `todo` | manage merge-gate todos |
-| `tui` | launch the terminal dashboard |
+| `tui` | launch the terminal UI |
 | `update` | rebuild the image |
 | `vm` | manage the OrbStack VM |
 
@@ -460,6 +461,9 @@ Usage:
 safe-ag pipeline <pipeline.yaml|name> [flags]
 safe-ag pipeline list
 safe-ag pipeline show <name>
+safe-ag pipeline inspect <name>
+safe-ag pipeline render <name>
+safe-ag pipeline validate <name>
 safe-ag pipeline create <name>
 ```
 
@@ -471,6 +475,8 @@ Flags:
 | `--dry-run` | bool | print the execution plan without running |
 | `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
 | `--var` | strings | manifest variable assignment `key=value`; repeatable |
+
+Saved user pipelines live in `~/.safe-ag/pipelines/`. Built-in review presets ship under the same catalog surface.
 
 ## `config`
 
@@ -536,6 +542,12 @@ User templates live in `~/.safe-ag/templates/`.
 safe-ag template show <name>
 ```
 
+### `template render`
+
+```bash
+safe-ag template render <name>
+```
+
 ### `template create`
 
 ```bash
@@ -547,6 +559,43 @@ No additional flags beyond `--help`.
 ## `pipeline` saved catalog
 
 Saved user pipelines live in `~/.safe-ag/pipelines/`.
+
+## `pr-review`
+
+Usage:
+
+```bash
+safe-ag pr-review [claude|codex|dual] [pr]
+```
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--dry-run` | bool | print the resolved review pipeline without running |
+| `--repo` | strings | default repo URL; inferred from current checkout when omitted |
+| `--var` | strings | workflow variable assignment `key=value`; repeatable |
+
+Behavior:
+- defaults to `dual`
+- infers current PR via `gh pr view --json number` when omitted
+- runs one-shot review presets without the watcher loop
+
+## `pr-fix`
+
+Usage:
+
+```bash
+safe-ag pr-fix [pr]
+```
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--dry-run` | bool | print the resolved fix pipeline without running |
+| `--repo` | strings | default repo URL; inferred from current checkout when omitted |
+| `--var` | strings | workflow variable assignment `key=value`; repeatable |
 
 ## `mcp-login`
 
@@ -612,20 +661,6 @@ safe-ag cron daemon
 ```
 
 No additional flags beyond `--help`.
-
-## `dashboard`
-
-Usage:
-
-```bash
-safe-ag dashboard [flags]
-```
-
-Flags:
-
-| Flag | Type | Meaning |
-|---|---|---|
-| `--bind` | string | bind address; default `localhost:8420` |
 
 ## `tui`
 

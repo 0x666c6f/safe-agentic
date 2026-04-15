@@ -25,7 +25,7 @@ The goal is simple:
 - a hardened OrbStack VM that acts as a host boundary between macOS and agent containers
 - dedicated managed Docker networks by default
 - tmux-backed sessions that you can reattach to later
-- CLI + TUI + dashboard for spawning, monitoring, reviewing, and shipping work
+- CLI + TUI for spawning, monitoring, reviewing, and shipping work
 - fleet and pipeline manifests for parallel and staged agent runs
 
 ## Core model
@@ -107,6 +107,8 @@ safe-ag logs --latest
 safe-ag diff --latest
 safe-ag output --latest
 safe-ag review --latest
+safe-ag pr-review
+safe-ag pr-fix
 safe-ag stop --latest
 safe-ag cleanup --auth
 safe-ag tui

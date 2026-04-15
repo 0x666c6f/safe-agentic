@@ -126,23 +126,25 @@ func TestDefaultEventsPath(t *testing.T) {
 	}
 }
 
-func TestDefaultEventsPath_WithXDGConfigHome(t *testing.T) {
+func TestDefaultEventsPath_UsesSafeAgStateHome(t *testing.T) {
+	t.Setenv("HOME", "/custom/home")
 	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg/config")
 	path := DefaultEventsPath()
-	expected := "/custom/xdg/config/safe-agentic/events.jsonl"
+	expected := "/custom/home/.safe-ag/state/events.jsonl"
 	if path != expected {
 		t.Errorf("DefaultEventsPath = %q, want %q", path, expected)
 	}
 }
 
 func TestDefaultEventsPath_WithoutXDGConfigHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 	path := DefaultEventsPath()
 	if filepath.Base(path) != "events.jsonl" {
 		t.Errorf("expected basename events.jsonl, got %q", filepath.Base(path))
 	}
-	if filepath.Base(filepath.Dir(path)) != "safe-agentic" {
-		t.Errorf("expected parent dir safe-agentic, got %q", filepath.Base(filepath.Dir(path)))
+	if filepath.Base(filepath.Dir(path)) != "state" {
+		t.Errorf("expected parent dir state, got %q", filepath.Base(filepath.Dir(path)))
 	}
 }
 
