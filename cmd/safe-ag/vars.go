@@ -98,9 +98,6 @@ func applyInputValues(inputs []fleet.InputSpec, vars map[string]string, repos []
 		if vars[input.Name] == "" && input.Default != "" {
 			vars[input.Name] = input.Default
 		}
-		if input.Name == "repo" && vars[input.Name] == "" && len(repos) > 0 {
-			vars[input.Name] = repos[0]
-		}
 		if input.Required && vars[input.Name] == "" {
 			return fmt.Errorf("missing required input %q", input.Name)
 		}
