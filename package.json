@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pinned AI CLIs for safe-agentic",
   "dependencies": {
-    "@openai/codex": "0.120.0"
+    "@openai/codex": "0.125.0"
   }
 }
