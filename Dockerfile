@@ -37,6 +37,7 @@ ARG DELTA_SHA256_ARM64=0edc36cf514f1bd84becac3e94ee8ae9f8818c6a1f99f7b2ee67b362a
 
 ARG AWSCLI_VERSION=2.34.25
 ARG CLAUDE_CODE_VERSION=2.1.119
+ARG CLAUDE_CODE_INSTALLER_SHA256=b315b46925a9bfb9422f2503dd5aa649f680832f4c076b22d87c39d578c3d830
 ARG BUN_VERSION=1.2.23
 ARG BUN_SHA256_AMD64=cf0ed0a920799d576ffde4e0cae66d732bf23c2530407f26f59c7831dffe1f0e
 ARG BUN_SHA256_ARM64=6a7a98c546d084a845deda62eb2a5b94a6a14a63ea81cf9186d46bf55bf910a9
@@ -272,6 +273,7 @@ RUN test -n "$CLI_CACHE_BUST" \
 RUN attempt=1 \
  && while true; do \
       if curl --retry 5 --retry-delay 2 --retry-all-errors -fsSLo /tmp/claude-install.sh https://claude.ai/install.sh \
+        && echo "${CLAUDE_CODE_INSTALLER_SHA256}  /tmp/claude-install.sh" | sha256sum -c - \
         && bash -s -- "$CLAUDE_CODE_VERSION" < /tmp/claude-install.sh \
         && test -x /home/agent/.local/bin/claude \
         && /home/agent/.local/bin/claude --version | grep -F "$CLAUDE_CODE_VERSION"; then \
