@@ -40,6 +40,7 @@ safe-ag tui
 
 - stopped containers still appear
 - `attach` will restart a stopped container when needed
+- on macOS, `attach` and `resume` open iTerm2 by default and fall back to Terminal.app when iTerm2 is not installed
 - preview uses session/log fallbacks depending on what is available
 - filtering is case-insensitive
 - narrow terminals automatically hide lower-priority columns

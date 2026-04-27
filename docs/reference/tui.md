@@ -94,6 +94,8 @@ The footer has five modes:
 | `Ctrl-k` | stop all agents |
 | `Enter` | attach to selected agent |
 
+On macOS, `attach` and `resume` open iTerm2 by default. If iTerm2 is not installed, they fall back to Terminal.app. On other platforms, or if terminal launch fails, the TUI exits and attaches in the current terminal.
+
 ### Rune keys
 
 | Key | Action |

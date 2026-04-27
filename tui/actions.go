@@ -96,22 +96,15 @@ func (ac *Actions) Attach() {
 				return
 			}
 		}
-		ac.app.ExecAfterExit(buildTmuxAttachArgs(name))
+		ac.openInteractive(buildTmuxAttachArgs(name))
 		return
 	}
 
-	ac.app.SuspendAndRun(func() {
-		var cmd *exec.Cmd
-		if running {
-			cmd = exec.Command("orb", "run", "-m", vmName, "docker", "exec", "-it", name, "bash", "-l")
-		} else {
-			cmd = exec.Command("orb", "run", "-m", vmName, "docker", "start", "-ai", name)
-		}
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
-	})
+	if running {
+		ac.openInteractive([]string{"orb", "run", "-m", vmName, "docker", "exec", "-it", name, "bash", "-l"})
+	} else {
+		ac.openInteractive([]string{"orb", "run", "-m", vmName, "docker", "start", "-ai", name})
+	}
 }
 
 // Resume reconnects to the agent TTY when the container is already running.
@@ -134,7 +127,7 @@ func (ac *Actions) Resume() {
 				return
 			}
 		}
-		ac.app.ExecAfterExit(buildTmuxAttachArgs(agent.Name))
+		ac.openInteractive(buildTmuxAttachArgs(agent.Name))
 		return
 	}
 
@@ -144,7 +137,7 @@ func (ac *Actions) Resume() {
 	}
 
 	if agent.Running {
-		ac.app.ExecAfterExit(buildAttachArgs(agent.Name))
+		ac.openInteractive(buildAttachArgs(agent.Name))
 		return
 	}
 
@@ -166,7 +159,15 @@ func (ac *Actions) Resume() {
 		return
 	}
 
-	ac.app.ExecAfterExit(fullArgs)
+	ac.openInteractive(fullArgs)
+}
+
+func (ac *Actions) openInteractive(args []string) {
+	if err := openTerminal(args); err == nil {
+		ac.app.footer.ShowStatus("Opened terminal", false)
+		return
+	}
+	ac.app.ExecAfterExit(args)
 }
 
 func resumeSupported(agentType string) bool {
