@@ -28,9 +28,11 @@ jobs:
         run: |
           latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$latest_tag" ]; then
-            echo "version=v0.1.0" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "changelog=Initial release" >> "$GITHUB_OUTPUT"
+            {
+              echo "version=v0.1.0"
+              echo "skip=false"
+              echo "changelog=Initial release"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -79,9 +81,9 @@ jobs:
           [ -n "$fixes" ] && changelog="${changelog}### Fixes\n${fixes}\n\n"
           [ -n "$other" ] && changelog="${changelog}### Other\n${other}\n\n"
 
-          echo "version=$next" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
           {
+            echo "version=$next"
+            echo "skip=false"
             echo "changelog<<CHANGELOGEOF"
             printf '%b' "$changelog"
             echo "CHANGELOGEOF"
@@ -124,8 +126,8 @@ jobs:
           cp bin/safe-ag-claude bin/safe-ag-codex "$staging/bin/"
           cp bin/agent-session.sh bin/repo-url.sh "$staging/bin/"
 
-          cp config/* "$staging/config/"
-          cp templates/* "$staging/templates/"
+          cp -R config/. "$staging/config/"
+          cp -R templates/. "$staging/templates/"
           cp vm/setup.sh "$staging/vm/"
 
           cp Dockerfile entrypoint.sh package.json package-lock.json op-env.sh "$staging/"
@@ -134,8 +136,10 @@ jobs:
           tar -czf "$tarball" "$staging"
           sha256=$(shasum -a 256 "$tarball" | awk '{print $1}')
 
-          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          {
+            echo "tarball=$tarball"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         if: steps.version.outputs.skip != 'true'
