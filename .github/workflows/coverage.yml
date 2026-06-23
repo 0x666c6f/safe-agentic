@@ -87,21 +87,9 @@ jobs:
         run: |
           git fetch origin badges --depth=1 >/dev/null 2>&1 || true
 
-          current="$(python3 - <<'PY'
-import json
-with open('.badge-out/coverage.json') as f:
-    print(str(json.load(f)["message"]).rstrip('%'))
-PY
-)"
+          current="$(python3 -c 'import json; print(str(json.load(open(".badge-out/coverage.json"))["message"]).rstrip("%"))')"
 
-          baseline="$(git show FETCH_HEAD:.github/badges/coverage.json 2>/dev/null | python3 - <<'PY'
-import json, sys
-raw = sys.stdin.read().strip()
-if not raw:
-    raise SystemExit(0)
-print(str(json.loads(raw)["message"]).rstrip('%'))
-PY
-)"
+          baseline="$(git show FETCH_HEAD:.github/badges/coverage.json 2>/dev/null | python3 -c 'import json, sys; raw = sys.stdin.read().strip(); print(str(json.loads(raw)["message"]).rstrip("%") if raw else "")')"
 
           if [ -z "$baseline" ]; then
             echo "No published coverage baseline found on badges branch; skipping regression check."
