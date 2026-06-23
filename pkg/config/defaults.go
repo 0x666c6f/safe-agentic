@@ -115,6 +115,13 @@ func Defaults() Config {
 }
 
 func UserDir() string {
+	return safeAgDir("SAFE_AGENTIC_CONFIG_HOME")
+}
+
+func safeAgDir(envKey string) string {
+	if base := os.Getenv(envKey); base != "" {
+		return filepath.Join(base, ".safe-ag")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
@@ -144,19 +151,22 @@ func CronPath() string {
 }
 
 func StateDir() string {
+	if base := os.Getenv("SAFE_AGENTIC_STATE_HOME"); base != "" {
+		return filepath.Join(base, ".safe-ag", "state")
+	}
 	return filepath.Join(UserDir(), "state")
 }
 
 func AuditPath() string {
-	return filepath.Join(UserDir(), "state", "audit.jsonl")
+	return filepath.Join(StateDir(), "audit.jsonl")
 }
 
 func EventsPath() string {
-	return filepath.Join(UserDir(), "state", "events.jsonl")
+	return filepath.Join(StateDir(), "events.jsonl")
 }
 
 func PipelineLogsDir() string {
-	return filepath.Join(UserDir(), "state", "pipelines")
+	return filepath.Join(StateDir(), "pipelines")
 }
 
 // DefaultsPath kept as a compatibility name for existing callers.

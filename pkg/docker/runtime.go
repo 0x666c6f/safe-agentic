@@ -114,7 +114,7 @@ func (d *DockerRunCmd) Build() []string {
 		args = append(args, "-it")
 	}
 	args = append(args, "--name", d.name)
-	args = append(args, "--hostname", d.name)
+	args = append(args, "--hostname", dockerHostname(d.name))
 	args = append(args, "--pull", "never")
 	args = append(args, d.flags...)
 	// Labels sorted for deterministic output
@@ -136,6 +136,18 @@ func (d *DockerRunCmd) Build() []string {
 	args = append(args, d.image)
 	args = append(args, d.cmdArgs...)
 	return args
+}
+
+func dockerHostname(name string) string {
+	const maxHostnameLen = 63
+	if len(name) <= maxHostnameLen {
+		return name
+	}
+	hostname := strings.TrimRight(name[:maxHostnameLen], ".-_")
+	if hostname == "" {
+		return name[:maxHostnameLen]
+	}
+	return hostname
 }
 
 func (d *DockerRunCmd) Render() string {

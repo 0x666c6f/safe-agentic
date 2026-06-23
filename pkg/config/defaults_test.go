@@ -53,6 +53,45 @@ func TestPathsUseSafeAgHome(t *testing.T) {
 	}
 }
 
+func TestPathsUseSafeAgConfigHome(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "host-home"))
+	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
+
+	if got := UserDir(); got != filepath.Join(configHome, ".safe-ag") {
+		t.Fatalf("UserDir() = %q", got)
+	}
+	if got := ConfigPath(); got != filepath.Join(configHome, ".safe-ag", "config.toml") {
+		t.Fatalf("ConfigPath() = %q", got)
+	}
+	if got := CronPath(); got != filepath.Join(configHome, ".safe-ag", "cron.json") {
+		t.Fatalf("CronPath() = %q", got)
+	}
+	if got := EventsPath(); got != filepath.Join(configHome, ".safe-ag", "state", "events.jsonl") {
+		t.Fatalf("EventsPath() = %q", got)
+	}
+}
+
+func TestStatePathsUseSafeAgStateHome(t *testing.T) {
+	configHome := t.TempDir()
+	stateHome := t.TempDir()
+	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
+	t.Setenv("SAFE_AGENTIC_STATE_HOME", stateHome)
+
+	if got := UserDir(); got != filepath.Join(configHome, ".safe-ag") {
+		t.Fatalf("UserDir() = %q", got)
+	}
+	if got := StateDir(); got != filepath.Join(stateHome, ".safe-ag", "state") {
+		t.Fatalf("StateDir() = %q", got)
+	}
+	if got := AuditPath(); got != filepath.Join(stateHome, ".safe-ag", "state", "audit.jsonl") {
+		t.Fatalf("AuditPath() = %q", got)
+	}
+	if got := PipelineLogsDir(); got != filepath.Join(stateHome, ".safe-ag", "state", "pipelines") {
+		t.Fatalf("PipelineLogsDir() = %q", got)
+	}
+}
+
 func TestLoadDefaultsMissingFile(t *testing.T) {
 	cfg, err := LoadDefaults(filepath.Join(t.TempDir(), "missing.toml"))
 	if err != nil {

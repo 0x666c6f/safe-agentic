@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/BurntSushi/toml"
 )
 
@@ -46,14 +47,7 @@ type AllowRules struct {
 }
 
 func UserRulesPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-			return filepath.Join(cwd, ".safe-ag", "rules.toml")
-		}
-		return filepath.Join(string(os.PathSeparator), ".safe-ag", "rules.toml")
-	}
-	return filepath.Join(home, ".safe-ag", "rules.toml")
+	return filepath.Join(config.UserDir(), "rules.toml")
 }
 
 func DefaultRulePaths() []string {

@@ -27,6 +27,11 @@ for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
   fi
 done
 
+# OrbStack may launch this script with cwd under a macOS share. Move to a VM-local
+# directory before later commands fork shells, otherwise they can warn that cwd
+# vanished after the lazy unmount.
+cd /
+
 # Prevent remounting on reboot via fstab override
 # OrbStack uses gvproxy/virtio mounts; blocking them here
 for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do

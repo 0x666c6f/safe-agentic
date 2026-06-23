@@ -30,9 +30,20 @@ var (
 // cleanupDetContainers removes containers created by deterministic tests.
 // Called from TestMain in integration_test.go.
 func cleanupDetContainers() {
+	removeContainerIfExists(detSharedContainer)
+	removeContainerIfExists("agent-shell-e2e-det-multi")
+}
+
+func removeContainerIfExists(name string) bool {
 	ctx := context.Background()
-	orbExec.Run(ctx, "docker", "rm", "-f", detSharedContainer)
-	orbExec.Run(ctx, "docker", "rm", "-f", "agent-shell-e2e-det-multi")
+	for i := 0; i < 5; i++ {
+		_, _ = orbExec.Run(ctx, "docker", "rm", "-f", name)
+		if _, err := orbExec.Run(ctx, "docker", "inspect", name); err != nil {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
 }
 
 // ensureSharedContainer creates a long-lived container with proper labels
@@ -43,7 +54,10 @@ func ensureSharedContainer(t *testing.T) {
 		ctx := context.Background()
 
 		// Clean up any leftover from a previous run
-		orbExec.Run(ctx, "docker", "rm", "-f", detSharedContainer)
+		if !removeContainerIfExists(detSharedContainer) {
+			t.Logf("failed to remove leftover shared container %s", detSharedContainer)
+			return
+		}
 
 		args := []string{
 			"docker", "run", "-d",

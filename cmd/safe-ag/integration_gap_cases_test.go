@@ -30,13 +30,44 @@ func cleanupNamedArtifacts(name string) {
 	orbExec.Run(ctx, "docker", "volume", "rm", name+"-auth")
 }
 
+func cleanupArtifactsByLabel(label string) {
+	ctx := context.Background()
+	out, _ := orbExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+	for _, id := range strings.Fields(string(out)) {
+		nameOut, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", id)
+		if err != nil {
+			orbExec.Run(ctx, "docker", "rm", "-f", id)
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
+		if name != "" {
+			cleanupNamedArtifacts(name)
+		}
+	}
+}
+
+func waitForContainerByLabel(t *testing.T, label string) string {
+	t.Helper()
+	ctx := context.Background()
+	for i := 0; i < 60; i++ {
+		out, _ := orbExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+		names := strings.Fields(string(out))
+		if len(names) > 0 {
+			nameOut, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", names[0])
+			if err == nil {
+				return strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("container with label %s did not appear", label)
+	return ""
+}
+
 func runSafeAgEnv(t *testing.T, env map[string]string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Env = append(os.Environ(), "SAFE_AGENTIC_VM_NAME="+testVMName)
-	for k, v := range env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = integrationCommandEnv(env)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -274,7 +305,6 @@ agents:
 			t.Fatalf("unexpected fleet output:\n%s", out)
 		}
 		for _, name := range []string{"agent-shell-fleet-one", "agent-shell-fleet-two"} {
-			cleanupNamedArtifacts(name)
 			defer stopAndRemove(t, name)
 			if !waitForContainer(t, name) {
 				t.Fatalf("fleet container %s did not appear", name)
@@ -308,9 +338,7 @@ stages:
 		if err := os.WriteFile(parent, []byte(parentBody), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"agent-shell-root-step", "agent-shell-child-step"} {
-			cleanupNamedArtifacts(name)
-		}
+		cleanupArtifactsByLabel("safe-agentic.fleet=integ-shell-pipeline")
 
 		out, err := runSafeAg(t, "pipeline", parent)
 		if err != nil {
@@ -319,12 +347,12 @@ stages:
 		if !strings.Contains(out, `Pipeline "integ-shell-pipeline" complete.`) {
 			t.Fatalf("unexpected pipeline output:\n%s", out)
 		}
-		for _, name := range []string{"agent-shell-root-step", "agent-shell-child-step"} {
-			cleanupNamedArtifacts(name)
-			defer stopAndRemove(t, name)
-			if !waitForContainer(t, name) {
-				t.Fatalf("pipeline container %s did not appear", name)
-			}
+		for _, label := range []string{
+			"safe-agentic.hierarchy=integ-shell-pipeline/root-step",
+			"safe-agentic.hierarchy=integ-shell-pipeline/child-pipe/child-step",
+		} {
+			name := waitForContainerByLabel(t, label)
+			defer cleanupNamedArtifacts(name)
 		}
 	})
 }

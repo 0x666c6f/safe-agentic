@@ -29,6 +29,16 @@ Layout:
 ~/.safe-ag/state/
 ```
 
+For isolated harnesses, set `SAFE_AGENTIC_CONFIG_HOME` to relocate this tree
+without changing `HOME` for tools such as OrbStack:
+
+```bash
+SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home safe-ag list
+```
+
+State files can be relocated separately with `SAFE_AGENTIC_STATE_HOME`.
+When unset, state stays under the config home.
+
 ## Preferences file
 
 Path:
@@ -253,9 +263,13 @@ Use:
 
 ```bash
 SAFE_AGENTIC_VM_NAME=safe-agentic-alt
+SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home
+SAFE_AGENTIC_STATE_HOME=/tmp/safe-ag-state
 ```
 
-This points the CLI at a different OrbStack VM.
+`SAFE_AGENTIC_VM_NAME` points the CLI at a different OrbStack VM.
+`SAFE_AGENTIC_CONFIG_HOME` and `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic
+files while keeping the process `HOME` intact for host tools.
 
 Useful for:
 - isolated testing
