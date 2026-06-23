@@ -14,6 +14,19 @@ func TestManagedNetworkName(t *testing.T) {
 	}
 }
 
+func TestManagedBridgeName(t *testing.T) {
+	name := ManagedBridgeName("agent-claude-abc")
+	if !strings.HasPrefix(name, "sa") {
+		t.Fatalf("managed bridge name %q should match VM egress guardrail prefix sa+", name)
+	}
+	if len(name) > 15 {
+		t.Fatalf("managed bridge name %q exceeds Linux interface length", name)
+	}
+	if name != ManagedBridgeName("agent-claude-abc") {
+		t.Fatalf("managed bridge name should be deterministic")
+	}
+}
+
 func TestCreateManagedNetwork(t *testing.T) {
 	fake := orb.NewFake()
 	name, err := CreateManagedNetwork(context.Background(), fake, "agent-claude-abc")
@@ -30,6 +43,9 @@ func TestCreateManagedNetwork(t *testing.T) {
 	cmdStr := strings.Join(cmds[0], " ")
 	if !strings.Contains(cmdStr, "--driver bridge") {
 		t.Errorf("missing --driver bridge in: %s", cmdStr)
+	}
+	if !strings.Contains(cmdStr, "com.docker.network.bridge.name="+ManagedBridgeName("agent-claude-abc")) {
+		t.Errorf("missing managed bridge name in: %s", cmdStr)
 	}
 	if !strings.Contains(cmdStr, "app=safe-agentic") {
 		t.Errorf("missing app label in: %s", cmdStr)

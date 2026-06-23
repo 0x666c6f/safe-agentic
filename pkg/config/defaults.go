@@ -21,6 +21,7 @@ type DefaultsSection struct {
 	DockerSocket bool   `toml:"docker_socket"`
 	ReuseAuth    bool   `toml:"reuse_auth"`
 	ReuseGHAuth  bool   `toml:"reuse_gh_auth"`
+	SeedAuth     bool   `toml:"seed_auth"`
 	Network      string `toml:"network"`
 	Identity     string `toml:"identity"`
 }
@@ -47,6 +48,7 @@ type fileDefaultsSection struct {
 	DockerSocket *bool   `toml:"docker_socket"`
 	ReuseAuth    *bool   `toml:"reuse_auth"`
 	ReuseGHAuth  *bool   `toml:"reuse_gh_auth"`
+	SeedAuth     *bool   `toml:"seed_auth"`
 	Network      *string `toml:"network"`
 	Identity     *string `toml:"identity"`
 }
@@ -73,6 +75,7 @@ var keyAliases = map[string]string{
 	"defaults.docker_socket":             "defaults.docker_socket",
 	"defaults.reuse_auth":                "defaults.reuse_auth",
 	"defaults.reuse_gh_auth":             "defaults.reuse_gh_auth",
+	"defaults.seed_auth":                 "defaults.seed_auth",
 	"defaults.network":                   "defaults.network",
 	"defaults.identity":                  "defaults.identity",
 	"git.author_name":                    "git.author_name",
@@ -87,6 +90,7 @@ var keyAliases = map[string]string{
 	"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET": "defaults.docker_socket",
 	"SAFE_AGENTIC_DEFAULT_REUSE_AUTH":    "defaults.reuse_auth",
 	"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH": "defaults.reuse_gh_auth",
+	"SAFE_AGENTIC_DEFAULT_SEED_AUTH":     "defaults.seed_auth",
 	"SAFE_AGENTIC_DEFAULT_NETWORK":       "defaults.network",
 	"SAFE_AGENTIC_DEFAULT_IDENTITY":      "defaults.identity",
 	"GIT_AUTHOR_NAME":                    "git.author_name",
@@ -105,6 +109,7 @@ func Defaults() Config {
 			PIDsLimit:   512,
 			ReuseAuth:   false,
 			ReuseGHAuth: false,
+			SeedAuth:    false,
 		},
 	}
 }
@@ -242,6 +247,9 @@ func (raw FileConfig) Effective() Config {
 		if raw.Defaults.ReuseGHAuth != nil {
 			cfg.Defaults.ReuseGHAuth = *raw.Defaults.ReuseGHAuth
 		}
+		if raw.Defaults.SeedAuth != nil {
+			cfg.Defaults.SeedAuth = *raw.Defaults.SeedAuth
+		}
 		if raw.Defaults.Network != nil {
 			cfg.Defaults.Network = *raw.Defaults.Network
 		}
@@ -292,6 +300,7 @@ func (s *fileDefaultsSection) isZero() bool {
 			s.DockerSocket == nil &&
 			s.ReuseAuth == nil &&
 			s.ReuseGHAuth == nil &&
+			s.SeedAuth == nil &&
 			s.Network == nil &&
 			s.Identity == nil)
 }
@@ -348,6 +357,8 @@ func GetValue(cfg Config, key string) (string, error) {
 		return strconv.FormatBool(cfg.Defaults.ReuseAuth), nil
 	case "defaults.reuse_gh_auth":
 		return strconv.FormatBool(cfg.Defaults.ReuseGHAuth), nil
+	case "defaults.seed_auth":
+		return strconv.FormatBool(cfg.Defaults.SeedAuth), nil
 	case "defaults.network":
 		return cfg.Defaults.Network, nil
 	case "defaults.identity":
@@ -391,6 +402,8 @@ func SetValue(raw *FileConfig, key, value string) error {
 		return setBool(&raw.ensureDefaults().ReuseAuth, canonical, value)
 	case "defaults.reuse_gh_auth":
 		return setBool(&raw.ensureDefaults().ReuseGHAuth, canonical, value)
+	case "defaults.seed_auth":
+		return setBool(&raw.ensureDefaults().SeedAuth, canonical, value)
 	case "defaults.network":
 		raw.ensureDefaults().Network = stringPtr(value)
 	case "defaults.identity":
@@ -444,6 +457,10 @@ func ResetValue(raw *FileConfig, key string) error {
 	case "defaults.reuse_gh_auth":
 		if raw.Defaults != nil {
 			raw.Defaults.ReuseGHAuth = nil
+		}
+	case "defaults.seed_auth":
+		if raw.Defaults != nil {
+			raw.Defaults.SeedAuth = nil
 		}
 	case "defaults.network":
 		if raw.Defaults != nil {

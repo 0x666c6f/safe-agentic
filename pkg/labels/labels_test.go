@@ -9,6 +9,7 @@ func TestLabelKeysUniqueAndNonEmpty(t *testing.T) {
 		SSH,
 		AuthType,
 		GHAuth,
+		SeedAuth,
 		NetworkMode,
 		DockerMode,
 		Resources,

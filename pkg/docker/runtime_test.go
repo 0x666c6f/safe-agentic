@@ -86,6 +86,15 @@ func TestAddNamedVolume(t *testing.T) {
 	}
 }
 
+func TestAddBindMount(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd.AddBindMount("/tmp/worktree", "/workspace", false)
+	cmdStr := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(cmdStr, "type=bind,src=/tmp/worktree,dst=/workspace") {
+		t.Errorf("missing bind mount: %s", cmdStr)
+	}
+}
+
 func TestAddEphemeralVolume(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	cmd.AddEphemeralVolume("/workspace")
@@ -207,6 +216,18 @@ func TestAppendRuntimeHardening_NoOptional(t *testing.T) {
 	}
 }
 
+func TestAppendRuntimeHardening_WorktreeWorkspace(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	AppendRuntimeHardening(cmd, HardeningOpts{WorkspaceSource: "/tmp/worktree"})
+	cmdStr := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(cmdStr, "type=bind,src=/tmp/worktree,dst=/workspace") {
+		t.Fatalf("missing worktree bind mount: %s", cmdStr)
+	}
+	if strings.Contains(cmdStr, "type=volume,dst=/workspace") {
+		t.Fatalf("should not include ephemeral workspace when worktree bind is set: %s", cmdStr)
+	}
+}
+
 func TestAppendCacheMounts(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	AppendCacheMounts(cmd)
@@ -231,6 +252,37 @@ func TestRender(t *testing.T) {
 	// The entire env arg "MY_VAR=value with spaces" contains spaces, so it gets quoted
 	if !strings.Contains(rendered, "\"MY_VAR=value with spaces\"") {
 		t.Errorf("expected quoted env entry in: %s", rendered)
+	}
+}
+
+func TestRenderRedactsSensitiveEnvAndLabels(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd.AddEnv("SAFE_AGENTIC_CLAUDE_AUTH_B64", "secret-auth")
+	cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", "private-task")
+	cmd.AddEnv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+	cmd.AddEnv("AWS_PROFILE", "dev")
+	cmd.AddEnv("GIT_AUTHOR_NAME", "Agent Bot")
+	cmd.AddLabel("safe-agentic.on-complete-b64", "secret-callback")
+	cmd.AddLabel("safe-agentic.prompt", "Review code")
+
+	rendered := cmd.Render()
+	for _, secret := range []string{"secret-auth", "private-task", "host-token", "secret-callback"} {
+		if strings.Contains(rendered, secret) {
+			t.Fatalf("rendered command leaked %q:\n%s", secret, rendered)
+		}
+	}
+	for _, want := range []string{
+		"SAFE_AGENTIC_CLAUDE_AUTH_B64=<redacted>",
+		"SAFE_AGENTIC_INSTRUCTIONS_B64=<redacted>",
+		"CLAUDE_CODE_OAUTH_TOKEN=<redacted>",
+		"AWS_PROFILE=dev",
+		"GIT_AUTHOR_NAME=Agent Bot",
+		"safe-agentic.on-complete-b64=<redacted>",
+		"safe-agentic.prompt=Review code",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered command missing %q:\n%s", want, rendered)
+		}
 	}
 }
 

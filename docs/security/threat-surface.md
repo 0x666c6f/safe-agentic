@@ -27,6 +27,14 @@ Adds:
 Tradeoff:
 - shared token state in the auth volume
 
+## `--seed-auth`
+
+Adds:
+- one-shot copy of host Claude/Codex auth into this session's auth mount
+
+Tradeoff:
+- the agent can use those agent credentials for the life of the session
+
 ## `--aws <profile>`
 
 Adds:

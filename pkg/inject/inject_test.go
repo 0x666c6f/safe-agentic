@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -310,6 +311,9 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	if err := os.Symlink("/etc/passwd", filepath.Join(dir, "hooks", "leak")); err != nil {
 		t.Fatalf("create symlink: %v", err)
 	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "hooks", "pipe"), 0o600); err != nil {
+		t.Fatalf("create fifo: %v", err)
+	}
 
 	envs, err := ReadClaudeSupportFiles(dir)
 	if err != nil {
@@ -351,6 +355,9 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	}
 	if contains(names, "hooks/leak") {
 		t.Fatalf("did not expect symlink target in archive, got %v", names)
+	}
+	if contains(names, "hooks/pipe") {
+		t.Fatalf("did not expect fifo in archive, got %v", names)
 	}
 }
 

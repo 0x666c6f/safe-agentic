@@ -61,6 +61,22 @@ func TestAppUpdatePreviewHandleCommandAndOverlayHelpers(t *testing.T) {
 		t.Fatalf("command status = %q", a.footer.hints.GetText(true))
 	}
 
+	a.handleCommand("action")
+	if a.footer.Mode() != FooterModeStatus || !strings.Contains(a.footer.hints.GetText(true), "Usage: :action") {
+		t.Fatalf("action command status = %q", a.footer.hints.GetText(true))
+	}
+
+	a.handleCommand("profile")
+	if a.footer.Mode() != FooterModeStatus || !strings.Contains(a.footer.hints.GetText(true), "Usage: :profile") {
+		t.Fatalf("profile command status = %q", a.footer.hints.GetText(true))
+	}
+
+	a.table.Update(nil)
+	a.handleCommand("comments")
+	if a.footer.Mode() != FooterModeStatus || !strings.Contains(a.footer.hints.GetText(true), "No agent selected") {
+		t.Fatalf("comments command status = %q", a.footer.hints.GetText(true))
+	}
+
 	ShowOverlay(a, "help", "Help", "body")
 	if name, _ := a.pages.GetFrontPage(); name != "help" {
 		t.Fatalf("front page after overlay = %q", name)

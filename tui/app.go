@@ -334,6 +334,16 @@ func (a *App) handleCommand(cmd string) {
 		a.actions.Fleet(arg)
 	case "pipeline":
 		a.actions.Pipeline(arg)
+	case "action":
+		a.actions.Action(arg)
+	case "profile":
+		a.actions.Profile(arg)
+	case "comments":
+		a.actions.ReviewComments()
+	case "timeline":
+		a.actions.Timeline()
+	case "inbox":
+		a.actions.Inbox()
 	case "pr-review":
 		a.actions.PRReview(arg)
 	case "pr-fix":
@@ -387,7 +397,7 @@ Navigation
   j / k / Up / Down   Move selection up/down
   1-9                 Sort by column (1=Name, 2=Type, etc.)
   /                   Filter agents by keyword
-  :                   Command mode (quit, fleet, pipeline, pr-review, pr-fix, audit)
+  :                   Command mode (quit, fleet, pipeline, profile, action, comments, timeline, inbox, pr-review, pr-fix, audit)
 
 Actions
   Enter / a           Attach to selected agent (tmux)

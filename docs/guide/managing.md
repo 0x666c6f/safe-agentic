@@ -8,30 +8,40 @@ This page is about container lifecycle after a session has been spawned.
 safe-ag list
 safe-ag peek --latest
 safe-ag logs --latest
+safe-ag search "error text"
 safe-ag summary --latest
 safe-ag output --latest
 safe-ag diff --latest
+safe-ag review-comments list --latest
+safe-ag timeline
+safe-ag inbox
 ```
 
 Use:
 - `list` for all containers
 - `peek` for quick live output
 - `logs` for the session log
+- `search` for finding prior output across agent session logs
 - `summary` for a compact state snapshot
 - `output` for the last useful result
 - `diff` for the workspace diff
+- `review-comments` for saved local file/line notes
+- `timeline` for recent event/audit history
+- `inbox` for failures or status markers that need attention
 
 ## Attach and resume
 
 ```bash
 safe-ag attach api-refactor
 safe-ag attach --latest
+safe-ag steer --latest "continue with the smallest fix"
 ```
 
 Behavior:
 - if the container is running, this attaches to tmux
 - if it is stopped, safe-agentic restarts it first
 - detach without stopping: `Ctrl-b d`
+- use `steer` to send a follow-up message without opening a terminal
 
 ## Stop and remove
 
@@ -55,7 +65,7 @@ safe-ag cleanup --auth
 
 Difference:
 - `cleanup`: remove containers, managed networks, and transient runtime state
-- `cleanup --auth`: also remove shared auth volumes
+- `cleanup --auth`: also remove shared and isolated auth volumes
 
 ## Export sessions
 

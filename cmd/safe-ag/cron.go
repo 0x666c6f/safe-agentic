@@ -10,17 +10,19 @@ import (
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/spf13/cobra"
 )
 
 // CronJob represents a scheduled pipeline/fleet/agent run.
 type CronJob struct {
-	Name     string `json:"name"`
-	Schedule string `json:"schedule"` // cron expression: "0 */6 * * *" or shorthand "every 6h"
-	Command  string `json:"command"`  // "pipeline pipeline.yaml" or "fleet agents.yaml" or "spawn claude ..."
-	Enabled  bool   `json:"enabled"`
-	LastRun  string `json:"last_run,omitempty"`
-	LastErr  string `json:"last_error,omitempty"`
+	Name     string   `json:"name"`
+	Schedule string   `json:"schedule"` // cron expression: "0 */6 * * *" or shorthand "every 6h"
+	Command  string   `json:"command"`  // "pipeline pipeline.yaml" or "fleet agents.yaml" or "spawn claude ..."
+	Args     []string `json:"args,omitempty"`
+	Enabled  bool     `json:"enabled"`
+	LastRun  string   `json:"last_run,omitempty"`
+	LastErr  string   `json:"last_error,omitempty"`
 }
 
 // CronConfig holds all scheduled jobs.
@@ -124,14 +126,14 @@ func loadCronConfig() (*CronConfig, error) {
 
 func saveCronConfig(cfg *CronConfig) error {
 	path := cronConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 func runCronAdd(cmd *cobra.Command, args []string) error {
@@ -160,6 +162,7 @@ func runCronAdd(cmd *cobra.Command, args []string) error {
 		Name:     name,
 		Schedule: schedule,
 		Command:  command,
+		Args:     append([]string{}, args[2:]...),
 		Enabled:  true,
 	})
 
@@ -190,7 +193,7 @@ func runCronList(cmd *cobra.Command, args []string) error {
 		if j.LastRun != "" {
 			lastRun = j.LastRun
 		}
-		fmt.Printf("%-20s %-15s %-8s %-20s %s\n", j.Name, j.Schedule, enabled, lastRun, j.Command)
+		fmt.Printf("%-20s %-15s %-8s %-20s %s\n", j.Name, j.Schedule, enabled, lastRun, cronJobCommand(j))
 	}
 	return nil
 }
@@ -259,13 +262,15 @@ func runCronRun(cmd *cobra.Command, args []string) error {
 	}
 	for i, j := range cfg.Jobs {
 		if j.Name == name {
-			fmt.Printf("Running job %q: safe-ag %s\n", name, j.Command)
+			fmt.Printf("Running job %q: safe-ag %s\n", name, cronJobCommand(j))
 			runErr := executeCronJob(j)
 			cfg.Jobs[i].LastRun = time.Now().Format(time.RFC3339)
 			if runErr != nil {
 				cfg.Jobs[i].LastErr = runErr.Error()
+				events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": name, "error": runErr.Error()})
 			} else {
 				cfg.Jobs[i].LastErr = ""
+				events.Emit(events.DefaultEventsPath(), "cron.completed", map[string]string{"job": name})
 			}
 			saveCronConfig(cfg)
 			return runErr
@@ -292,14 +297,16 @@ func runCronDaemon(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			if shouldRun(j, now) {
-				fmt.Printf("[%s] Running job %q: safe-ag %s\n", now.Format("15:04:05"), j.Name, j.Command)
+				fmt.Printf("[%s] Running job %q: safe-ag %s\n", now.Format("15:04:05"), j.Name, cronJobCommand(j))
 				runErr := executeCronJob(j)
 				cfg.Jobs[i].LastRun = now.Format(time.RFC3339)
 				if runErr != nil {
 					cfg.Jobs[i].LastErr = runErr.Error()
+					events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": j.Name, "error": runErr.Error()})
 					fmt.Fprintf(os.Stderr, "[%s] Job %q failed: %v\n", now.Format("15:04:05"), j.Name, runErr)
 				} else {
 					cfg.Jobs[i].LastErr = ""
+					events.Emit(events.DefaultEventsPath(), "cron.completed", map[string]string{"job": j.Name})
 					fmt.Printf("[%s] Job %q completed\n", now.Format("15:04:05"), j.Name)
 				}
 				saveCronConfig(cfg)
@@ -311,7 +318,7 @@ func runCronDaemon(cmd *cobra.Command, args []string) error {
 }
 
 func executeCronJob(job CronJob) error {
-	parts := strings.Fields(job.Command)
+	parts := cronJobArgs(job)
 	if len(parts) == 0 {
 		return fmt.Errorf("empty command")
 	}
@@ -326,6 +333,20 @@ func executeCronJob(job CronJob) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+func cronJobArgs(job CronJob) []string {
+	if len(job.Args) > 0 {
+		return append([]string{}, job.Args...)
+	}
+	return strings.Fields(job.Command)
+}
+
+func cronJobCommand(job CronJob) string {
+	if job.Command != "" {
+		return job.Command
+	}
+	return strings.Join(job.Args, " ")
 }
 
 // shouldRun determines if a job should run based on its schedule and last run time.

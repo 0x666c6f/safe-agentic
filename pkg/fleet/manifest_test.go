@@ -17,6 +17,19 @@ func writeTemp(t *testing.T, content string) string {
 	return p
 }
 
+func writeProfile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	profileDir := filepath.Join(dir, ".safe-ag", "agents")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile dir: %v", err)
+	}
+	path := filepath.Join(profileDir, name+".toml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	return profileDir
+}
+
 // ─── FleetManifest ──────────────────────────────────────────────────────────
 
 func TestParseFleet_TwoAgents(t *testing.T) {
@@ -114,13 +127,17 @@ func TestParseFleet_ExplicitFalseOverridesDefaultTrue(t *testing.T) {
 	p := writeTemp(t, `
 defaults:
   reuse_auth: true
+  seed_auth: true
   ssh: true
+  allow_setup_scripts: true
 agents:
   - name: worker-a
     type: claude
     repo: https://github.com/org/api.git
     reuse_auth: false
+    seed_auth: false
     ssh: false
+    allow_setup_scripts: false
 `)
 	m, err := ParseFleet(p)
 	if err != nil {
@@ -129,8 +146,93 @@ agents:
 	if got := m.Agents[0].ReuseAuth; got {
 		t.Fatalf("ReuseAuth = %v, want false", got)
 	}
+	if got := m.Agents[0].SeedAuth; got {
+		t.Fatalf("SeedAuth = %v, want false", got)
+	}
 	if got := m.Agents[0].SSH; got {
 		t.Fatalf("SSH = %v, want false", got)
+	}
+	if got := m.Agents[0].AllowSetupScripts; got {
+		t.Fatalf("AllowSetupScripts = %v, want false", got)
+	}
+}
+
+func TestParseFleet_ProfileInheritance(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := writeProfile(t, dir, "reviewer", `
+agent_type = "codex"
+repo = ["git@github.com:org/profile.git"]
+container_name = "profile-name"
+prompt = "Profile prompt ${topic}"
+template = "code-review"
+template_vars = ["repo=${repo}"]
+instructions = "Profile instructions ${topic}"
+ssh = true
+reuse_auth = true
+reuse_gh_auth = true
+memory = "12g"
+pids_limit = 256
+`)
+	manifest := filepath.Join(dir, "manifest.yaml")
+	body := `
+vars:
+  topic: auth
+defaults:
+  profile: reviewer
+agents:
+  - name: worker
+    prompt: "Override ${topic}"
+    reuse_auth: false
+`
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	m, err := ParseFleetWithOptions(manifest, ParseOptions{
+		ProfileDirs:  []string{profileDir},
+		DefaultRepos: []string{"git@github.com:org/default.git"},
+	})
+	if err != nil {
+		t.Fatalf("ParseFleetWithOptions() error = %v", err)
+	}
+	got := m.Agents[0]
+	if got.Type != "codex" {
+		t.Fatalf("Type = %q, want codex", got.Type)
+	}
+	if got.Name != "worker" {
+		t.Fatalf("Name = %q, want worker", got.Name)
+	}
+	if got.Repos[0] != "git@github.com:org/profile.git" {
+		t.Fatalf("Repos = %v", got.Repos)
+	}
+	if got.Prompt != "Override auth" {
+		t.Fatalf("Prompt = %q, want Override auth", got.Prompt)
+	}
+	if got.Template != "code-review" || got.Instructions != "Profile instructions auth" {
+		t.Fatalf("template/instructions not inherited: %#v", got)
+	}
+	if got.TemplateVars[0] != "repo=git@github.com:org/default.git" {
+		t.Fatalf("TemplateVars = %v", got.TemplateVars)
+	}
+	if !got.SSH || !got.ReuseGHAuth {
+		t.Fatalf("expected SSH and ReuseGHAuth from profile: %#v", got)
+	}
+	if got.ReuseAuth {
+		t.Fatalf("ReuseAuth = true, want explicit manifest false")
+	}
+	if got.Memory != "12g" || got.PIDsLimit != 256 {
+		t.Fatalf("resources not inherited: mem=%q pids=%d", got.Memory, got.PIDsLimit)
+	}
+}
+
+func TestParseFleet_ProfileMissing(t *testing.T) {
+	p := writeTemp(t, `
+agents:
+  - profile: nope
+`)
+	_, err := ParseFleetWithOptions(p, ParseOptions{ProfileDirs: []string{t.TempDir()}})
+	if err == nil || !strings.Contains(err.Error(), `profile "nope" not found`) {
+		t.Fatalf("ParseFleetWithOptions() error = %v, want missing profile", err)
 	}
 }
 
@@ -151,12 +253,10 @@ steps:
     type: claude
     repo: git@github.com:org/api.git
     prompt: Run all tests
-    on_failure: fix-tests
   - name: fix-tests
     type: claude
     repo: git@github.com:org/api.git
     prompt: Fix failing tests
-    retry: 2
   - name: create-pr
     type: claude
     repo: git@github.com:org/api.git
@@ -181,13 +281,10 @@ steps:
 	if len(s0.DependsOn) != 0 {
 		t.Errorf("stage[0] should have no deps, got %v", s0.DependsOn)
 	}
-	if s0.Agents[0].OnFailure != "fix-tests" {
-		t.Errorf("stage[0].Agents[0].OnFailure = %q", s0.Agents[0].OnFailure)
-	}
 
 	s1 := m.Stages[1]
-	if s1.Agents[0].Retry != 2 {
-		t.Errorf("stage[1].Agents[0].Retry = %d, want 2", s1.Agents[0].Retry)
+	if s1.Name != "fix-tests" {
+		t.Errorf("stage[1].Name = %q, want fix-tests", s1.Name)
 	}
 
 	s2 := m.Stages[2]
@@ -226,31 +323,78 @@ stages:
 	}
 }
 
-func TestParsePipeline_WhenOutputs(t *testing.T) {
-	p := writeTemp(t, `
+func TestParsePipeline_ProfileInheritance(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := writeProfile(t, dir, "fixer", `
+agent_type = "claude"
+repo = ["git@github.com:org/api.git"]
+ssh = true
+seed_auth = true
+docker = true
+`)
+	manifest := filepath.Join(dir, "pipeline.yaml")
+	body := `
+steps:
+  - name: fix
+    profile: fixer
+    prompt: Fix it
+`
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	m, err := ParsePipelineWithOptions(manifest, ParseOptions{ProfileDirs: []string{profileDir}})
+	if err != nil {
+		t.Fatalf("ParsePipelineWithOptions() error = %v", err)
+	}
+	got := m.Stages[0].Agents[0]
+	if got.Type != "claude" || got.Repos[0] != "git@github.com:org/api.git" || !got.SSH || !got.SeedAuth || !got.Docker {
+		t.Fatalf("profile fields not inherited: %#v", got)
+	}
+}
+
+func TestParsePipeline_RejectsUnsupportedControls(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "on_failure",
+			yaml: "on_failure: fix",
+			want: "unsupported on_failure",
+		},
+		{
+			name: "retry",
+			yaml: "retry: 2",
+			want: "unsupported retry",
+		},
+		{
+			name: "when",
+			yaml: "when: pass",
+			want: "unsupported when",
+		},
+		{
+			name: "outputs",
+			yaml: `outputs: "echo pass"`,
+			want: "unsupported outputs",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := writeTemp(t, `
 name: test-pipeline
 steps:
   - name: check
     type: claude
     repo: https://github.com/org/r.git
     prompt: test
-    outputs: "echo pass"
-  - name: act
-    type: claude
-    repo: https://github.com/org/r.git
-    prompt: test
-    depends_on: check
-    when: pass
+    `+tt.yaml+`
 `)
-	m, err := ParsePipeline(p)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if m.Stages[0].Agents[0].Outputs != "echo pass" {
-		t.Errorf("Outputs = %q", m.Stages[0].Agents[0].Outputs)
-	}
-	if m.Stages[1].Agents[0].When != "pass" {
-		t.Errorf("When = %q", m.Stages[1].Agents[0].When)
+			_, err := ParsePipeline(p)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ParsePipeline() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

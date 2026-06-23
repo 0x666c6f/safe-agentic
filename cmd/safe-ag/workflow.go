@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -129,15 +130,14 @@ func runCheckpointCreate(cmd *cobra.Command, args []string) error {
 
 	// Stash changes inside the workspace
 	stashMsg := fmt.Sprintf("checkpoint: %s", label)
-	stashCmd := fmt.Sprintf("git stash push -m %q", stashMsg)
-	out, err := exec.Run(ctx, workspaceExec(name, stashCmd)...)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, "git", "stash", "push", "-m", stashMsg)...)
 	if err != nil {
 		return fmt.Errorf("git stash: %w", err)
 	}
 	stashOutput := strings.TrimSpace(string(out))
 
 	// docker commit to capture the full container state
-	imageTag := fmt.Sprintf("safe-agentic-checkpoint:%s-%s", name, label)
+	imageTag := fmt.Sprintf("safe-agentic-checkpoint:%s-%s", name, checkpointTagSuffix(label))
 	_, err = exec.Run(ctx, "docker", "commit", name, imageTag)
 	if err != nil {
 		return fmt.Errorf("docker commit: %w", err)
@@ -148,6 +148,32 @@ func runCheckpointCreate(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Stash: %s\n", stashOutput)
 	}
 	return nil
+}
+
+func checkpointTagSuffix(label string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range label {
+		allowed := (r >= 'A' && r <= 'Z') ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-'
+		if allowed {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+		if b.Len() >= 80 {
+			break
+		}
+	}
+	suffix := strings.Trim(b.String(), ".-_")
+	if suffix == "" {
+		return "snapshot"
+	}
+	return suffix
 }
 
 // checkpoint list
@@ -222,8 +248,7 @@ func runCheckpointRevert(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	popCmd := fmt.Sprintf("git stash pop %s", ref)
-	out, err := exec.Run(ctx, workspaceExec(name, popCmd)...)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, "git", "stash", "pop", ref)...)
 	if err != nil {
 		return fmt.Errorf("git stash pop: %w", err)
 	}
@@ -268,13 +293,9 @@ func writeTodos(ctx context.Context, exec orb.Executor, containerName string, it
 	if err != nil {
 		return fmt.Errorf("marshal todos: %w", err)
 	}
-	// Use printf to avoid heredoc quoting issues; escape single quotes in the JSON.
-	jsonStr := strings.ReplaceAll(string(data), "'", "'\\''")
-	writeCmd := fmt.Sprintf(
-		"mkdir -p /workspace/.safe-agentic && printf '%%s' '%s' > /workspace/.safe-agentic/todos.json",
-		jsonStr,
-	)
-	_, err = exec.Run(ctx, "docker", "exec", containerName, "bash", "-c", writeCmd)
+	payload := base64.StdEncoding.EncodeToString(data)
+	writeCmd := "mkdir -p /workspace/.safe-agentic && printf %s \"$1\" | base64 -d > /workspace/.safe-agentic/todos.json"
+	_, err = exec.Run(ctx, "docker", "exec", containerName, "bash", "-lc", writeCmd, "bash", payload)
 	if err != nil {
 		return fmt.Errorf("write todos: %w", err)
 	}
@@ -536,16 +557,14 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try codex review first
-	codexCmd := fmt.Sprintf("codex review --base %s 2>/dev/null", reviewBase)
-	out, err := exec.Run(ctx, workspaceExec(name, codexCmd)...)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, "codex", "review", "--base", reviewBase)...)
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		fmt.Print(string(out))
 		return nil
 	}
 
 	// Fallback to git diff
-	diffCmd := fmt.Sprintf("git diff %s...HEAD", reviewBase)
-	out, err = exec.Run(ctx, workspaceExec(name, diffCmd)...)
+	out, err = exec.Run(ctx, workspaceExecCommand(name, "git", "diff", reviewBase+"...HEAD")...)
 	if err != nil {
 		return fmt.Errorf("git diff %s...HEAD: %w", reviewBase, err)
 	}

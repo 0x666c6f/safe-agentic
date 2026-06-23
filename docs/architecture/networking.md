@@ -5,11 +5,13 @@ Networking is one of the main safety controls in safe-agentic.
 ## Default mode
 
 By default, each agent gets a managed Docker bridge network.
+The VM setup pins each managed bridge interface to a `sa*` name so the `SAFE_AGENTIC_EGRESS` iptables chain can apply default egress guardrails.
 
 Intent:
 - isolate agents from each other
 - avoid broad reuse of the default Docker bridge
 - keep the default path narrow and predictable
+- block private/link-local/reserved address ranges by default while allowing normal TCP egress on 22/80/443
 
 ## Custom network
 

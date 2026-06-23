@@ -90,6 +90,30 @@ func TestEmitCreatesParentDirectory(t *testing.T) {
 	}
 }
 
+func TestEmitCreatesPrivateFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state", "events.jsonl")
+
+	if err := Emit(path, "test.event", nil); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat events file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("events file mode = %o, want 600", got)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat events dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("events dir mode = %o, want 700", got)
+	}
+}
+
 func TestEmitAppendsToExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
@@ -113,6 +137,87 @@ func TestEmitAppendsToExistingFile(t *testing.T) {
 	}
 	if count != 5 {
 		t.Errorf("expected 5 lines, got %d", count)
+	}
+}
+
+func TestReadReturnsRecentEvents(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	for _, typ := range []string{"one", "two", "three"} {
+		if err := Emit(path, typ, map[string]string{"container": "agent"}); err != nil {
+			t.Fatalf("Emit %s: %v", typ, err)
+		}
+	}
+	events, err := Read(path, 2)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(events) != 2 || events[0].Type != "two" || events[1].Type != "three" {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestReadMissingFile(t *testing.T) {
+	events, err := Read(filepath.Join(t.TempDir(), "missing.jsonl"), 0)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events len = %d, want 0", len(events))
+	}
+}
+
+func TestClassifyFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		payload   map[string]string
+		want      string
+	}{
+		{
+			name:      "explicit",
+			eventType: "agent.note",
+			payload:   map[string]string{"status": StatusReadyForReview},
+			want:      StatusReadyForReview,
+		},
+		{
+			name:      "auth",
+			eventType: "agent.failed",
+			payload:   map[string]string{"error": "401 unauthorized from GitHub"},
+			want:      StatusNeedsAuth,
+		},
+		{
+			name:      "tests",
+			eventType: "action.failed",
+			payload:   map[string]string{"command": "go test ./...", "error": "exit 1"},
+			want:      StatusFailedTests,
+		},
+		{
+			name:      "stuck",
+			eventType: "pipeline.failed",
+			payload:   map[string]string{"error": "unmet dependencies"},
+			want:      StatusStuck,
+		},
+		{
+			name:      "failed",
+			eventType: "cron.failed",
+			payload:   map[string]string{"error": "exit 1"},
+			want:      StatusFailed,
+		},
+		{
+			name:      "info",
+			eventType: "agent.spawned",
+			payload:   map[string]string{"container": "agent"},
+			want:      StatusInfo,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyFields(tt.eventType, tt.payload); got != tt.want {
+				t.Fatalf("ClassifyFields() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -159,5 +159,6 @@ safe-ag setup
 2. [Command Map](usage.md): shortest path to the right command
 3. [Workflow](guide/workflow.md): diff, retry, review, PR flow
 4. [Fleet and Pipelines](guide/fleet.md): orchestration and manifests
-5. [Architecture](architecture.md): how the boundary layers fit together
-6. [Security](security.md): defaults, wideners, and threat model
+5. [Codex App Parity Roadmap](roadmap/codex-app-parity.md): UX roadmap and implementation tracks
+6. [Architecture](architecture.md): how the boundary layers fit together
+7. [Security](security.md): defaults, wideners, and threat model

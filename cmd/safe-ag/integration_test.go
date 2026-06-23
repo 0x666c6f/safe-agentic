@@ -177,6 +177,8 @@ func TestE2E_HelpOutput(t *testing.T) {
 		"checkpoint", "todo", "pr", "review", "fleet", "pipeline",
 		"setup", "update", "vm", "diagnose", "config", "template",
 		"retry", "sessions", "replay", "mcp-login", "aws-refresh",
+		"action", "search", "steer", "review-comments", "profile",
+		"timeline", "inbox", "handoff", "worktree", "workspace", "browser", "server",
 	}
 	for _, cmd := range expectedCmds {
 		if !strings.Contains(out, cmd) {

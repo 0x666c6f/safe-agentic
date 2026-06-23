@@ -23,6 +23,34 @@ safe-ag-codex <repo-url> [<repo-url>...]
 
 These auto-enable `--ssh` when the URL starts with `git@` or `ssh://`.
 
+## Saved profiles
+
+```bash
+safe-ag profile list
+safe-ag profile show reviewer
+safe-ag profile run reviewer "focus on auth only"
+```
+
+Profiles live in `~/.safe-ag/agents/*.toml` and `.safe-ag/agents/*.toml`. Use them for repeatable roles before hand-writing a long `safe-ag spawn` command.
+
+## Policy guards
+
+Before suggesting a risky spawn mode, remember `~/.safe-ag/rules.toml` and nearest `.safe-ag/rules.toml` can deny it after defaults are applied:
+
+```toml
+[allow]
+docker_modes = ["off", "dind"]  # off, dind, host-socket
+networks = ["managed", "none"]
+aws_profiles = ["dev"]
+ssh = false
+reuse_auth = false
+reuse_gh_auth = false
+seed_auth = false
+setup_scripts = false
+```
+
+If a spawn fails with a policy denial, adjust the command to the allowed mode instead of bypassing the rule.
+
 ## Full command (when you need options)
 
 ```bash
@@ -49,6 +77,7 @@ safe-ag spawn <claude|codex> [options]
 | `--instructions-file PATH` | Load role context from a file | none |
 | `--on-exit 'CMD'` | Run a host command when agent finishes | none |
 | `--max-cost N` | Cost budget label | none |
+| `--worktree` | Create and mount a managed host git worktree from current checkout | off |
 | `--background` | Headless mode — detach immediately after spawn. Codex needs pre-seeded `--reuse-auth`. | off |
 | `--auto-trust` | Skip the trust prompt on first run | off |
 
@@ -77,8 +106,24 @@ safe-ag spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monor
 # With AWS credentials for infrastructure work
 safe-ag spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 
+# Current checkout as isolated managed worktree
+safe-ag spawn claude --worktree --name auth-fix --prompt 'Fix the auth tests'
+
 # Untrusted code (no SSH, no internet)
 safe-ag spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
+```
+
+## Worktree Mode
+
+`--worktree` must be run from inside a git checkout and cannot be combined with `--repo`.
+It creates `~/.safe-ag/worktrees/<container-name>` on branch `safe-ag/<container-name>`, bind-mounts it at `/workspace`, and copies ignored local files listed in `.safe-aginclude`.
+
+```bash
+safe-ag handoff auth-fix --to-worktree
+safe-ag handoff auth-fix --to-local ./workspace-copy
+safe-ag worktree snapshot auth-fix "before review fixes"
+safe-ag worktree restore auth-fix stash@{0}
+safe-ag worktree cleanup --dry-run
 ```
 
 ## Templates
@@ -155,7 +200,7 @@ agents:
     repo: https://github.com/org/frontend.git
 ```
 
-Supported fields per agent: `name`, `type`, `repo`, `ssh`, `reuse_auth`, `reuse_gh_auth`, `docker`, `prompt`, `aws`, `network`, `memory`, `cpus`, `template`, `instructions`, `instructions_file`, `on_exit`, `max_cost`, `background`, `auto_trust`.
+Supported fields per agent: `name`, `type`, `repo`, `repos`, `ssh`, `reuse_auth`, `reuse_gh_auth`, `seed_auth`, `docker`, `allow_setup_scripts`, `prompt`, `aws`, `network`, `memory`, `cpus`, `background`, `auto_trust`.
 
 ## Pipeline — multi-step agent workflows
 
@@ -172,12 +217,11 @@ steps:
     type: claude
     repo: git@github.com:org/api.git
     prompt: "Run all tests and report results"
-    on_failure: fix-tests
   - name: fix-tests
     type: claude
     repo: git@github.com:org/api.git
     prompt: "Fix the failing tests"
-    retry: 2
+    depends_on: run-tests
   - name: create-pr
     type: claude
     repo: git@github.com:org/api.git
@@ -185,11 +229,11 @@ steps:
     depends_on: fix-tests
 ```
 
-Steps run sequentially. `depends_on` skips if dependency hasn't completed. `retry` re-attempts. `on_failure` triggers a handler step.
+Steps run sequentially. `depends_on` waits until dependencies complete successfully. `retry`, `on_failure`, `when`, and `outputs` are not implemented and are rejected instead of silently ignored.
 
 ## Lifecycle scripts (safe-agentic.json)
 
-Repos can include a `safe-agentic.json` at root for automatic setup:
+Repos can include a `safe-agentic.json` at root for optional setup:
 
 ```json
 {
@@ -199,7 +243,7 @@ Repos can include a `safe-agentic.json` at root for automatic setup:
 }
 ```
 
-The `setup` script runs automatically after the repo is cloned inside the container.
+The `setup` script runs after clone only when the session was spawned with `--allow-setup-scripts` or the manifest agent sets `allow_setup_scripts: true`.
 
 ## After spawning
 

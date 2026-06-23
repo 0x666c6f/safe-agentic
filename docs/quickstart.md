@@ -116,7 +116,7 @@ safe-ag cleanup
 safe-ag cleanup --auth
 ```
 
-Use `cleanup --auth` only when you want to remove shared auth volumes too.
+Use `cleanup --auth` only when you want to remove shared and isolated auth volumes too.
 
 ## Next pages
 

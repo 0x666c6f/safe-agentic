@@ -1166,6 +1166,30 @@ func (ac *Actions) Review() {
 	}()
 }
 
+// ReviewComments shows saved review comments for the selected agent.
+func (ac *Actions) ReviewComments() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	name := agent.Name
+	ac.app.footer.ShowStatus("Loading review comments...", false)
+	go func() {
+		out, err := newCLICmd("review-comments", "list", name, "--all").CombinedOutput()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				msg := strings.TrimSpace(string(out))
+				if msg == "" {
+					msg = "Review comments failed"
+				}
+				ac.app.footer.ShowStatus(msg, true)
+				return
+			}
+			ShowOverlay(ac.app, "review-comments", fmt.Sprintf("Review comments: %s", name), string(out))
+		})
+	}()
+}
+
 // Cost shows estimated API spend for the agent's sessions in an overlay.
 func (ac *Actions) Cost() {
 	agent := ac.selectedOrWarn()
@@ -1218,6 +1242,38 @@ func (ac *Actions) Audit() {
 	}()
 }
 
+// Timeline shows recent safe-agentic events.
+func (ac *Actions) Timeline() {
+	ac.showCommandOverlay("timeline", "Timeline", "Loading timeline...", "No timeline events yet")
+}
+
+// Inbox shows events that likely need attention.
+func (ac *Actions) Inbox() {
+	ac.showCommandOverlay("inbox", "Inbox", "Loading inbox...", "Inbox empty")
+}
+
+func (ac *Actions) showCommandOverlay(command, title, loading, empty string) {
+	ac.app.footer.ShowStatus(loading, false)
+	go func() {
+		out, err := newCLICmd(command).CombinedOutput()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			content := strings.TrimSpace(string(out))
+			if err != nil {
+				if content == "" {
+					content = title + " failed"
+				}
+				ac.app.footer.ShowStatus(content, true)
+				return
+			}
+			if content == "" {
+				ac.app.footer.ShowStatus(empty, false)
+				return
+			}
+			ShowOverlay(ac.app, command, title, content)
+		})
+	}()
+}
+
 // Fleet spawns agents from a manifest file (entered via command bar).
 func (ac *Actions) Fleet(manifestPath string) {
 	if manifestPath == "" {
@@ -1256,6 +1312,57 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 			} else {
 				ac.app.footer.ShowStatus("Pipeline complete", false)
 			}
+		})
+	}()
+}
+
+// Action runs a configured safe-ag action in the selected agent.
+func (ac *Actions) Action(actionName string) {
+	actionName = strings.TrimSpace(actionName)
+	if actionName == "" {
+		ac.app.footer.ShowStatus("Usage: :action <name>", true)
+		return
+	}
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	ac.app.footer.ShowStatus("Running action "+actionName+" in "+agent.Name+"...", false)
+	go func() {
+		cmd := newCLICmd("action", "run", actionName, agent.Name)
+		out, err := cmd.CombinedOutput()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Action failed: "+strings.TrimSpace(string(out)), true)
+				return
+			}
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = "Action complete"
+			}
+			ac.app.footer.ShowStatus(msg, false)
+		})
+	}()
+}
+
+// Profile runs a saved agent profile.
+func (ac *Actions) Profile(arg string) {
+	fields := strings.Fields(strings.TrimSpace(arg))
+	if len(fields) == 0 {
+		ac.app.footer.ShowStatus("Usage: :profile <name> [prompt]", true)
+		return
+	}
+	ac.app.footer.ShowStatus("Running profile "+fields[0]+"...", false)
+	go func() {
+		args := append([]string{"profile", "run"}, fields...)
+		out, err := newCLICmd(args...).CombinedOutput()
+		ac.app.poller.ForceRefresh()
+		ac.app.tapp.QueueUpdateDraw(func() {
+			if err != nil {
+				ac.app.footer.ShowStatus("Profile failed: "+strings.TrimSpace(string(out)), true)
+				return
+			}
+			ac.app.footer.ShowStatus("Profile started", false)
 		})
 	}()
 }

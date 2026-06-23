@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +16,14 @@ import (
 	"testing"
 	"time"
 
+	actionpkg "github.com/0x666c6f/safe-agentic/pkg/actions"
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 )
 
 // ─── test harness ─────────────────────────────────────────────────────────────
@@ -28,6 +33,7 @@ import (
 func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 	t.Helper()
 	fake := orb.NewFake()
+	t.Setenv("HOME", t.TempDir())
 	original := newExecutor
 	origFindBuildRoot := findBuildRoot
 	origSyncBuildContextToVM := syncBuildContextToVM
@@ -133,6 +139,697 @@ func TestListCommandJSON(t *testing.T) {
 	joined := strings.Join(cmds[0], " ")
 	if !strings.Contains(joined, "{{json .}}") {
 		t.Errorf("expected json format flag, got: %s", joined)
+	}
+}
+
+// ─── action ─────────────────────────────────────────────────────────────────
+
+func TestActionListAndRun(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	dir := t.TempDir()
+	actionsPath := filepath.Join(dir, "actions.toml")
+	if err := os.WriteFile(actionsPath, []byte(`
+[actions.test]
+description = "Run tests"
+command = "go test ./..."
+cwd = "backend"
+`), 0o600); err != nil {
+		t.Fatalf("write actions file: %v", err)
+	}
+	oldActionFiles := actionFiles
+	actionFiles = []string{actionsPath}
+	defer func() { actionFiles = oldActionFiles }()
+
+	output := captureOutput(func() {
+		if err := runActionList(actionListCmd, nil); err != nil {
+			t.Fatalf("runActionList() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "test") || !strings.Contains(output, "Run tests") {
+		t.Fatalf("action list output = %q", output)
+	}
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker exec "+containerName+" bash -lc", "ok\n")
+
+	output = captureOutput(func() {
+		if err := runActionRun(actionRunCmd, []string{"test", containerName}); err != nil {
+			t.Fatalf("runActionRun() error = %v", err)
+		}
+	})
+	if output != "ok\n" {
+		t.Fatalf("run output = %q, want ok", output)
+	}
+	cmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(cmds) == 0 {
+		t.Fatal("expected docker exec command")
+	}
+	joined := strings.Join(cmds[0], " ")
+	if !strings.Contains(joined, "cd 'backend' && go test ./...") {
+		t.Fatalf("action command not applied: %s", joined)
+	}
+}
+
+func TestActionShowMissing(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	oldActionFiles := actionFiles
+	actionFiles = []string{filepath.Join(t.TempDir(), "missing.toml")}
+	defer func() { actionFiles = oldActionFiles }()
+
+	if err := runActionShow(actionShowCmd, []string{"missing"}); err == nil {
+		t.Fatal("expected missing action error")
+	}
+}
+
+// ─── search ─────────────────────────────────────────────────────────────────
+
+func TestMatchRenderedLogLines(t *testing.T) {
+	raw := []byte(`{"type":"user","message":{"role":"user","content":"Run tests"}}` + "\n" +
+		`{"type":"assistant","message":{"role":"assistant","content":"Needle found in output"}}` + "\n")
+
+	matches := matchRenderedLogLines(raw, "needle", false)
+	if len(matches) != 1 || !strings.Contains(matches[0], "Needle found") {
+		t.Fatalf("matches = %#v", matches)
+	}
+	if matches := matchRenderedLogLines(raw, "needle", true); len(matches) != 0 {
+		t.Fatalf("case-sensitive matches = %#v, want none", matches)
+	}
+}
+
+func TestSearchSpecificAgent(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.agent-type"}}`, "claude\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.repo-display"}}`, "org/repo\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetResponse("docker exec "+containerName+" python3 -c", "/home/agent/.claude/projects/org-repo/session.jsonl\n")
+	fake.SetResponse("docker exec "+containerName+" bash -c tail", `{"type":"assistant","message":{"role":"assistant","content":"Needle found here"}}`+"\n")
+
+	output := captureOutput(func() {
+		if err := runSearch(searchCmd, []string{"needle", containerName}); err != nil {
+			t.Fatalf("runSearch() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, containerName+":") || !strings.Contains(output, "Needle found here") {
+		t.Fatalf("search output = %q", output)
+	}
+}
+
+// ─── steer ──────────────────────────────────────────────────────────────────
+
+func TestRunSteerSendsMessage(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.terminal"}}`, "tmux\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetResponse("docker exec "+containerName+" tmux has-session", "")
+	fake.SetResponse("docker exec "+containerName+" tmux send-keys", "")
+
+	output := captureOutput(func() {
+		if err := runSteer(steerCmd, []string{containerName, "keep it narrow"}); err != nil {
+			t.Fatalf("runSteer() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "Sent to "+containerName) {
+		t.Fatalf("steer output = %q", output)
+	}
+
+	cmds := fake.CommandsMatching("docker exec " + containerName + " tmux send-keys")
+	if len(cmds) == 0 {
+		t.Fatal("expected tmux send-keys command")
+	}
+	joined := strings.Join(cmds[0], " ")
+	if !strings.Contains(joined, "-- keep it narrow Enter") {
+		t.Fatalf("message not sent through tmux: %s", joined)
+	}
+}
+
+func TestRunSteerStartsStoppedContainer(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-stopped"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.terminal"}}`, "tmux\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "false\n")
+	fake.SetResponse("docker start "+containerName, "")
+	fake.SetResponse("docker exec "+containerName+" tmux has-session", "")
+	fake.SetResponse("docker exec "+containerName+" tmux send-keys", "")
+
+	captureOutput(func() {
+		if err := runSteer(steerCmd, []string{containerName, "continue"}); err != nil {
+			t.Fatalf("runSteer() error = %v", err)
+		}
+	})
+	if len(fake.CommandsMatching("docker start "+containerName)) == 0 {
+		t.Fatal("expected docker start for stopped container")
+	}
+}
+
+// ─── review comments ────────────────────────────────────────────────────────
+
+func TestReviewCommentsLifecycle(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	oldPath := reviewCommentsPath
+	oldAll := reviewCommentsAll
+	reviewCommentsPath = filepath.Join(t.TempDir(), "review-comments.jsonl")
+	reviewCommentsAll = false
+	defer func() {
+		reviewCommentsPath = oldPath
+		reviewCommentsAll = oldAll
+	}()
+
+	containerName := "agent-claude-review"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	addOut := captureOutput(func() {
+		if err := runReviewCommentsAdd(reviewCommentsAddCmd, []string{containerName, "cmd/main.go", "8", "tighten this"}); err != nil {
+			t.Fatalf("runReviewCommentsAdd() error = %v", err)
+		}
+	})
+	fields := strings.Fields(addOut)
+	if len(fields) < 2 {
+		t.Fatalf("add output = %q", addOut)
+	}
+	id := fields[1]
+
+	listOut := captureOutput(func() {
+		if err := runReviewCommentsList(reviewCommentsListCmd, nil); err != nil {
+			t.Fatalf("runReviewCommentsList() error = %v", err)
+		}
+	})
+	if !strings.Contains(listOut, id) || !strings.Contains(listOut, "cmd/main.go:8") || !strings.Contains(listOut, "open") {
+		t.Fatalf("list output = %q", listOut)
+	}
+
+	captureOutput(func() {
+		if err := runReviewCommentsResolve(reviewCommentsResolveCmd, []string{id}); err != nil {
+			t.Fatalf("runReviewCommentsResolve() error = %v", err)
+		}
+	})
+
+	listOut = captureOutput(func() {
+		if err := runReviewCommentsList(reviewCommentsListCmd, nil); err != nil {
+			t.Fatalf("runReviewCommentsList(open) error = %v", err)
+		}
+	})
+	if !strings.Contains(listOut, "No review comments") {
+		t.Fatalf("open list output = %q", listOut)
+	}
+
+	reviewCommentsAll = true
+	listOut = captureOutput(func() {
+		if err := runReviewCommentsList(reviewCommentsListCmd, nil); err != nil {
+			t.Fatalf("runReviewCommentsList(all) error = %v", err)
+		}
+	})
+	if !strings.Contains(listOut, "resolved") {
+		t.Fatalf("all list output = %q", listOut)
+	}
+
+	clearOut := captureOutput(func() {
+		if err := runReviewCommentsClear(reviewCommentsClearCmd, []string{containerName}); err != nil {
+			t.Fatalf("runReviewCommentsClear() error = %v", err)
+		}
+	})
+	if !strings.Contains(clearOut, "Cleared 1 review comments") {
+		t.Fatalf("clear output = %q", clearOut)
+	}
+}
+
+// ─── timeline and inbox ─────────────────────────────────────────────────────
+
+func TestTimelineAndInbox(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	t.Setenv("HOME", t.TempDir())
+	if err := events.Emit(events.DefaultEventsPath(), "agent.spawned", map[string]string{"container": "agent-a"}); err != nil {
+		t.Fatalf("emit spawn: %v", err)
+	}
+	if err := events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": "nightly", "error": "exit 1"}); err != nil {
+		t.Fatalf("emit cron failed: %v", err)
+	}
+	logger := &audit.Logger{Path: audit.DefaultPath()}
+	if err := logger.Log("stop", "agent-a", nil); err != nil {
+		t.Fatalf("audit stop: %v", err)
+	}
+
+	oldLines := timelineLines
+	oldInboxAll := inboxAll
+	timelineLines = 10
+	inboxAll = false
+	defer func() {
+		timelineLines = oldLines
+		inboxAll = oldInboxAll
+	}()
+
+	timelineOut := captureOutput(func() {
+		if err := runTimeline(timelineCmd, nil); err != nil {
+			t.Fatalf("runTimeline() error = %v", err)
+		}
+	})
+	if !strings.Contains(timelineOut, "agent.spawned") || !strings.Contains(timelineOut, "cron.failed") || !strings.Contains(timelineOut, "audit.stop") {
+		t.Fatalf("timeline output = %q", timelineOut)
+	}
+
+	inboxOut := captureOutput(func() {
+		if err := runInbox(inboxCmd, nil); err != nil {
+			t.Fatalf("runInbox() error = %v", err)
+		}
+	})
+	if !strings.Contains(inboxOut, "failed") || !strings.Contains(inboxOut, "cron.failed") {
+		t.Fatalf("inbox output = %q", inboxOut)
+	}
+	if strings.Contains(inboxOut, "agent.spawned") {
+		t.Fatalf("inbox should hide informational events: %q", inboxOut)
+	}
+}
+
+func TestServerRequestHandlers(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	actionsPath := filepath.Join(home, ".safe-ag", "actions.toml")
+	if err := os.MkdirAll(filepath.Dir(actionsPath), 0o755); err != nil {
+		t.Fatalf("mkdir actions dir: %v", err)
+	}
+	if err := os.WriteFile(actionsPath, []byte("[actions.test]\ncommand = \"go test ./...\"\n"), 0o600); err != nil {
+		t.Fatalf("write actions: %v", err)
+	}
+	if err := events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": "nightly", "error": "exit 1"}); err != nil {
+		t.Fatalf("emit event: %v", err)
+	}
+
+	ping, err := handleServerRequest(serverRequest{Method: "ping"})
+	if err != nil {
+		t.Fatalf("ping error = %v", err)
+	}
+	if got := ping.(map[string]any)["ok"]; got != true {
+		t.Fatalf("ping ok = %v", got)
+	}
+
+	actionsResult, err := handleServerRequest(serverRequest{Method: "actions.list"})
+	if err != nil {
+		t.Fatalf("actions.list error = %v", err)
+	}
+	if got := actionsResult.([]actionpkg.Action)[0].Name; got != "test" {
+		t.Fatalf("action name = %q, want test", got)
+	}
+
+	inboxResult, err := handleServerRequest(serverRequest{Method: "inbox"})
+	if err != nil {
+		t.Fatalf("inbox error = %v", err)
+	}
+	items := inboxResult.([]timelineEntry)
+	if len(items) != 1 || items[0].Status != events.StatusFailed {
+		t.Fatalf("inbox = %#v", items)
+	}
+
+	resp := handleServerLine([]byte(`{"jsonrpc":"2.0","id":1,"method":"nope"}`))
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "unknown method") {
+		t.Fatalf("response = %#v, want unknown method error", resp)
+	}
+
+	schemaResult, err := handleServerRequest(serverRequest{Method: "schema"})
+	if err != nil {
+		t.Fatalf("schema error = %v", err)
+	}
+	methods := schemaResult.(map[string]any)["methods"].(map[string]any)
+	if methods["agent.diff"] == nil || methods["actions.run"] == nil {
+		t.Fatalf("schema missing methods: %#v", methods)
+	}
+
+	fake.Reset()
+	fake.SetResponse("docker ps -a --filter name=^agent- --format", "agent-codex-a\tcodex\trepo\tfleet\tUp 1 minute\t/tmp/wt\tcpu=4,mem=8g\n")
+	agentsResult, err := handleServerRequest(serverRequest{Method: "agents.list"})
+	if err != nil {
+		t.Fatalf("agents.list error = %v", err)
+	}
+	agents := agentsResult.([]serverAgent)
+	if len(agents) != 1 || agents[0].Name != "agent-codex-a" || agents[0].Type != "codex" {
+		t.Fatalf("agents.list = %#v", agents)
+	}
+
+	fake.Reset()
+	containerName := "agent-codex-a"
+	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Status}}", "running\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetResponse("docker exec "+containerName, "diff --git a/file b/file\n")
+	diffResult, err := handleServerRequest(serverRequest{
+		Method: "agent.diff",
+		Params: json.RawMessage(`{"target":"agent-codex-a"}`),
+	})
+	if err != nil {
+		t.Fatalf("agent.diff error = %v", err)
+	}
+	if !strings.Contains(diffResult.(string), "diff --git") {
+		t.Fatalf("agent.diff = %q", diffResult)
+	}
+
+	fake.Reset()
+	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", containerName+"\n")
+	fake.SetResponse("docker exec "+containerName, "ok\n")
+	actionResult, err := handleServerRequest(serverRequest{
+		Method: "actions.run",
+		Params: json.RawMessage(`{"target":"agent-codex-a","action":"test"}`),
+	})
+	if err != nil {
+		t.Fatalf("actions.run error = %v", err)
+	}
+	if got := actionResult.(map[string]string)["output"]; got != "ok\n" {
+		t.Fatalf("actions.run output = %q", got)
+	}
+}
+
+func TestServerHTTPHandlerRequiresBearerToken(t *testing.T) {
+	srv := httptest.NewServer(serverHTTPHandler("secret"))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/rpc", "application/json", strings.NewReader(`{"method":"ping"}`))
+	if err != nil {
+		t.Fatalf("unauthorized post: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authorized post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out serverResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Error != nil || out.Result == nil {
+		t.Fatalf("response = %#v", out)
+	}
+}
+
+func TestBrowserRejectsUnsupportedMode(t *testing.T) {
+	oldMode := browserMode
+	browserMode = "bogus"
+	defer func() { browserMode = oldMode }()
+	_, err := captureBrowserArtifact(context.Background(), "http://example.test", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "unsupported browser mode") {
+		t.Fatalf("captureBrowserArtifact() error = %v, want unsupported mode", err)
+	}
+}
+
+// ─── profiles ───────────────────────────────────────────────────────────────
+
+func TestProfileListShowAndRunDryRun(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	dir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	profileDir := filepath.Join(dir, "agents")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "reviewer.toml"), []byte(`
+agent_type = "codex"
+repo = ["git@github.com:org/repo.git"]
+container_name = "reviewer"
+prompt = "Review the diff"
+ssh = true
+reuse_auth = true
+reuse_gh_auth = true
+docker = false
+background = true
+`), 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	oldDirs := profileDirs
+	oldDryRun := profileRunDryRun
+	profileDirs = []string{profileDir}
+	profileRunDryRun = false
+	defer func() {
+		profileDirs = oldDirs
+		profileRunDryRun = oldDryRun
+	}()
+
+	listOut := captureOutput(func() {
+		if err := runProfileList(profileListCmd, nil); err != nil {
+			t.Fatalf("runProfileList() error = %v", err)
+		}
+	})
+	if !strings.Contains(listOut, "reviewer") || !strings.Contains(listOut, "codex") {
+		t.Fatalf("profile list output = %q", listOut)
+	}
+
+	showOut := captureOutput(func() {
+		if err := runProfileShow(profileShowCmd, []string{"reviewer"}); err != nil {
+			t.Fatalf("runProfileShow() error = %v", err)
+		}
+	})
+	if !strings.Contains(showOut, "reuse_auth: true") || !strings.Contains(showOut, "docker: false") {
+		t.Fatalf("profile show output = %q", showOut)
+	}
+
+	profileRunDryRun = true
+	fake.SetResponse("docker network create", "")
+	runOut := captureOutput(func() {
+		if err := runProfileRun(profileRunCmd, []string{"reviewer", "Focus auth"}); err != nil {
+			t.Fatalf("runProfileRun() error = %v", err)
+		}
+	})
+	if !strings.Contains(runOut, "agent-codex-reviewer") ||
+		!strings.Contains(runOut, "SAFE_AGENTIC_PROMPT_B64") ||
+		!strings.Contains(runOut, "safe-agentic.auth=shared") ||
+		!strings.Contains(runOut, "safe-agentic.docker=off") {
+		t.Fatalf("profile dry-run output = %q", runOut)
+	}
+}
+
+// ─── handoff ────────────────────────────────────────────────────────────────
+
+func TestHandoffToWorktree(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	oldLocal := handoffToLocal
+	oldWorktree := handoffToWorktree
+	handoffToLocal = ""
+	handoffToWorktree = true
+	defer func() {
+		handoffToLocal = oldLocal
+		handoffToWorktree = oldWorktree
+	}()
+
+	containerName := "agent-claude-worktree"
+	worktreePath := "/Users/florian/.safe-ag/worktrees/" + containerName
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.worktree"}}`, worktreePath+"\n")
+
+	output := captureOutput(func() {
+		if err := runHandoff(handoffCmd, []string{containerName}); err != nil {
+			t.Fatalf("runHandoff() error = %v", err)
+		}
+	})
+	if strings.TrimSpace(output) != worktreePath {
+		t.Fatalf("handoff output = %q", output)
+	}
+}
+
+func TestHandoffToLocalCopiesWorkspace(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	oldLocal := handoffToLocal
+	oldWorktree := handoffToWorktree
+	dest := filepath.Join(t.TempDir(), "workspace-copy")
+	handoffToLocal = dest
+	handoffToWorktree = false
+	defer func() {
+		handoffToLocal = oldLocal
+		handoffToWorktree = oldWorktree
+	}()
+
+	containerName := "agent-claude-copy"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker cp "+containerName+":/workspace", "")
+
+	output := captureOutput(func() {
+		if err := runHandoff(handoffCmd, []string{containerName}); err != nil {
+			t.Fatalf("runHandoff() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "Workspace copied to "+dest) {
+		t.Fatalf("handoff output = %q", output)
+	}
+	if len(fake.CommandsMatching("docker cp "+containerName+":/workspace")) == 0 {
+		t.Fatal("expected docker cp command")
+	}
+}
+
+func TestWorktreeListAndCleanupMissing(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+	t.Setenv("HOME", t.TempDir())
+
+	missingPath := filepath.Join(t.TempDir(), "missing-worktree")
+	if err := worktrees.AppendRegistry(worktrees.RegistryPath(), worktrees.Worktree{
+		Container: "agent-claude-missing",
+		RepoRoot:  t.TempDir(),
+		Path:      missingPath,
+		Branch:    "safe-ag/missing",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("append registry: %v", err)
+	}
+
+	listOut := captureOutput(func() {
+		if err := runWorktreeList(worktreeListCmd, nil); err != nil {
+			t.Fatalf("runWorktreeList() error = %v", err)
+		}
+	})
+	if !strings.Contains(listOut, "agent-claude-missing") || !strings.Contains(listOut, "missing") {
+		t.Fatalf("worktree list output = %q", listOut)
+	}
+
+	oldAll := worktreeCleanupAll
+	oldDryRun := worktreeCleanupDryRun
+	worktreeCleanupAll = false
+	worktreeCleanupDryRun = false
+	defer func() {
+		worktreeCleanupAll = oldAll
+		worktreeCleanupDryRun = oldDryRun
+	}()
+
+	cleanupOut := captureOutput(func() {
+		if err := runWorktreeCleanup(worktreeCleanupCmd, nil); err != nil {
+			t.Fatalf("runWorktreeCleanup() error = %v", err)
+		}
+	})
+	if !strings.Contains(cleanupOut, "drop registry entry") || !strings.Contains(cleanupOut, "Removed 1") {
+		t.Fatalf("worktree cleanup output = %q", cleanupOut)
+	}
+	entries, err := worktrees.ReadRegistry(worktrees.RegistryPath())
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("registry entries after cleanup = %#v", entries)
+	}
+}
+
+func TestWorkspaceFileOperations(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	containerName := "agent-claude-workspace"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	if err := runWorkspaceStage(workspaceStageCmd, []string{containerName, "src/app.go"}); err != nil {
+		t.Fatalf("runWorkspaceStage() error = %v", err)
+	}
+	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "git add -- src/app.go") {
+		t.Fatalf("stage command = %s", got)
+	}
+
+	if err := runWorkspaceUnstage(workspaceUnstageCmd, []string{containerName, "src/app.go"}); err != nil {
+		t.Fatalf("runWorkspaceUnstage() error = %v", err)
+	}
+	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "git restore --staged -- src/app.go") {
+		t.Fatalf("unstage command = %s", got)
+	}
+
+	oldYes := workspaceYes
+	workspaceYes = true
+	defer func() { workspaceYes = oldYes }()
+	if err := runWorkspaceRevert(workspaceRevertCmd, []string{containerName, "src/app.go"}); err != nil {
+		t.Fatalf("runWorkspaceRevert() error = %v", err)
+	}
+	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "git checkout -- src/app.go") {
+		t.Fatalf("revert command = %s", got)
+	}
+}
+
+func TestWorkspaceRejectsEscapingPath(t *testing.T) {
+	if _, err := cleanWorkspacePaths([]string{"../secrets"}); err == nil {
+		t.Fatal("cleanWorkspacePaths() error = nil, want escape rejection")
+	}
+}
+
+func TestWorkspacePatchOperations(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	containerName := "agent-claude-workspace"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(oldWD)
+
+	patchPath := "selected.patch"
+	patch := `diff --git a/src/app.go b/src/app.go
+--- a/src/app.go
++++ b/src/app.go
+@@ -1 +1 @@
+-old
++new
+`
+	if err := os.WriteFile(patchPath, []byte(patch), 0o600); err != nil {
+		t.Fatalf("write patch: %v", err)
+	}
+	rel := patchPath
+
+	if err := runWorkspaceStagePatch(workspaceStagePatchCmd, []string{containerName, rel}); err != nil {
+		t.Fatalf("runWorkspaceStagePatch() error = %v", err)
+	}
+	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "'git' 'apply' '--cached' '--whitespace=nowarn'") {
+		t.Fatalf("stage patch command = %s", got)
+	}
+
+	oldYes := workspaceYes
+	workspaceYes = true
+	defer func() { workspaceYes = oldYes }()
+	if err := runWorkspaceRevertPatch(workspaceRevertPatchCmd, []string{containerName, rel}); err != nil {
+		t.Fatalf("runWorkspaceRevertPatch() error = %v", err)
+	}
+	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "'git' 'apply' '--reverse' '--whitespace=nowarn'") {
+		t.Fatalf("revert patch command = %s", got)
+	}
+}
+
+func TestWorkspacePatchRejectsEscapingPath(t *testing.T) {
+	patch := []byte("diff --git a/../secret b/../secret\n--- a/../secret\n+++ b/../secret\n")
+	if err := validateWorkspacePatch(patch); err == nil {
+		t.Fatal("validateWorkspacePatch() error = nil, want escape rejection")
 	}
 }
 
@@ -297,6 +994,33 @@ func TestRunLogs_StoppedContainerUsesCopy(t *testing.T) {
 	}
 }
 
+func TestRunLogs_RunningContainerQuotesSessionPath(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	jsonlPath := "/home/agent/.claude/projects/repo/evil $(touch /tmp/pwned).jsonl"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.agent-type"}}`, "claude\n")
+	fake.SetResponse(`docker inspect --format {{index .Config.Labels "safe-agentic.repo-display"}}`, "org/repo\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetResponse("docker exec "+containerName+" python3 -c", jsonlPath+"\n")
+	fake.SetResponse("docker exec "+containerName+" bash -c tail", `{"type":"user","message":{"role":"user","content":"hello"}}`+"\n")
+
+	if err := runLogs(logsCmd, []string{containerName}); err != nil {
+		t.Fatalf("runLogs() error = %v", err)
+	}
+
+	tailCmds := fake.CommandsMatching("docker exec " + containerName + " bash -c tail")
+	if len(tailCmds) == 0 {
+		t.Fatal("expected tail command")
+	}
+	tailScript := tailCmds[0][5]
+	if !strings.Contains(tailScript, shellQuote(jsonlPath)) {
+		t.Fatalf("session path was not shell-quoted:\n%s", tailScript)
+	}
+}
+
 // ─── cleanup ──────────────────────────────────────────────────────────────────
 
 func TestCleanupCommand(t *testing.T) {
@@ -322,6 +1046,32 @@ func TestCleanupCommand(t *testing.T) {
 	pruneCmds := fake.CommandsMatching("docker network prune")
 	if len(pruneCmds) == 0 {
 		t.Fatal("expected docker network prune command")
+	}
+}
+
+func TestCleanupAuthRemovesSharedAndIsolatedAuthVolumes(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	origCleanupAuth := cleanupAuth
+	cleanupAuth = true
+	defer func() { cleanupAuth = origCleanupAuth }()
+
+	fake.SetResponse("docker volume ls --filter name=safe-agentic- --format {{.Name}}", "safe-agentic-claude-auth\nsafe-agentic-codex-gh-auth\n")
+	fake.SetResponse("docker volume ls --filter label=safe-agentic.type=auth --format {{.Name}}", "agent-claude-worker-auth\n")
+
+	if err := runCleanup(cleanupCmd, nil); err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"docker volume rm safe-agentic-claude-auth",
+		"docker volume rm safe-agentic-codex-gh-auth",
+		"docker volume rm agent-claude-worker-auth",
+	} {
+		if got := fake.CommandsMatching(want); len(got) == 0 {
+			t.Fatalf("missing cleanup command %q", want)
+		}
 	}
 }
 
@@ -734,6 +1484,36 @@ func TestTodoAdd(t *testing.T) {
 	}
 }
 
+func TestTodoAdd_TextIsArgSafe(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker exec "+containerName+" bash -c cat", "[]\n")
+
+	text := "ship $(touch /tmp/pwned) and 'quote'"
+	if err := runTodoAdd(todoAddCmd, []string{containerName, text}); err != nil {
+		t.Fatalf("runTodoAdd() error = %v", err)
+	}
+
+	writeCmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(writeCmds) == 0 {
+		t.Fatal("expected docker exec write command")
+	}
+	if strings.Contains(writeCmds[0][5], "touch /tmp/pwned") {
+		t.Fatalf("todo text leaked into shell script:\n%s", writeCmds[0][5])
+	}
+	payload := writeCmds[0][len(writeCmds[0])-1]
+	decoded, err := inject.DecodeB64(payload)
+	if err != nil {
+		t.Fatalf("decode todo payload: %v", err)
+	}
+	if !strings.Contains(decoded, text) {
+		t.Fatalf("decoded payload missing todo text:\n%s", decoded)
+	}
+}
+
 func TestTodoList_Empty(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
@@ -856,7 +1636,7 @@ func TestCheckpointCreate(t *testing.T) {
 
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
-	fake.SetResponse("docker exec "+containerName+" bash -c", "Saved working directory\n")
+	fake.SetResponse("docker exec "+containerName+" bash -lc", "Saved working directory\n")
 	fake.SetResponse("docker commit", "sha256:abc123\n")
 
 	output := captureOutput(func() {
@@ -871,6 +1651,57 @@ func TestCheckpointCreate(t *testing.T) {
 	if !strings.Contains(output, "my-snapshot") {
 		t.Errorf("expected snapshot label in output, got: %s", output)
 	}
+}
+
+func TestCheckpointCreate_LabelIsArgSafeAndTagSafe(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker exec "+containerName+" bash -lc", "Saved working directory\n")
+	fake.SetResponse("docker commit", "sha256:abc123\n")
+
+	label := "ship $(touch /tmp/pwned)"
+	if err := runCheckpointCreate(checkpointCreateCmd, []string{containerName, label}); err != nil {
+		t.Fatalf("runCheckpointCreate() error = %v", err)
+	}
+
+	execCmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(execCmds) == 0 {
+		t.Fatal("expected docker exec command")
+	}
+	if len(execCmds[0]) < 6 {
+		t.Fatalf("docker exec command too short:\n%v", execCmds[0])
+	}
+	shellScript := execCmds[0][5]
+	if strings.Contains(shellScript, "touch /tmp/pwned") {
+		t.Fatalf("label leaked into executable shell script:\n%s", shellScript)
+	}
+	if !containsString(execCmds[0], "checkpoint: "+label) {
+		t.Fatalf("checkpoint label should be passed as one argv element:\n%v", execCmds[0])
+	}
+
+	commitCmds := fake.CommandsMatching("docker commit")
+	if len(commitCmds) == 0 {
+		t.Fatal("expected docker commit command")
+	}
+	joinedCommit := strings.Join(commitCmds[0], " ")
+	if strings.Contains(joinedCommit, "$(") || strings.Contains(joinedCommit, "/tmp/pwned") {
+		t.Fatalf("unsafe label leaked into Docker tag:\n%s", joinedCommit)
+	}
+	if !strings.Contains(joinedCommit, "safe-agentic-checkpoint:agent-claude-test-ship-touch-tmp-pwned") {
+		t.Fatalf("Docker tag should use safe label suffix, got:\n%s", joinedCommit)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCheckpointList_Empty(t *testing.T) {
@@ -922,6 +1753,26 @@ func TestRunQuickStart_SSHAutoDetect(t *testing.T) {
 	// called executeSpawn with ssh=true (which means it passed validation)
 	if err != nil && strings.Contains(err.Error(), "at least one repo URL") {
 		t.Fatal("SSH URL should be recognized as a repo URL")
+	}
+}
+
+func TestRunQuickStart_JoinsUnquotedPromptArgs(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+	t.Setenv("HOME", t.TempDir())
+
+	origSpawnOpts := spawnOpts
+	spawnOpts = SpawnOpts{DryRun: true}
+	defer func() { spawnOpts = origSpawnOpts }()
+
+	output := captureOutput(func() {
+		if err := runQuickStart(runCmd, []string{"https://github.com/org/repo.git", "fix", "the", "tests"}); err != nil {
+			t.Fatalf("runQuickStart() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "fix the tests") {
+		t.Fatalf("quick-start prompt args were not joined:\n%s", output)
 	}
 }
 
@@ -1010,8 +1861,8 @@ func TestUpdateCommand_Quick(t *testing.T) {
 		t.Fatal("expected docker build command")
 	}
 	joined := strings.Join(buildCmds[0], " ")
-	if !strings.Contains(joined, "CACHEBUST") {
-		t.Errorf("expected CACHEBUST arg, got: %s", joined)
+	if !strings.Contains(joined, "CLI_CACHE_BUST") {
+		t.Errorf("expected CLI_CACHE_BUST arg, got: %s", joined)
 	}
 }
 
@@ -1167,6 +2018,42 @@ func TestRunAWSRefresh_WritesCredentialsAsAgentUser(t *testing.T) {
 	}
 }
 
+func TestRunAWSRefresh_ProfileExportIsShellQuoted(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatalf("mkdir aws dir: %v", err)
+	}
+	profile := "evil $(touch /tmp/pwned)"
+	creds := "[" + profile + "]\naws_access_key_id = test\naws_secret_access_key = secret\n"
+	if err := os.WriteFile(filepath.Join(awsDir, "credentials"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("write host credentials: %v", err)
+	}
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	if err := runAWSRefresh(awsRefreshCmd, []string{containerName, profile}); err != nil {
+		t.Fatalf("runAWSRefresh() error = %v", err)
+	}
+
+	cmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(cmds) < 2 {
+		t.Fatalf("expected credential write and profile export commands, got %d", len(cmds))
+	}
+	exportScript := cmds[1][5]
+	if strings.Contains(exportScript, "\""+profile+"\"") {
+		t.Fatalf("profile used unsafe double-quoted shell form:\n%s", exportScript)
+	}
+	if !strings.Contains(exportScript, shellQuote("export AWS_PROFILE="+shellQuote(profile))) {
+		t.Fatalf("profile export is not shell-quoted:\n%s", exportScript)
+	}
+}
+
 // ─── config key validation ────────────────────────────────────────────────────
 
 func TestConfigKeyAllowed(t *testing.T) {
@@ -1179,6 +2066,7 @@ func TestConfigKeyAllowed(t *testing.T) {
 		"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET",
 		"SAFE_AGENTIC_DEFAULT_REUSE_AUTH",
 		"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH",
+		"SAFE_AGENTIC_DEFAULT_SEED_AUTH",
 		"SAFE_AGENTIC_DEFAULT_NETWORK",
 		"SAFE_AGENTIC_DEFAULT_IDENTITY",
 		"GIT_AUTHOR_NAME",
@@ -1220,6 +2108,7 @@ func TestConfigGetField(t *testing.T) {
 			DockerSocket: false,
 			ReuseAuth:    true,
 			ReuseGHAuth:  false,
+			SeedAuth:     true,
 			Network:      "mynet",
 			Identity:     "Alice <alice@example.com>",
 		},
@@ -1243,6 +2132,7 @@ func TestConfigGetField(t *testing.T) {
 		{"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET", "false"},
 		{"SAFE_AGENTIC_DEFAULT_REUSE_AUTH", "true"},
 		{"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH", "false"},
+		{"SAFE_AGENTIC_DEFAULT_SEED_AUTH", "true"},
 		{"SAFE_AGENTIC_DEFAULT_NETWORK", "mynet"},
 		{"SAFE_AGENTIC_DEFAULT_IDENTITY", "Alice <alice@example.com>"},
 		{"GIT_AUTHOR_NAME", "Alice"},
@@ -1537,6 +2427,42 @@ func TestPRCommand(t *testing.T) {
 	_ = output
 }
 
+func TestPRCommand_TitleIsArgSafe(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+
+	prTitle = "ship $(touch /tmp/pwned)"
+	prBase = "main"
+	defer func() { prTitle = ""; prBase = "main" }()
+
+	if err := runPR(prCmd, []string{containerName}); err != nil {
+		t.Fatalf("runPR() error = %v", err)
+	}
+
+	cmds := fake.CommandsMatching("docker exec " + containerName + " bash -lc")
+	if len(cmds) == 0 {
+		t.Fatal("expected docker exec command")
+	}
+	foundPRCreate := false
+	for _, cmd := range cmds {
+		if containsString(cmd, "gh") && containsString(cmd, "pr") && containsString(cmd, "create") {
+			foundPRCreate = true
+			if strings.Contains(cmd[5], "touch /tmp/pwned") {
+				t.Fatalf("PR title leaked into executable shell script:\n%s", cmd[5])
+			}
+			if !containsString(cmd, prTitle) {
+				t.Fatalf("PR title should be passed as one argv element:\n%v", cmd)
+			}
+		}
+	}
+	if !foundPRCreate {
+		t.Fatalf("expected gh pr create command, got:\n%v", cmds)
+	}
+}
+
 // ─── review command ──────────────────────────────────────────────────────────
 
 func TestReviewCommand(t *testing.T) {
@@ -1653,15 +2579,17 @@ func TestDepsmet(t *testing.T) {
 
 func TestSpecToSpawnOpts(t *testing.T) {
 	spec := fleet.AgentSpec{
-		Type:      "claude",
-		Name:      "test-agent",
-		Repo:      "https://github.com/org/repo.git",
-		Prompt:    "Fix the tests",
-		SSH:       true,
-		ReuseAuth: true,
-		AutoTrust: true,
-		Memory:    "16g",
-		CPUs:      "8",
+		Type:              "claude",
+		Name:              "test-agent",
+		Repo:              "https://github.com/org/repo.git",
+		Prompt:            "Fix the tests",
+		SSH:               true,
+		ReuseAuth:         true,
+		SeedAuth:          true,
+		AutoTrust:         true,
+		AllowSetupScripts: true,
+		Memory:            "16g",
+		CPUs:              "8",
 	}
 
 	opts := specToSpawnOpts(spec, "fleet-vol-123")
@@ -1684,8 +2612,14 @@ func TestSpecToSpawnOpts(t *testing.T) {
 	if !opts.ReuseAuth {
 		t.Error("ReuseAuth should be true")
 	}
+	if !opts.SeedAuth {
+		t.Error("SeedAuth should be true")
+	}
 	if opts.Memory != "16g" {
 		t.Errorf("Memory = %q, want 16g", opts.Memory)
+	}
+	if !opts.AllowSetupScripts {
+		t.Error("AllowSetupScripts should be true")
 	}
 	if opts.FleetVolume != "fleet-vol-123" {
 		t.Errorf("FleetVolume = %q, want fleet-vol-123", opts.FleetVolume)
@@ -2796,6 +3730,15 @@ func TestSpawnWithCallbacks(t *testing.T) {
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
 	}
+	for _, want := range []string{
+		"SAFE_AGENTIC_ON_EXIT_B64=",
+		"SAFE_AGENTIC_ON_COMPLETE_B64=",
+		"SAFE_AGENTIC_ON_FAIL_B64=",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dry-run missing callback env %q:\n%s", want, output)
+		}
+	}
 }
 
 func TestSpawnWithTemplate(t *testing.T) {
@@ -2850,6 +3793,207 @@ func TestExecuteSpawn_DefaultsToEphemeralAuth(t *testing.T) {
 	}
 }
 
+func TestExecuteSpawn_DefaultDoesNotSeedHostAuth(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+	claudeDir := filepath.Join(home, ".claude")
+	codexDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("mkdir codex dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("write claude auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType: "shell",
+			DryRun:    true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+
+	for _, forbidden := range []string{
+		"CLAUDE_CODE_OAUTH_TOKEN=",
+		"SAFE_AGENTIC_CLAUDE_AUTH_B64=",
+		"SAFE_AGENTIC_CODEX_AUTH_B64=",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("default spawn should not seed host auth %q:\n%s", forbidden, output)
+		}
+	}
+}
+
+func TestExecuteSpawn_SeedAuthInjectsHostAuth(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+	claudeDir := filepath.Join(home, ".claude")
+	codexDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("mkdir codex dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("write claude auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType: "shell",
+			SeedAuth:  true,
+			DryRun:    true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+
+	for _, want := range []string{
+		"CLAUDE_CODE_OAUTH_TOKEN=<redacted>",
+		"SAFE_AGENTIC_CLAUDE_AUTH_B64=<redacted>",
+		"SAFE_AGENTIC_CODEX_AUTH_B64=<redacted>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("seed auth missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "host-token") || strings.Contains(output, "secret") {
+		t.Fatalf("dry-run leaked host auth:\n%s", output)
+	}
+}
+
+func TestExecuteSpawn_AppliesConfigDefaults(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+	configDir := filepath.Join(home, ".safe-ag")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configText := `version = 1
+
+[defaults]
+ssh = true
+docker = true
+reuse_auth = true
+reuse_gh_auth = true
+seed_auth = true
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType: "claude",
+			Repos:     []string{"https://github.com/org/repo.git"},
+			DryRun:    true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+
+	for _, want := range []string{
+		"SSH_AUTH_SOCK=/run/ssh-agent.sock",
+		"safe-agentic.auth=shared",
+		"safe-agentic.gh-auth=shared",
+		"safe-agentic.docker=dind",
+		"CLAUDE_CODE_OAUTH_TOKEN=<redacted>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dry-run missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "host-token") {
+		t.Fatalf("dry-run leaked host token:\n%s", output)
+	}
+}
+
+func TestExecuteSpawn_OptOutsOverrideConfigDefaults(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".safe-ag")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configText := `version = 1
+
+[defaults]
+ssh = true
+docker = true
+reuse_auth = true
+reuse_gh_auth = true
+seed_auth = true
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType:     "claude",
+			Repos:         []string{"https://github.com/org/repo.git"},
+			NoSSH:         true,
+			NoDocker:      true,
+			NoReuseAuth:   true,
+			NoReuseGHAuth: true,
+			NoSeedAuth:    true,
+			DryRun:        true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+
+	forbidden := []string{
+		"SSH_AUTH_SOCK=/run/ssh-agent.sock",
+		"safe-agentic.auth=shared",
+		"safe-agentic.gh-auth=shared",
+		"safe-agentic.docker=dind",
+		"SAFE_AGENTIC_CLAUDE_AUTH_B64=",
+		"SAFE_AGENTIC_CODEX_AUTH_B64=",
+	}
+	for _, bad := range forbidden {
+		if strings.Contains(output, bad) {
+			t.Fatalf("dry-run should not contain %q:\n%s", bad, output)
+		}
+	}
+	if !strings.Contains(output, "safe-agentic.auth=ephemeral") {
+		t.Fatalf("dry-run missing ephemeral auth after opt-out:\n%s", output)
+	}
+	if !strings.Contains(output, "safe-agentic.docker=off") {
+		t.Fatalf("dry-run missing docker=off after opt-out:\n%s", output)
+	}
+}
+
 func TestValidateSpawnOpts_RejectsConflictingAuthModes(t *testing.T) {
 	err := validateSpawnOpts(SpawnOpts{
 		AgentType:     "claude",
@@ -2858,6 +4002,22 @@ func TestValidateSpawnOpts_RejectsConflictingAuthModes(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("expected mutually exclusive auth error, got %v", err)
+	}
+}
+
+func TestValidateSpawnModeConflicts_RejectsExplicitOpposites(t *testing.T) {
+	tests := []SpawnOpts{
+		{SSH: true, NoSSH: true},
+		{ReuseAuth: true, NoReuseAuth: true},
+		{ReuseGHAuth: true, NoReuseGHAuth: true},
+		{SeedAuth: true, NoSeedAuth: true},
+		{DockerAccess: true, NoDocker: true},
+		{DockerSocket: true, NoDockerSocket: true},
+	}
+	for _, tt := range tests {
+		if err := validateSpawnModeConflicts(tt); err == nil {
+			t.Fatalf("validateSpawnModeConflicts(%+v) error = nil, want conflict", tt)
+		}
 	}
 }
 
@@ -2930,8 +4090,11 @@ func TestSpawnWithInstructionsAndInstructionsFile(t *testing.T) {
 	})
 
 	want := inject.EncodeB64("Inline instructions\n\nFile instructions")
-	if !strings.Contains(output, "SAFE_AGENTIC_INSTRUCTIONS_B64="+want) {
-		t.Fatalf("expected merged instructions env in dry-run output, got: %s", output)
+	if strings.Contains(output, want) {
+		t.Fatalf("dry-run leaked instructions payload: %s", output)
+	}
+	if !strings.Contains(output, "SAFE_AGENTIC_INSTRUCTIONS_B64=<redacted>") {
+		t.Fatalf("expected redacted instructions env in dry-run output, got: %s", output)
 	}
 	if strings.Count(output, "SAFE_AGENTIC_INSTRUCTIONS_B64=") != 1 {
 		t.Fatalf("expected one instructions env entry, got: %s", output)
@@ -3344,6 +4507,7 @@ name: test-fleet
 agents:
   - type: claude
     repo: https://github.com/org/repo.git
+    seed_auth: true
     prompt: "Fix the tests"
 `
 	f := filepath.Join(t.TempDir(), "fleet.yaml")
@@ -3360,6 +4524,9 @@ agents:
 
 	if !strings.Contains(output, "Fleet manifest") {
 		t.Errorf("expected 'Fleet manifest' in output, got: %s", output)
+	}
+	if !strings.Contains(output, "--seed-auth") {
+		t.Errorf("expected --seed-auth in dry-run output, got: %s", output)
 	}
 }
 

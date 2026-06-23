@@ -48,6 +48,20 @@ func TestLoadSaveCronConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved cron config: %v", err)
 	}
+	info, err := os.Stat(cronConfigPath())
+	if err != nil {
+		t.Fatalf("stat saved cron config: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("cron config mode = %v, want 0600", got)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(cronConfigPath()))
+	if err != nil {
+		t.Fatalf("stat cron config dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("cron config dir mode = %v, want 0700", got)
+	}
 	var decoded CronConfig
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("saved config is invalid json: %v", err)
@@ -167,6 +181,34 @@ func TestRunCronLifecycleCommands(t *testing.T) {
 	})
 	if !strings.Contains(emptyOut, "No cron jobs configured") {
 		t.Fatalf("unexpected empty list output: %s", emptyOut)
+	}
+}
+
+func TestRunCronAddPersistsArgvForQuotedPrompt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if err := runCronAdd(cronAddCmd, []string{
+		"hourly",
+		"every 1h",
+		"spawn",
+		"claude",
+		"--repo",
+		"https://github.com/org/repo.git",
+		"--prompt",
+		"Check status",
+	}); err != nil {
+		t.Fatalf("runCronAdd() error = %v", err)
+	}
+
+	cfg, err := loadCronConfig()
+	if err != nil {
+		t.Fatalf("loadCronConfig() error = %v", err)
+	}
+	got := cronJobArgs(cfg.Jobs[0])
+	want := []string{"spawn", "claude", "--repo", "https://github.com/org/repo.git", "--prompt", "Check status"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("cronJobArgs() = %#v, want %#v", got, want)
 	}
 }
 

@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
@@ -12,10 +13,16 @@ func ManagedNetworkName(containerName string) string {
 	return containerName + "-net"
 }
 
+func ManagedBridgeName(containerName string) string {
+	sum := sha1.Sum([]byte(containerName))
+	return fmt.Sprintf("sa%x", sum[:6])
+}
+
 func CreateManagedNetwork(ctx context.Context, exec orb.Executor, containerName string) (string, error) {
 	netName := ManagedNetworkName(containerName)
 	_, err := exec.Run(ctx, "docker", "network", "create",
 		"--driver", "bridge",
+		"--opt", "com.docker.network.bridge.name="+ManagedBridgeName(containerName),
 		"--label", fmt.Sprintf("%s=%s", labels.App, labels.AppValue),
 		netName)
 	if err != nil {

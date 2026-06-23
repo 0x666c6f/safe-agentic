@@ -528,7 +528,8 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 
 	// Set the profile env var via docker exec.
 	if p, ok := envs["AWS_PROFILE"]; ok {
-		exportCmd := fmt.Sprintf("printf '\\nexport AWS_PROFILE=%q\\n' %q >> ~/.bashrc", p, p)
+		exportLine := "export AWS_PROFILE=" + shellQuote(p)
+		exportCmd := fmt.Sprintf("printf '\\n%%s\\n' %s >> ~/.bashrc", shellQuote(exportLine))
 		if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", exportCmd); err != nil {
 			return fmt.Errorf("persist AWS profile: %w", err)
 		}

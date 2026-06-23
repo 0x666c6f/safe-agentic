@@ -27,7 +27,7 @@ func DefaultPath() string {
 }
 
 func (l *Logger) Log(action, container string, details map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(l.Path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o700); err != nil {
 		return fmt.Errorf("create audit dir: %w", err)
 	}
 	entry := Entry{
@@ -40,11 +40,14 @@ func (l *Logger) Log(action, container string, details map[string]string) error 
 	if err != nil {
 		return fmt.Errorf("marshal audit entry: %w", err)
 	}
-	f, err := os.OpenFile(l.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(l.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
 	defer f.Close()
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod audit log: %w", err)
+	}
 	_, err = fmt.Fprintf(f, "%s\n", data)
 	return err
 }

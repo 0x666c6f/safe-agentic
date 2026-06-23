@@ -6,31 +6,49 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/profiles"
 	"gopkg.in/yaml.v3"
 )
 
 // AgentSpec describes a single agent in a fleet or pipeline stage.
 // Fields mirror the flat YAML format used in examples/:
 //
-//	name, type, repo, prompt, ssh, reuse_auth, auto_trust, background,
-//	network, memory, cpus, aws, docker, reuse_gh_auth,
+//	profile, name, type, repo, prompt, template, instructions, ssh, reuse_auth,
+//	seed_auth, auto_trust, background, network, memory, cpus, aws, docker,
+//	reuse_gh_auth, allow_setup_scripts, callbacks, pids_limit,
 //	depends_on, on_failure, retry, when, outputs
 type AgentSpec struct {
-	Name        string   `yaml:"name"`
-	Type        string   `yaml:"type"`
-	Repo        string   `yaml:"repo"`
-	Repos       []string `yaml:"repos"`
-	Prompt      string   `yaml:"prompt"`
-	SSH         bool     `yaml:"ssh"`
-	ReuseAuth   bool     `yaml:"reuse_auth"`
-	ReuseGHAuth bool     `yaml:"reuse_gh_auth"`
-	AutoTrust   bool     `yaml:"auto_trust"`
-	Background  bool     `yaml:"background"`
-	Docker      bool     `yaml:"docker"`
-	Network     string   `yaml:"network"`
-	Memory      string   `yaml:"memory"`
-	CPUs        string   `yaml:"cpus"`
-	AWS         string   `yaml:"aws"`
+	Name              string   `yaml:"name"`
+	Profile           string   `yaml:"profile"`
+	Type              string   `yaml:"type"`
+	Repo              string   `yaml:"repo"`
+	Repos             []string `yaml:"repos"`
+	Prompt            string   `yaml:"prompt"`
+	Template          string   `yaml:"template"`
+	TemplateVars      []string `yaml:"template_vars"`
+	Instructions      string   `yaml:"instructions"`
+	InstructionsFile  string   `yaml:"instructions_file"`
+	SSH               bool     `yaml:"ssh"`
+	ReuseAuth         bool     `yaml:"reuse_auth"`
+	EphemeralAuth     bool     `yaml:"ephemeral_auth"`
+	ReuseGHAuth       bool     `yaml:"reuse_gh_auth"`
+	SeedAuth          bool     `yaml:"seed_auth"`
+	AutoTrust         bool     `yaml:"auto_trust"`
+	Background        bool     `yaml:"background"`
+	Docker            bool     `yaml:"docker"`
+	DockerSocket      bool     `yaml:"docker_socket"`
+	AllowSetupScripts bool     `yaml:"allow_setup_scripts"`
+	Network           string   `yaml:"network"`
+	Memory            string   `yaml:"memory"`
+	CPUs              string   `yaml:"cpus"`
+	PIDsLimit         int      `yaml:"pids_limit"`
+	Identity          string   `yaml:"identity"`
+	AWS               string   `yaml:"aws"`
+	MaxCost           string   `yaml:"max_cost"`
+	Notify            string   `yaml:"notify"`
+	OnExit            string   `yaml:"on_exit"`
+	OnComplete        string   `yaml:"on_complete"`
+	OnFail            string   `yaml:"on_fail"`
 	// Pipeline-specific fields
 	DependsOn string `yaml:"depends_on"`
 	OnFailure string `yaml:"on_failure"`
@@ -38,12 +56,16 @@ type AgentSpec struct {
 	When      string `yaml:"when"`
 	Outputs   string `yaml:"outputs"`
 
-	hasSSH         bool `yaml:"-"`
-	hasReuseAuth   bool `yaml:"-"`
-	hasReuseGHAuth bool `yaml:"-"`
-	hasAutoTrust   bool `yaml:"-"`
-	hasBackground  bool `yaml:"-"`
-	hasDocker      bool `yaml:"-"`
+	hasSSH               bool `yaml:"-"`
+	hasReuseAuth         bool `yaml:"-"`
+	hasEphemeralAuth     bool `yaml:"-"`
+	hasReuseGHAuth       bool `yaml:"-"`
+	hasSeedAuth          bool `yaml:"-"`
+	hasAutoTrust         bool `yaml:"-"`
+	hasBackground        bool `yaml:"-"`
+	hasDocker            bool `yaml:"-"`
+	hasDockerSocket      bool `yaml:"-"`
+	hasAllowSetupScripts bool `yaml:"-"`
 }
 
 type InputSpec struct {
@@ -55,26 +77,42 @@ type InputSpec struct {
 }
 
 type rawAgentSpec struct {
-	Name        string   `yaml:"name"`
-	Type        string   `yaml:"type"`
-	Repo        string   `yaml:"repo"`
-	Repos       []string `yaml:"repos"`
-	Prompt      string   `yaml:"prompt"`
-	SSH         *bool    `yaml:"ssh"`
-	ReuseAuth   *bool    `yaml:"reuse_auth"`
-	ReuseGHAuth *bool    `yaml:"reuse_gh_auth"`
-	AutoTrust   *bool    `yaml:"auto_trust"`
-	Background  *bool    `yaml:"background"`
-	Docker      *bool    `yaml:"docker"`
-	Network     string   `yaml:"network"`
-	Memory      string   `yaml:"memory"`
-	CPUs        string   `yaml:"cpus"`
-	AWS         string   `yaml:"aws"`
-	DependsOn   string   `yaml:"depends_on"`
-	OnFailure   string   `yaml:"on_failure"`
-	Retry       int      `yaml:"retry"`
-	When        string   `yaml:"when"`
-	Outputs     string   `yaml:"outputs"`
+	Name              string   `yaml:"name"`
+	Profile           string   `yaml:"profile"`
+	Type              string   `yaml:"type"`
+	Repo              string   `yaml:"repo"`
+	Repos             []string `yaml:"repos"`
+	Prompt            string   `yaml:"prompt"`
+	Template          string   `yaml:"template"`
+	TemplateVars      []string `yaml:"template_vars"`
+	Instructions      string   `yaml:"instructions"`
+	InstructionsFile  string   `yaml:"instructions_file"`
+	SSH               *bool    `yaml:"ssh"`
+	ReuseAuth         *bool    `yaml:"reuse_auth"`
+	EphemeralAuth     *bool    `yaml:"ephemeral_auth"`
+	ReuseGHAuth       *bool    `yaml:"reuse_gh_auth"`
+	SeedAuth          *bool    `yaml:"seed_auth"`
+	AutoTrust         *bool    `yaml:"auto_trust"`
+	Background        *bool    `yaml:"background"`
+	Docker            *bool    `yaml:"docker"`
+	DockerSocket      *bool    `yaml:"docker_socket"`
+	AllowSetupScripts *bool    `yaml:"allow_setup_scripts"`
+	Network           string   `yaml:"network"`
+	Memory            string   `yaml:"memory"`
+	CPUs              string   `yaml:"cpus"`
+	PIDsLimit         int      `yaml:"pids_limit"`
+	Identity          string   `yaml:"identity"`
+	AWS               string   `yaml:"aws"`
+	MaxCost           string   `yaml:"max_cost"`
+	Notify            string   `yaml:"notify"`
+	OnExit            string   `yaml:"on_exit"`
+	OnComplete        string   `yaml:"on_complete"`
+	OnFail            string   `yaml:"on_fail"`
+	DependsOn         string   `yaml:"depends_on"`
+	OnFailure         string   `yaml:"on_failure"`
+	Retry             int      `yaml:"retry"`
+	When              string   `yaml:"when"`
+	Outputs           string   `yaml:"outputs"`
 }
 
 func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
@@ -84,20 +122,32 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	*a = AgentSpec{
-		Name:      raw.Name,
-		Type:      raw.Type,
-		Repo:      raw.Repo,
-		Repos:     raw.Repos,
-		Prompt:    raw.Prompt,
-		Network:   raw.Network,
-		Memory:    raw.Memory,
-		CPUs:      raw.CPUs,
-		AWS:       raw.AWS,
-		DependsOn: raw.DependsOn,
-		OnFailure: raw.OnFailure,
-		Retry:     raw.Retry,
-		When:      raw.When,
-		Outputs:   raw.Outputs,
+		Name:             raw.Name,
+		Profile:          raw.Profile,
+		Type:             raw.Type,
+		Repo:             raw.Repo,
+		Repos:            raw.Repos,
+		Prompt:           raw.Prompt,
+		Template:         raw.Template,
+		TemplateVars:     raw.TemplateVars,
+		Instructions:     raw.Instructions,
+		InstructionsFile: raw.InstructionsFile,
+		Network:          raw.Network,
+		Memory:           raw.Memory,
+		CPUs:             raw.CPUs,
+		PIDsLimit:        raw.PIDsLimit,
+		Identity:         raw.Identity,
+		AWS:              raw.AWS,
+		MaxCost:          raw.MaxCost,
+		Notify:           raw.Notify,
+		OnExit:           raw.OnExit,
+		OnComplete:       raw.OnComplete,
+		OnFail:           raw.OnFail,
+		DependsOn:        raw.DependsOn,
+		OnFailure:        raw.OnFailure,
+		Retry:            raw.Retry,
+		When:             raw.When,
+		Outputs:          raw.Outputs,
 	}
 	if raw.SSH != nil {
 		a.SSH = *raw.SSH
@@ -107,9 +157,17 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 		a.ReuseAuth = *raw.ReuseAuth
 		a.hasReuseAuth = true
 	}
+	if raw.EphemeralAuth != nil {
+		a.EphemeralAuth = *raw.EphemeralAuth
+		a.hasEphemeralAuth = true
+	}
 	if raw.ReuseGHAuth != nil {
 		a.ReuseGHAuth = *raw.ReuseGHAuth
 		a.hasReuseGHAuth = true
+	}
+	if raw.SeedAuth != nil {
+		a.SeedAuth = *raw.SeedAuth
+		a.hasSeedAuth = true
 	}
 	if raw.AutoTrust != nil {
 		a.AutoTrust = *raw.AutoTrust
@@ -122,6 +180,14 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 	if raw.Docker != nil {
 		a.Docker = *raw.Docker
 		a.hasDocker = true
+	}
+	if raw.DockerSocket != nil {
+		a.DockerSocket = *raw.DockerSocket
+		a.hasDockerSocket = true
+	}
+	if raw.AllowSetupScripts != nil {
+		a.AllowSetupScripts = *raw.AllowSetupScripts
+		a.hasAllowSetupScripts = true
 	}
 	return nil
 }
@@ -178,6 +244,7 @@ type PipelineManifest struct {
 type ParseOptions struct {
 	Vars         map[string]string
 	DefaultRepos []string
+	ProfileDirs  []string
 }
 
 // ParseFleet reads and parses a fleet YAML manifest file.
@@ -201,7 +268,21 @@ func ParseFleetWithOptions(path string, opts ParseOptions) (*FleetManifest, erro
 		return nil, err
 	}
 	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
+	profileCatalog, err := loadProfileCatalog(opts.ProfileDirs)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults, err = applyProfile(m.Defaults, profileCatalog)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
 	for i := range m.Agents {
+		m.Agents[i] = interpolateAgentSpec(m.Agents[i], vars)
+		m.Agents[i], err = applyProfile(m.Agents[i], profileCatalog)
+		if err != nil {
+			return nil, err
+		}
 		m.Agents[i] = mergeDefaults(m.Defaults, m.Agents[i])
 		m.Agents[i] = interpolateAgentSpec(m.Agents[i], vars)
 		m.Agents[i] = applyDefaultRepos(m.Agents[i], opts.DefaultRepos)
@@ -237,6 +318,18 @@ func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest
 		return nil, err
 	}
 	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
+	profileCatalog, err := loadProfileCatalog(opts.ProfileDirs)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults, err = applyProfile(m.Defaults, profileCatalog)
+	if err != nil {
+		return nil, err
+	}
+	m.Defaults = interpolateAgentSpec(m.Defaults, vars)
+	if err := applyPipelineProfiles(&m, profileCatalog, vars); err != nil {
+		return nil, err
+	}
 	applyPipelineDefaults(&m)
 	interpolatePipelineFields(&m, vars, filepath.Dir(path))
 	applyPipelineDefaultRepos(&m, opts.DefaultRepos)
@@ -248,25 +341,47 @@ func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest
 
 // mergeDefaults applies default values to an agent spec (agent values take precedence).
 func mergeDefaults(defaults, agent AgentSpec) AgentSpec {
+	agent.Profile = mergeStringDefault(agent.Profile, defaults.Profile)
 	agent.Repo = mergeStringDefault(agent.Repo, defaults.Repo)
 	agent.Repos = mergeSliceDefault(agent.Repos, defaults.Repos)
+	agent.Template = mergeStringDefault(agent.Template, defaults.Template)
+	agent.TemplateVars = mergeSliceDefault(agent.TemplateVars, defaults.TemplateVars)
+	agent.Instructions = mergeStringDefault(agent.Instructions, defaults.Instructions)
+	agent.InstructionsFile = mergeStringDefault(agent.InstructionsFile, defaults.InstructionsFile)
 	agent.SSH = mergeBoolDefault(agent.SSH, agent.hasSSH, defaults.SSH)
 	agent.ReuseAuth = mergeBoolDefault(agent.ReuseAuth, agent.hasReuseAuth, defaults.ReuseAuth)
+	agent.EphemeralAuth = mergeBoolDefault(agent.EphemeralAuth, agent.hasEphemeralAuth, defaults.EphemeralAuth)
 	agent.ReuseGHAuth = mergeBoolDefault(agent.ReuseGHAuth, agent.hasReuseGHAuth, defaults.ReuseGHAuth)
+	agent.SeedAuth = mergeBoolDefault(agent.SeedAuth, agent.hasSeedAuth, defaults.SeedAuth)
 	agent.AutoTrust = mergeBoolDefault(agent.AutoTrust, agent.hasAutoTrust, defaults.AutoTrust)
 	agent.Background = mergeBoolDefault(agent.Background, agent.hasBackground, defaults.Background)
 	agent.Docker = mergeBoolDefault(agent.Docker, agent.hasDocker, defaults.Docker)
+	agent.DockerSocket = mergeBoolDefault(agent.DockerSocket, agent.hasDockerSocket, defaults.DockerSocket)
+	agent.AllowSetupScripts = mergeBoolDefault(agent.AllowSetupScripts, agent.hasAllowSetupScripts, defaults.AllowSetupScripts)
 	agent.Network = mergeStringDefault(agent.Network, defaults.Network)
 	agent.Memory = mergeStringDefault(agent.Memory, defaults.Memory)
 	agent.CPUs = mergeStringDefault(agent.CPUs, defaults.CPUs)
+	if agent.PIDsLimit == 0 {
+		agent.PIDsLimit = defaults.PIDsLimit
+	}
+	agent.Identity = mergeStringDefault(agent.Identity, defaults.Identity)
 	agent.AWS = mergeStringDefault(agent.AWS, defaults.AWS)
+	agent.MaxCost = mergeStringDefault(agent.MaxCost, defaults.MaxCost)
+	agent.Notify = mergeStringDefault(agent.Notify, defaults.Notify)
+	agent.OnExit = mergeStringDefault(agent.OnExit, defaults.OnExit)
+	agent.OnComplete = mergeStringDefault(agent.OnComplete, defaults.OnComplete)
+	agent.OnFail = mergeStringDefault(agent.OnFail, defaults.OnFail)
 	agent.Type = mergeStringDefault(agent.Type, defaults.Type)
 	agent.hasSSH = agent.hasSSH || defaults.hasSSH
 	agent.hasReuseAuth = agent.hasReuseAuth || defaults.hasReuseAuth
+	agent.hasEphemeralAuth = agent.hasEphemeralAuth || defaults.hasEphemeralAuth
 	agent.hasReuseGHAuth = agent.hasReuseGHAuth || defaults.hasReuseGHAuth
+	agent.hasSeedAuth = agent.hasSeedAuth || defaults.hasSeedAuth
 	agent.hasAutoTrust = agent.hasAutoTrust || defaults.hasAutoTrust
 	agent.hasBackground = agent.hasBackground || defaults.hasBackground
 	agent.hasDocker = agent.hasDocker || defaults.hasDocker
+	agent.hasDockerSocket = agent.hasDockerSocket || defaults.hasDockerSocket
+	agent.hasAllowSetupScripts = agent.hasAllowSetupScripts || defaults.hasAllowSetupScripts
 	return agent
 }
 
@@ -376,6 +491,20 @@ func applyPipelineDefaults(m *PipelineManifest) {
 	}
 }
 
+func applyPipelineProfiles(m *PipelineManifest, catalog profiles.Catalog, vars map[string]string) error {
+	var err error
+	for i, stage := range m.Stages {
+		for j := range stage.Agents {
+			m.Stages[i].Agents[j] = interpolateAgentSpec(m.Stages[i].Agents[j], vars)
+			m.Stages[i].Agents[j], err = applyProfile(m.Stages[i].Agents[j], catalog)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func interpolatePipelineFields(m *PipelineManifest, vars map[string]string, baseDir string) {
 	for i, stage := range m.Stages {
 		if stage.Pipeline != "" {
@@ -389,6 +518,75 @@ func interpolatePipelineFields(m *PipelineManifest, vars map[string]string, base
 			m.Stages[i].Agents[j] = interpolateAgentSpec(m.Stages[i].Agents[j], vars)
 		}
 	}
+}
+
+func loadProfileCatalog(dirs []string) (profiles.Catalog, error) {
+	if len(dirs) == 0 {
+		return profiles.Catalog{}, nil
+	}
+	return profiles.LoadDirs(dirs)
+}
+
+func applyProfile(spec AgentSpec, catalog profiles.Catalog) (AgentSpec, error) {
+	if spec.Profile == "" {
+		return spec, nil
+	}
+	profile, ok := catalog.Get(spec.Profile)
+	if !ok {
+		return spec, fmt.Errorf("profile %q not found", spec.Profile)
+	}
+	base := agentSpecFromProfile(profile)
+	base.Profile = spec.Profile
+	return mergeDefaults(base, spec), nil
+}
+
+func agentSpecFromProfile(profile profiles.Profile) AgentSpec {
+	spec := AgentSpec{
+		Name:                 profile.ContainerName,
+		Type:                 profile.AgentType,
+		Repos:                append([]string{}, profile.Repos...),
+		Prompt:               profile.Prompt,
+		Template:             profile.Template,
+		TemplateVars:         append([]string{}, profile.TemplateVars...),
+		Instructions:         profile.Instructions,
+		InstructionsFile:     profile.InstructionsFile,
+		Network:              profile.Network,
+		Memory:               profile.Memory,
+		CPUs:                 profile.CPUs,
+		PIDsLimit:            profile.PIDsLimit,
+		Identity:             profile.Identity,
+		AWS:                  profile.AWSProfile,
+		MaxCost:              profile.MaxCost,
+		Notify:               profile.Notify,
+		OnExit:               profile.OnExit,
+		OnComplete:           profile.OnComplete,
+		OnFail:               profile.OnFail,
+		SSH:                  boolValue(profile.SSH),
+		ReuseAuth:            boolValue(profile.ReuseAuth),
+		EphemeralAuth:        boolValue(profile.EphemeralAuth),
+		ReuseGHAuth:          boolValue(profile.ReuseGHAuth),
+		SeedAuth:             boolValue(profile.SeedAuth),
+		Docker:               boolValue(profile.Docker),
+		DockerSocket:         boolValue(profile.DockerSocket),
+		AutoTrust:            boolValue(profile.AutoTrust),
+		Background:           boolValue(profile.Background),
+		AllowSetupScripts:    boolValue(profile.AllowSetupScripts),
+		hasSSH:               profile.SSH != nil,
+		hasReuseAuth:         profile.ReuseAuth != nil,
+		hasEphemeralAuth:     profile.EphemeralAuth != nil,
+		hasReuseGHAuth:       profile.ReuseGHAuth != nil,
+		hasSeedAuth:          profile.SeedAuth != nil,
+		hasAutoTrust:         profile.AutoTrust != nil,
+		hasBackground:        profile.Background != nil,
+		hasDocker:            profile.Docker != nil,
+		hasDockerSocket:      profile.DockerSocket != nil,
+		hasAllowSetupScripts: profile.AllowSetupScripts != nil,
+	}
+	return spec
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func mergeStringDefault(value, fallback string) string {
@@ -472,11 +670,30 @@ func interpolateAgentSpec(spec AgentSpec, vars map[string]string) AgentSpec {
 	if len(vars) == 0 {
 		return spec
 	}
+	spec.Name = interpolateVars(spec.Name, vars)
+	spec.Profile = interpolateVars(spec.Profile, vars)
+	spec.Type = interpolateVars(spec.Type, vars)
 	spec.Repo = interpolateVars(spec.Repo, vars)
 	for i := range spec.Repos {
 		spec.Repos[i] = interpolateVars(spec.Repos[i], vars)
 	}
 	spec.Prompt = interpolateVars(spec.Prompt, vars)
+	spec.Template = interpolateVars(spec.Template, vars)
+	for i := range spec.TemplateVars {
+		spec.TemplateVars[i] = interpolateVars(spec.TemplateVars[i], vars)
+	}
+	spec.Instructions = interpolateVars(spec.Instructions, vars)
+	spec.InstructionsFile = interpolateVars(spec.InstructionsFile, vars)
+	spec.Network = interpolateVars(spec.Network, vars)
+	spec.Memory = interpolateVars(spec.Memory, vars)
+	spec.CPUs = interpolateVars(spec.CPUs, vars)
+	spec.Identity = interpolateVars(spec.Identity, vars)
+	spec.AWS = interpolateVars(spec.AWS, vars)
+	spec.MaxCost = interpolateVars(spec.MaxCost, vars)
+	spec.Notify = interpolateVars(spec.Notify, vars)
+	spec.OnExit = interpolateVars(spec.OnExit, vars)
+	spec.OnComplete = interpolateVars(spec.OnComplete, vars)
+	spec.OnFail = interpolateVars(spec.OnFail, vars)
 	return spec
 }
 
@@ -506,6 +723,9 @@ func ensurePipelineResolved(m *PipelineManifest) error {
 			return err
 		}
 		for _, agent := range stage.Agents {
+			if err := ensureSupportedPipelineControls(stage.Name, agent); err != nil {
+				return err
+			}
 			if err := ensureAgentSpecResolved("agent", agent); err != nil {
 				return err
 			}
@@ -514,7 +734,32 @@ func ensurePipelineResolved(m *PipelineManifest) error {
 	return nil
 }
 
+func ensureSupportedPipelineControls(stageName string, spec AgentSpec) error {
+	prefix := "stage " + stageName
+	if spec.Name != "" {
+		prefix += " agent " + spec.Name
+	}
+	switch {
+	case spec.OnFailure != "":
+		return fmt.Errorf("%s uses unsupported on_failure; use depends_on or remove it", prefix)
+	case spec.Retry != 0:
+		return fmt.Errorf("%s uses unsupported retry; rerun failed stages manually for now", prefix)
+	case spec.When != "":
+		return fmt.Errorf("%s uses unsupported when; split the manifest or remove it", prefix)
+	case spec.Outputs != "":
+		return fmt.Errorf("%s uses unsupported outputs; pass context through prompts/files for now", prefix)
+	default:
+		return nil
+	}
+}
+
 func ensureAgentSpecResolved(kind string, spec AgentSpec) error {
+	if err := ensureResolvedField(kind+" profile", spec.Profile); err != nil {
+		return err
+	}
+	if err := ensureResolvedField(kind+" name", spec.Name); err != nil {
+		return err
+	}
 	if err := ensureResolvedField(kind+" repo", spec.Repo); err != nil {
 		return err
 	}
@@ -524,6 +769,20 @@ func ensureAgentSpecResolved(kind string, spec AgentSpec) error {
 		}
 	}
 	if err := ensureResolvedField(kind+" prompt", spec.Prompt); err != nil {
+		return err
+	}
+	if err := ensureResolvedField(kind+" template", spec.Template); err != nil {
+		return err
+	}
+	for _, value := range spec.TemplateVars {
+		if err := ensureResolvedField(kind+" template_vars", value); err != nil {
+			return err
+		}
+	}
+	if err := ensureResolvedField(kind+" instructions", spec.Instructions); err != nil {
+		return err
+	}
+	if err := ensureResolvedField(kind+" instructions_file", spec.InstructionsFile); err != nil {
 		return err
 	}
 	return nil

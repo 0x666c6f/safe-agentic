@@ -27,6 +27,26 @@ safe-ag retry --latest --feedback "Focus only on src/ and add tests"
 
 `retry` reconstructs the original spawn options and starts a fresh container with the same session shape.
 
+## Steer a running agent
+
+```bash
+safe-ag steer --latest "Focus only on the failing test and avoid unrelated refactors"
+safe-ag steer api-refactor "Run the narrower test first"
+```
+
+Use `steer` when the agent is active and you want to add guidance without attaching to the tmux session. If the container is stopped, `steer` starts it and waits for tmux.
+
+## Review comments
+
+```bash
+safe-ag review-comments add --latest cmd/main.go 42 "Handle empty input before parsing"
+safe-ag review-comments list --latest
+safe-ag steer --latest "Address the open review comments, then run tests"
+safe-ag review-comments resolve rc-123
+```
+
+Use review comments for local file/line notes that should survive between `review`, `diff`, `steer`, and PR handoff. They are stored on the host under `~/.safe-ag/state/`.
+
 ## Checkpoints
 
 ```bash
@@ -68,9 +88,11 @@ safe-ag spawn claude --ssh --reuse-auth \
   --prompt "Fix the failing CI tests"
 
 safe-ag peek --latest
+safe-ag steer --latest "Keep the fix narrow and add one regression test"
 safe-ag summary --latest
 safe-ag diff --latest
 safe-ag review --latest
+safe-ag review-comments add --latest src/api.go 37 "Add a regression test for this branch"
 safe-ag todo add --latest "Verify locally"
 safe-ag todo check --latest 1
 safe-ag pr --latest --title "fix: resolve CI failures"

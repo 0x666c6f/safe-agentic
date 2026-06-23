@@ -219,6 +219,9 @@ func tarDir(tw *tar.Writer, baseDir, dirName string) error {
 			}
 			return tw.WriteHeader(hdr)
 		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err

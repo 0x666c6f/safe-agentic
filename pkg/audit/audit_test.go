@@ -53,6 +53,30 @@ func TestLogCreatesParentDirectory(t *testing.T) {
 	}
 }
 
+func TestLogCreatesPrivateFile(t *testing.T) {
+	dir := t.TempDir()
+	l := &Logger{Path: filepath.Join(dir, "state", "audit.jsonl")}
+
+	if err := l.Log("spawn", "agent-1", nil); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+
+	info, err := os.Stat(l.Path)
+	if err != nil {
+		t.Fatalf("stat audit file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("audit file mode = %o, want 600", got)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(l.Path))
+	if err != nil {
+		t.Fatalf("stat audit dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("audit dir mode = %o, want 700", got)
+	}
+}
+
 func TestReadWithLimit(t *testing.T) {
 	dir := t.TempDir()
 	l := &Logger{Path: filepath.Join(dir, "audit.jsonl")}

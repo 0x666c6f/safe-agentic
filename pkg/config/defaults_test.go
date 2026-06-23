@@ -18,6 +18,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Defaults.PIDsLimit != 512 {
 		t.Fatalf("PIDsLimit = %d, want 512", cfg.Defaults.PIDsLimit)
 	}
+	if cfg.Defaults.SeedAuth {
+		t.Fatal("SeedAuth = true, want false")
+	}
 }
 
 func TestPathsUseSafeAgHome(t *testing.T) {
@@ -67,6 +70,7 @@ func TestLoadDefaultsMergesSparseToml(t *testing.T) {
 [defaults]
 memory = "16g"
 reuse_auth = true
+seed_auth = true
 
 [git]
 author_name = "Agent Bot"
@@ -87,6 +91,9 @@ author_name = "Agent Bot"
 	}
 	if !cfg.Defaults.ReuseAuth {
 		t.Fatal("ReuseAuth = false, want true")
+	}
+	if !cfg.Defaults.SeedAuth {
+		t.Fatal("SeedAuth = false, want true")
 	}
 	if cfg.Git.AuthorName != "Agent Bot" {
 		t.Fatalf("AuthorName = %q", cfg.Git.AuthorName)
@@ -119,6 +126,9 @@ func TestSetValueAndSaveRawConfig(t *testing.T) {
 	if err := SetValue(&raw, "SAFE_AGENTIC_DEFAULT_REUSE_AUTH", "true"); err != nil {
 		t.Fatalf("SetValue alias: %v", err)
 	}
+	if err := SetValue(&raw, "SAFE_AGENTIC_DEFAULT_SEED_AUTH", "true"); err != nil {
+		t.Fatalf("SetValue seed auth alias: %v", err)
+	}
 	if err := SetValue(&raw, "git.author_name", "Agent Bot"); err != nil {
 		t.Fatalf("SetValue git: %v", err)
 	}
@@ -135,6 +145,9 @@ func TestSetValueAndSaveRawConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, "reuse_auth = true") {
 		t.Fatalf("config missing reuse_auth:\n%s", text)
+	}
+	if !strings.Contains(text, "seed_auth = true") {
+		t.Fatalf("config missing seed_auth:\n%s", text)
 	}
 	if !strings.Contains(text, `author_name = "Agent Bot"`) {
 		t.Fatalf("config missing author_name:\n%s", text)
@@ -179,6 +192,9 @@ func TestSetValueRejectsBadTypes(t *testing.T) {
 		t.Fatal("expected integer parse error")
 	}
 	if err := SetValue(&raw, "defaults.reuse_auth", "nope"); err == nil {
+		t.Fatal("expected bool parse error")
+	}
+	if err := SetValue(&raw, "defaults.seed_auth", "nope"); err == nil {
 		t.Fatal("expected bool parse error")
 	}
 }
