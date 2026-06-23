@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ const (
 
 var orbExec *orb.OrbExecutor
 var testVMName = "safe-agentic"
+var integrationHome string
 
 // binaryPath holds the path to the built safe-ag binary.
 // Set relative to the module root by TestMain.
@@ -56,6 +59,17 @@ func TestMain(m *testing.M) {
 		binaryPath = "../../bin/safe-ag"
 	}
 
+	var homeErr error
+	integrationHome, homeErr = os.MkdirTemp("", "safe-agentic-integration-home-")
+	if homeErr != nil {
+		fmt.Fprintf(os.Stderr, "create integration home: %v\n", homeErr)
+		os.Exit(1)
+	}
+	if err := writeIntegrationConfig(integrationHome); err != nil {
+		fmt.Fprintf(os.Stderr, "write integration config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Verify VM + Docker
 	orbExec = &orb.OrbExecutor{VMName: testVMName}
 	ctx := context.Background()
@@ -72,11 +86,90 @@ func TestMain(m *testing.M) {
 	}
 	fmt.Printf("VM %s and Docker OK\n", testVMName)
 
+	cleanupTestContainers()
+	cleanupDetContainers()
 	code := m.Run()
 
 	cleanupTestContainers()
 	cleanupDetContainers()
+	if integrationHome != "" {
+		os.RemoveAll(integrationHome)
+	}
 	os.Exit(code)
+}
+
+func writeIntegrationConfig(home string) error {
+	configDir := filepath.Join(home, ".safe-ag")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		return err
+	}
+	config := `version = 1
+
+[defaults]
+cpus = "4"
+memory = "8g"
+pids_limit = 512
+ssh = false
+docker = false
+docker_socket = false
+reuse_auth = true
+reuse_gh_auth = true
+seed_auth = false
+
+[git]
+author_name = "Safe Agentic Test"
+author_email = "safe-agentic-test@example.invalid"
+committer_name = "Safe Agentic Test"
+committer_email = "safe-agentic-test@example.invalid"
+`
+	return os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o600)
+}
+
+func integrationCommandEnv(overrides map[string]string) []string {
+	managed := map[string]string{
+		"SAFE_AGENTIC_CONFIG_HOME": integrationHome,
+		"SAFE_AGENTIC_STATE_HOME":  integrationHome,
+		"SAFE_AGENTIC_VM_NAME":     testVMName,
+		"CLAUDE_CONFIG_DIR":        filepath.Join(integrationHome, ".claude"),
+		"CODEX_HOME":               filepath.Join(integrationHome, ".codex"),
+	}
+	for key, value := range overrides {
+		managed[key] = value
+	}
+
+	env := make([]string, 0, len(os.Environ())+len(managed))
+	for _, item := range os.Environ() {
+		key, _, ok := strings.Cut(item, "=")
+		if !ok || skipIntegrationHostEnv(key) {
+			continue
+		}
+		if _, ok := managed[key]; ok {
+			continue
+		}
+		env = append(env, item)
+	}
+
+	keys := make([]string, 0, len(managed))
+	for key := range managed {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		env = append(env, key+"="+managed[key])
+	}
+	return env
+}
+
+func skipIntegrationHostEnv(key string) bool {
+	switch key {
+	case "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+		"SAFE_AGENTIC_CONFIG_HOME", "SAFE_AGENTIC_STATE_HOME",
+		"SAFE_AGENTIC_VM_NAME",
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL":
+		return true
+	}
+	return strings.HasPrefix(key, "SAFE_AGENTIC_DEFAULT_")
 }
 
 func cleanupTestContainers() {
@@ -109,7 +202,7 @@ func cleanupTestContainers() {
 func runSafeAg(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Env = append(os.Environ(), "SAFE_AGENTIC_VM_NAME="+testVMName)
+	cmd.Env = integrationCommandEnv(nil)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

@@ -198,4 +198,5 @@ seed_auth = false
 - containers persist after the agent exits; `safe-ag attach` will restart stopped containers when needed
 - `safe-ag cleanup` keeps auth volumes by default; use `safe-ag cleanup --auth` for full reset
 - `SAFE_AGENTIC_VM_NAME` lets you point the CLI at a different OrbStack VM
+- `SAFE_AGENTIC_CONFIG_HOME` / `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic files without changing `HOME`
 - `safe-ag-tui` is a separate binary; `safe-ag tui` is the normal entrypoint

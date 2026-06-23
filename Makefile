@@ -1,4 +1,4 @@
-.PHONY: build build-all build-tui install test clean
+.PHONY: build build-all build-tui install test validate-skills clean
 
 VERSION ?= dev
 
@@ -18,6 +18,9 @@ install: build build-tui
 
 test:
 	go test ./...
+
+validate-skills:
+	go run ./tools/validate-skills
 
 clean:
 	rm -f bin/safe-ag bin/safe-ag-tui

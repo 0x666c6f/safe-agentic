@@ -26,6 +26,19 @@ func TestNewRunCmd_Basics(t *testing.T) {
 	}
 }
 
+func TestNewRunCmd_TruncatesLongHostname(t *testing.T) {
+	name := "agent-shell-integ-shell-pipeline-root-step-root-step-20260623-161038"
+	cmd := NewRunCmd(name, "safe-agentic:latest")
+	args := cmd.Build()
+	cmdStr := strings.Join(args, " ")
+	if !strings.Contains(cmdStr, "--name "+name) {
+		t.Errorf("container name changed: %s", cmdStr)
+	}
+	if !strings.Contains(cmdStr, "--hostname agent-shell-integ-shell-pipeline-root-step-root-step-20260623") {
+		t.Errorf("hostname not truncated safely: %s", cmdStr)
+	}
+}
+
 func TestNewRunCmd_Interactive(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	args := cmd.Build()

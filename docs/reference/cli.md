@@ -762,6 +762,8 @@ safe-ag config show
 ```
 
 Reads `~/.safe-ag/config.toml`.
+Set `SAFE_AGENTIC_CONFIG_HOME` to read from another safe-agentic config home
+without changing the process `HOME`.
 
 ### `config get`
 

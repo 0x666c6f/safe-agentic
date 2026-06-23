@@ -192,6 +192,16 @@ func TestDefaultRulePathsIncludesNearestProjectRules(t *testing.T) {
 	}
 }
 
+func TestUserRulesPathUsesSafeAgConfigHome(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "host-home"))
+	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
+
+	if got, want := UserRulesPath(), filepath.Join(configHome, ".safe-ag", "rules.toml"); got != want {
+		t.Fatalf("UserRulesPath() = %q, want %q", got, want)
+	}
+}
+
 func sameFilePath(a, b string) bool {
 	cleanA, errA := filepath.EvalSymlinks(filepath.Dir(a))
 	cleanB, errB := filepath.EvalSymlinks(filepath.Dir(b))
