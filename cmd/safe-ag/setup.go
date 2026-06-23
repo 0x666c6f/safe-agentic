@@ -384,7 +384,7 @@ func runDockerBuild(ctx context.Context, orbRunner interface {
 		buildArgs = []string{"docker", "build", "--no-cache", "-t", "safe-agentic:latest", "/tmp/build-context"}
 	case updateQuick:
 		cacheBust := fmt.Sprintf("%d", time.Now().Unix())
-		buildArgs = []string{"docker", "build", "--build-arg", "CACHEBUST=" + cacheBust, "-t", "safe-agentic:latest", "/tmp/build-context"}
+		buildArgs = []string{"docker", "build", "--build-arg", "CLI_CACHE_BUST=" + cacheBust, "-t", "safe-agentic:latest", "/tmp/build-context"}
 	}
 
 	fmt.Println("Building safe-agentic:latest…")

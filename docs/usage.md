@@ -23,12 +23,16 @@ safe-ag vm ssh
 
 ```bash
 safe-ag spawn <claude|codex|shell> ...
+safe-ag spawn claude --worktree --name task-name
 safe-ag run <repo...> [prompt]
 safe-ag attach <name>
 safe-ag attach --latest
+safe-ag steer --latest "continue, but keep the change smaller"
+safe-ag profile run reviewer "focus security only"
 ```
 
 Use `spawn` when you want explicit control. Use `run` for a quick single-task session.
+Use `profile run` for repeatable roles from `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml`.
 
 ## See what the agent is doing
 
@@ -36,10 +40,15 @@ Use `spawn` when you want explicit control. Use `run` for a quick single-task se
 safe-ag list
 safe-ag peek <name>
 safe-ag logs <name>
+safe-ag search "error text"
 safe-ag summary <name>
 safe-ag output <name>
 safe-ag diff <name>
 safe-ag review <name>
+safe-ag review-comments list <name>
+safe-ag timeline
+safe-ag inbox
+safe-ag server --stdio
 ```
 
 Typical meaning:
@@ -49,6 +58,9 @@ Typical meaning:
 - `output`: last useful result
 - `diff`: git diff from the workspace
 - `review`: review the diff
+- `review-comments`: local file/line notes for review handoff
+- `timeline`: recent event/audit stream
+- `inbox`: failures or status markers that need attention
 
 ## Manage containers
 
@@ -74,7 +86,18 @@ safe-ag todo check <name> <index>
 safe-ag todo uncheck <name> <index>
 
 safe-ag retry <name> [--feedback "..."]
+safe-ag steer <name> "address the failing test only"
+safe-ag handoff <name> --to-worktree
+safe-ag handoff <name> --to-local ./workspace-copy
+safe-ag worktree snapshot <name> "before cleanup"
+safe-ag worktree restore <name> stash@{0}
+safe-ag worktree cleanup --dry-run
+safe-ag workspace stage <name> src/app.go
+safe-ag workspace revert <name> src/app.go --yes
+safe-ag workspace stage-patch <name> selected.patch
+safe-ag workspace revert-patch <name> selected.patch --yes
 safe-ag pr <name> [--title ... --base ...]
+safe-ag browser capture http://localhost:3000 --mode auto --annotation "checkout flow"
 ```
 
 ## Auth and config
@@ -84,6 +107,12 @@ safe-ag config show
 safe-ag config get <key>
 safe-ag config set <key> <value>
 safe-ag config reset <key>
+
+# hard spawn guards
+$EDITOR ~/.safe-ag/rules.toml
+
+safe-ag action list
+safe-ag action run test --latest
 
 safe-ag template list
 safe-ag template show <name>

@@ -65,6 +65,13 @@ func (d *DockerRunCmd) AddCmdArgs(args ...string) { d.cmdArgs = append(d.cmdArgs
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
+func (d *DockerRunCmd) AddBindMount(src, dst string, readonly bool) {
+	mount := fmt.Sprintf("type=bind,src=%s,dst=%s", src, dst)
+	if readonly {
+		mount += ",readonly"
+	}
+	d.mounts = append(d.mounts, "--mount", mount)
+}
 func (d *DockerRunCmd) AddEphemeralVolume(dst string) {
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,dst=%s", dst))
 }
@@ -132,7 +139,7 @@ func (d *DockerRunCmd) Build() []string {
 }
 
 func (d *DockerRunCmd) Render() string {
-	args := d.Build()
+	args := redactSensitiveArgs(d.Build())
 	var quoted []string
 	for _, a := range args {
 		if strings.ContainsAny(a, " \t\"'$\\") {
@@ -144,12 +151,53 @@ func (d *DockerRunCmd) Render() string {
 	return strings.Join(quoted, " ")
 }
 
+func redactSensitiveArgs(args []string) []string {
+	redacted := append([]string{}, args...)
+	for i := 1; i < len(redacted); i++ {
+		switch redacted[i-1] {
+		case "-e":
+			redacted[i] = redactKeyValue(redacted[i], sensitiveEnvKey)
+		case "--label":
+			redacted[i] = redactKeyValue(redacted[i], sensitiveLabelKey)
+		}
+	}
+	return redacted
+}
+
+func redactKeyValue(value string, sensitive func(string) bool) string {
+	key, _, ok := strings.Cut(value, "=")
+	if !ok || !sensitive(key) {
+		return value
+	}
+	return key + "=<redacted>"
+}
+
+func sensitiveEnvKey(key string) bool {
+	upper := strings.ToUpper(key)
+	if strings.HasPrefix(upper, "SAFE_AGENTIC_") && strings.HasSuffix(upper, "_B64") {
+		return true
+	}
+	return strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "SECRET") ||
+		strings.Contains(upper, "CREDS") ||
+		strings.Contains(upper, "CREDENTIAL")
+}
+
+func sensitiveLabelKey(key string) bool {
+	upper := strings.ToUpper(key)
+	return strings.Contains(upper, "B64") ||
+		strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "SECRET") ||
+		strings.Contains(upper, "CREDENTIAL")
+}
+
 type HardeningOpts struct {
-	Network     string
-	Memory      string
-	CPUs        string
-	PIDsLimit   int
-	SeccompPath string
+	Network         string
+	Memory          string
+	CPUs            string
+	PIDsLimit       int
+	SeccompPath     string
+	WorkspaceSource string
 }
 
 func AppendRuntimeHardening(cmd *DockerRunCmd, opts HardeningOpts) {
@@ -180,7 +228,11 @@ func AppendRuntimeHardening(cmd *DockerRunCmd, opts HardeningOpts) {
 	cmd.AddTmpfs("/dev/shm", "64m", true, true)
 	cmd.AddTmpfsOwned("/home/agent/.config", "32m", true, true, 1000, 1000)
 	cmd.AddTmpfsOwned("/home/agent/.ssh", "1m", true, true, 1000, 1000)
-	cmd.AddEphemeralVolume("/workspace")
+	if opts.WorkspaceSource != "" {
+		cmd.AddBindMount(opts.WorkspaceSource, "/workspace", false)
+	} else {
+		cmd.AddEphemeralVolume("/workspace")
+	}
 }
 
 func AppendCacheMounts(cmd *DockerRunCmd) {

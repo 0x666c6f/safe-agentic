@@ -38,3 +38,14 @@ func TestAgentSessionDoesNotResumeFleetOrBackgroundRuns(t *testing.T) {
 		t.Fatalf("agent-session.sh missing fleet resume guard")
 	}
 }
+
+func TestEntrypointPromptEnvOnlyUsedWithoutLaunchArgs(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read entrypoint.sh: %v", err)
+	}
+	content := string(script)
+	if !strings.Contains(content, `[ "${#launch_args[@]}" -eq 0 ]`) {
+		t.Fatalf("entrypoint prompt env guard missing launch_args check")
+	}
+}

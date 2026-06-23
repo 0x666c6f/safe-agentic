@@ -17,7 +17,6 @@ steps:
     auto_trust: true
     prompt: "Read SECURITY-FINDINGS.md and fix all critical and high severity issues. Run the test suite after each fix to ensure nothing breaks. Commit each fix separately with a descriptive message."
     depends_on: audit
-    retry: 2
 
   - name: verify
     type: claude

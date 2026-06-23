@@ -10,6 +10,7 @@ Without opt-in flags, a spawned agent does not get:
 - your SSH agent
 - shared Claude/Codex auth
 - shared GitHub auth
+- host Claude/Codex auth copied into the session
 - AWS credentials
 - Docker daemon access
 

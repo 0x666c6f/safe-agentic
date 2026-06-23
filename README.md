@@ -25,7 +25,9 @@ The goal is simple:
 - a hardened OrbStack VM that acts as a host boundary between macOS and agent containers
 - dedicated managed Docker networks by default
 - tmux-backed sessions that you can reattach to later
-- CLI + TUI for spawning, monitoring, reviewing, and shipping work
+- CLI + TUI for spawning, steering, monitoring, reviewing, and shipping work
+- managed worktrees for isolated host checkouts with handoff/snapshot helpers
+- saved profiles, project/user actions, timeline, inbox, browser capture, workspace file ops, JSON stdio server, and log search for daily loops
 - fleet and pipeline manifests for parallel and staged agent runs
 
 ## Core model
@@ -40,6 +42,7 @@ macOS host
 Default stance:
 - no SSH forwarding
 - no shared auth
+- no host Claude/Codex auth seeding
 - no AWS credentials
 - no Docker daemon access
 - read-only container rootfs
@@ -157,12 +160,25 @@ Important opt-in flags:
 | `--ssh` | private repos, pushes | repo access through your SSH agent |
 | `--reuse-auth` | avoid re-auth | shared agent auth volume |
 | `--reuse-gh-auth` | `gh` inside containers | shared GitHub auth volume |
+| `--seed-auth` | skip first login for this session | one-shot copy of host Claude/Codex auth |
 | `--aws <profile>` | infra work | AWS API access |
 | `--docker` | build/test containers | DinD sidecar |
 | `--docker-socket` | full Docker control | direct VM daemon access |
 | `--network <name>` | custom connectivity | bypass managed network policy |
 
 If you only need a public repo and a prompt, do not add flags you do not need.
+
+Hard local policy can deny risky spawn modes before any network, worktree, or container is created:
+
+```toml
+# ~/.safe-ag/rules.toml or .safe-ag/rules.toml
+[allow]
+docker_modes = ["off"]
+networks = ["managed"]
+ssh = false
+reuse_auth = false
+seed_auth = false
+```
 
 ## Docs map
 
@@ -172,13 +188,14 @@ If you only need a public repo and a prompt, do not add flags you do not need.
 - [Managing](docs/guide/managing.md): attach, logs, sessions, cleanup
 - [Workflow](docs/guide/workflow.md): diff, retry, review, PRs
 - [Fleet and pipelines](docs/guide/fleet.md): manifests and orchestration
-- [Configuration](docs/guide/configuration.md): defaults, templates, VM/image maintenance
+- [Configuration](docs/guide/configuration.md): defaults, policy rules, profiles, actions, templates, VM/image maintenance
+- [Codex App Parity Roadmap](docs/roadmap/codex-app-parity.md): UX roadmap and implementation tracks
 - [Architecture](docs/architecture.md): component map and reference pages
 - [Security model](docs/security.md): defaults, threat surface, limitations
 
 ## Notes
 
 - containers persist after the agent exits; `safe-ag attach` will restart stopped containers when needed
-- `safe-ag cleanup` keeps shared auth by default; use `safe-ag cleanup --auth` for full reset
+- `safe-ag cleanup` keeps auth volumes by default; use `safe-ag cleanup --auth` for full reset
 - `SAFE_AGENTIC_VM_NAME` lets you point the CLI at a different OrbStack VM
 - `safe-ag-tui` is a separate binary; `safe-ag tui` is the normal entrypoint

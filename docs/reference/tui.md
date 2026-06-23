@@ -142,6 +142,11 @@ Current `:` commands:
 | `q` / `quit` | quit the TUI |
 | `fleet <file>` | run `safe-ag fleet <file>` |
 | `pipeline <file>` | run `safe-ag pipeline <file>` |
+| `profile <name> [prompt]` | run a saved agent profile |
+| `action <name>` | run a configured action in the selected agent |
+| `comments` | list saved review comments for the selected agent |
+| `timeline` | open recent events |
+| `inbox` | open events that may need attention |
 | `audit` | open the audit view |
 
 Unknown commands produce a footer error status.
@@ -176,19 +181,22 @@ Current spawn form fields:
 
 | Field | Type | Notes |
 |---|---|---|
-| `Type` | dropdown | `claude` or `codex` |
+| `Type` | dropdown | `claude`, `codex`, or `shell` |
 | `Repo URL (optional)` | text | HTTPS GitHub URLs auto-convert to SSH when SSH is enabled |
 | `Name (optional)` | text | container name suffix |
 | `Prompt (optional)` | text | initial task |
-| `SSH` | checkbox | default `true` in the form |
-| `Reuse auth` | checkbox | default `true` in the form |
-| `Reuse GH auth` | checkbox | default `false` |
+| `SSH` | checkbox | default follows `~/.safe-ag/config.toml`; SSH repo URLs enable SSH automatically |
+| `Reuse auth` | checkbox | default follows `~/.safe-ag/config.toml` |
+| `Reuse GH auth` | checkbox | default follows `~/.safe-ag/config.toml` |
+| `Seed host auth` | checkbox | copy host Claude/Codex auth into this session; default follows `~/.safe-ag/config.toml` |
 | `AWS profile (optional)` | text | AWS profile name |
-| `Docker` | checkbox | enable DinD |
+| `Docker` | checkbox | enable DinD; default follows `~/.safe-ag/config.toml` |
+| `Docker socket` | checkbox | mount the VM Docker socket; default follows `~/.safe-ag/config.toml` |
 | `Identity (optional)` | text | git identity |
 
 Submit behavior:
 - the TUI launches `safe-ag spawn ... --background`
+- when a checkbox differs from config defaults, the TUI emits the matching `--flag` or `--no-flag`
 - success message tries to extract the spawned container name from command output
 
 ## Copy form

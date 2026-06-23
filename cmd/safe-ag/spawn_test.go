@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,10 +21,10 @@ func TestResolveContainerName(t *testing.T) {
 		want      string
 	}{
 		{"claude", "my-agent", "20260410-120000", nil, "agent-claude-my-agent"},
-		{"codex", "", "20260410-120000", []string{"https://github.com/org/repo.git"}, "agent-codex-repo"},
+		{"codex", "", "20260410-120000", []string{"https://github.com/org/repo.git"}, "agent-codex-repo-20260410-120000"},
 		{"claude", "", "20260410-120000", nil, "agent-claude-20260410-120000"},
 		{"shell", "debug", "20260410-120000", nil, "agent-shell-debug"},
-		{"claude", "", "20260410-120000", []string{"https://github.com/org/very-long-repository-name-here.git"}, "agent-claude-very-long-repository"},
+		{"claude", "", "20260410-120000", []string{"https://github.com/org/very-long-repository-name-here.git"}, "agent-claude-very-long-repository-20260410-120000"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -92,6 +93,122 @@ func TestSpawnDryRunContainsSecurityFlags(t *testing.T) {
 	}
 }
 
+func TestStartSpawnContainerStartsDinDBeforeAgent(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetResponse("docker exec safe-agentic-docker-agent-claude-test docker info", "ok")
+	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
+	resolved := spawnResolved{
+		ContainerName: "agent-claude-test",
+		NetworkName:   "agent-claude-test-net",
+		ImageName:     "safe-agentic:latest",
+	}
+
+	if err := startSpawnContainer(context.Background(), fake, cmd, SpawnOpts{AgentType: "claude", DockerAccess: true}, resolved); err != nil {
+		t.Fatalf("startSpawnContainer() error = %v", err)
+	}
+	runCmds := fake.CommandsMatching("docker run")
+	if len(runCmds) < 2 {
+		t.Fatalf("expected DinD and agent docker runs, got %d", len(runCmds))
+	}
+	first := strings.Join(runCmds[0], " ")
+	second := strings.Join(runCmds[1], " ")
+	if !strings.Contains(first, "safe-agentic-docker-agent-claude-test") {
+		t.Fatalf("first docker run should start DinD, got:\n%s", first)
+	}
+	if !strings.Contains(second, "--name agent-claude-test") {
+		t.Fatalf("second docker run should start agent, got:\n%s", second)
+	}
+}
+
+func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	repo := initSpawnGitRepo(t)
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+	defer os.Chdir(oldWD)
+	t.Setenv("HOME", t.TempDir())
+
+	worktreePath := filepath.Join(t.TempDir(), "agent-worktree")
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType:      "claude",
+			Name:           "worktree-test",
+			Worktree:       true,
+			WorktreePath:   worktreePath,
+			WorktreeBranch: "safe-ag/worktree-test",
+			DryRun:         true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn worktree dry-run error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "Worktree: "+worktreePath) {
+		t.Fatalf("dry-run output missing worktree path:\n%s", output)
+	}
+	if !strings.Contains(output, "type=bind,src="+worktreePath+",dst=/workspace") {
+		t.Fatalf("dry-run output missing workspace bind:\n%s", output)
+	}
+	if !strings.Contains(output, "SAFE_AGENTIC_WORKTREE=1") {
+		t.Fatalf("dry-run output missing worktree env:\n%s", output)
+	}
+	if !strings.Contains(output, "safe-agentic.worktree="+worktreePath) {
+		t.Fatalf("dry-run output missing worktree label:\n%s", output)
+	}
+	if strings.Contains(output, "type=volume,dst=/workspace") {
+		t.Fatalf("dry-run output should not include ephemeral workspace:\n%s", output)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created worktree path or unexpected stat error: %v", err)
+	}
+}
+
+func TestExecuteSpawnPolicyDeniesDockerBeforeDryRun(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rulesDir := filepath.Join(home, ".safe-ag")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatalf("mkdir rules dir: %v", err)
+	}
+	rules := `[allow]
+docker_modes = ["off"]
+networks = ["managed"]
+`
+	if err := os.WriteFile(filepath.Join(rulesDir, "rules.toml"), []byte(rules), 0o600); err != nil {
+		t.Fatalf("write rules: %v", err)
+	}
+
+	err := executeSpawn(SpawnOpts{
+		AgentType:    "claude",
+		Name:         "policy-test",
+		DockerAccess: true,
+		DryRun:       true,
+	})
+	if err == nil || !strings.Contains(err.Error(), `denies docker mode "dind"`) {
+		t.Fatalf("executeSpawn() error = %v, want docker policy denial", err)
+	}
+}
+
+func TestValidateSpawnWorktreeRejectsRepos(t *testing.T) {
+	err := validateSpawnOpts(SpawnOpts{
+		AgentType: "claude",
+		Worktree:  true,
+		Repos:     []string{"https://github.com/org/repo.git"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "omit --repo") {
+		t.Fatalf("validateSpawnOpts() error = %v", err)
+	}
+}
+
 func TestAuthDestination(t *testing.T) {
 	tests := []struct {
 		agentType string
@@ -109,14 +226,42 @@ func TestAuthDestination(t *testing.T) {
 	}
 }
 
+func initSpawnGitRepo(t *testing.T) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runSpawnGit(t, repo, "init")
+	runSpawnGit(t, repo, "config", "user.email", "agent@example.com")
+	runSpawnGit(t, repo, "config", "user.name", "Agent")
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("tracked\n"), 0o600); err != nil {
+		t.Fatalf("write tracked: %v", err)
+	}
+	runSpawnGit(t, repo, "add", "tracked.txt")
+	runSpawnGit(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+func runSpawnGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
 func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
 	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
 
-	appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+	if err := appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
 		AgentType: "claude",
 	}, spawnResolved{
 		ContainerName: "agent-claude-test",
-	})
+	}); err != nil {
+		t.Fatalf("appendAuthVolumes() error = %v", err)
+	}
 
 	joined := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(joined, "--tmpfs /home/agent/.claude:rw,noexec,nosuid,size=8m,uid=1000,gid=1000") {
@@ -124,6 +269,45 @@ func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
 	}
 	if strings.Contains(joined, "src=agent-claude-test-auth,dst=/home/agent/.claude") {
 		t.Fatalf("did not expect named auth volume in docker command, got:\n%s", joined)
+	}
+}
+
+func TestAppendAuthVolumes_ShellEphemeralMountsClaudeAndCodex(t *testing.T) {
+	cmd := docker.NewRunCmd("agent-shell-test", "safe-agentic:latest")
+
+	if err := appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+		AgentType: "shell",
+	}, spawnResolved{
+		ContainerName: "agent-shell-test",
+	}); err != nil {
+		t.Fatalf("appendAuthVolumes() error = %v", err)
+	}
+
+	joined := strings.Join(cmd.Build(), " ")
+	for _, want := range []string{
+		"--tmpfs /home/agent/.claude:rw,noexec,nosuid,size=8m,uid=1000,gid=1000",
+		"--tmpfs /home/agent/.codex:rw,noexec,nosuid,size=8m,uid=1000,gid=1000",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected shell auth mount %q in docker command:\n%s", want, joined)
+		}
+	}
+}
+
+func TestAppendAuthVolumes_FleetCopyFailsClosed(t *testing.T) {
+	fake := orb.NewFake()
+	fake.SetError("docker run --rm", "copy failed")
+	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
+
+	err := appendAuthVolumes(context.Background(), fake, cmd, SpawnOpts{
+		AgentType:   "claude",
+		ReuseAuth:   true,
+		FleetVolume: "fleet-vol",
+	}, spawnResolved{
+		ContainerName: "agent-claude-test",
+	})
+	if err == nil || !strings.Contains(err.Error(), "copy shared auth volume") {
+		t.Fatalf("appendAuthVolumes() error = %v, want copy failure", err)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/repourl"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -133,22 +135,25 @@ func ShowCopyForm(app *App, containerName string) {
 // ShowSpawnForm shows a modal form for spawning a new agent.
 func ShowSpawnForm(app *App) {
 	agentType := "claude"
+	defaults := loadSpawnFormDefaults()
 	form := tview.NewForm().
-		AddDropDown("Type:", []string{"claude", "codex"}, 0, func(option string, index int) {
+		AddDropDown("Type:", []string{"claude", "codex", "shell"}, 0, func(option string, index int) {
 			agentType = option
 		}).
 		AddInputField("Repo URL (optional):", "", 50, nil, nil).
 		AddInputField("Name (optional):", "", 30, nil, nil).
 		AddInputField("Prompt (optional):", "", 50, nil, nil).
-		AddCheckbox("SSH:", true, nil).
-		AddCheckbox("Reuse auth:", true, nil).
-		AddCheckbox("Reuse GH auth:", false, nil).
+		AddCheckbox("SSH:", defaults.ssh, nil).
+		AddCheckbox("Reuse auth:", defaults.reuseAuth, nil).
+		AddCheckbox("Reuse GH auth:", defaults.reuseGHAuth, nil).
+		AddCheckbox("Seed host auth:", defaults.seedAuth, nil).
 		AddInputField("AWS profile (optional):", "", 30, nil, nil).
-		AddCheckbox("Docker:", false, nil).
+		AddCheckbox("Docker:", defaults.docker, nil).
+		AddCheckbox("Docker socket:", defaults.dockerSocket, nil).
 		AddInputField("Identity (optional):", "", 40, nil, nil)
 
 	form.AddButton("Spawn", func() {
-		spec := readSpawnForm(form, agentType)
+		spec := readSpawnForm(form, agentType, defaults)
 		closeSpawnForm(app)
 		runSpawnFormSubmit(app, spec)
 	})
@@ -169,7 +174,7 @@ func ShowSpawnForm(app *App) {
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(form, 28, 0, true).
+			AddItem(form, 30, 0, true).
 			AddItem(nil, 0, 1, false),
 			70, 0, true).
 		AddItem(nil, 0, 1, false)
@@ -179,30 +184,60 @@ func ShowSpawnForm(app *App) {
 }
 
 type spawnFormSpec struct {
-	agentType   string
-	repoURL     string
-	name        string
-	prompt      string
-	ssh         bool
-	reuseAuth   bool
-	reuseGHAuth bool
-	awsProfile  string
-	docker      bool
-	identity    string
+	agentType    string
+	repoURL      string
+	name         string
+	prompt       string
+	ssh          bool
+	reuseAuth    bool
+	reuseGHAuth  bool
+	seedAuth     bool
+	awsProfile   string
+	docker       bool
+	dockerSocket bool
+	identity     string
+	defaults     spawnFormDefaults
 }
 
-func readSpawnForm(form *tview.Form, agentType string) spawnFormSpec {
+type spawnFormDefaults struct {
+	ssh          bool
+	reuseAuth    bool
+	reuseGHAuth  bool
+	seedAuth     bool
+	docker       bool
+	dockerSocket bool
+}
+
+func loadSpawnFormDefaults() spawnFormDefaults {
+	cfg, err := config.LoadDefaults(config.DefaultsPath())
+	if err != nil {
+		return spawnFormDefaults{}
+	}
+	return spawnFormDefaults{
+		ssh:          cfg.Defaults.SSH,
+		reuseAuth:    cfg.Defaults.ReuseAuth,
+		reuseGHAuth:  cfg.Defaults.ReuseGHAuth,
+		seedAuth:     cfg.Defaults.SeedAuth,
+		docker:       cfg.Defaults.Docker,
+		dockerSocket: cfg.Defaults.DockerSocket,
+	}
+}
+
+func readSpawnForm(form *tview.Form, agentType string, defaults spawnFormDefaults) spawnFormSpec {
 	return spawnFormSpec{
-		agentType:   agentType,
-		repoURL:     formInputText(form, "Repo URL (optional):"),
-		name:        formInputText(form, "Name (optional):"),
-		prompt:      formInputText(form, "Prompt (optional):"),
-		ssh:         formCheckboxValue(form, "SSH:"),
-		reuseAuth:   formCheckboxValue(form, "Reuse auth:"),
-		reuseGHAuth: formCheckboxValue(form, "Reuse GH auth:"),
-		awsProfile:  formInputText(form, "AWS profile (optional):"),
-		docker:      formCheckboxValue(form, "Docker:"),
-		identity:    formInputText(form, "Identity (optional):"),
+		agentType:    agentType,
+		repoURL:      strings.TrimSpace(formInputText(form, "Repo URL (optional):")),
+		name:         strings.TrimSpace(formInputText(form, "Name (optional):")),
+		prompt:       formInputText(form, "Prompt (optional):"),
+		ssh:          formCheckboxValue(form, "SSH:"),
+		reuseAuth:    formCheckboxValue(form, "Reuse auth:"),
+		reuseGHAuth:  formCheckboxValue(form, "Reuse GH auth:"),
+		seedAuth:     formCheckboxValue(form, "Seed host auth:"),
+		awsProfile:   strings.TrimSpace(formInputText(form, "AWS profile (optional):")),
+		docker:       formCheckboxValue(form, "Docker:"),
+		dockerSocket: formCheckboxValue(form, "Docker socket:"),
+		identity:     strings.TrimSpace(formInputText(form, "Identity (optional):")),
+		defaults:     defaults,
 	}
 }
 
@@ -229,6 +264,8 @@ func runSpawnFormSubmit(app *App, spec spawnFormSpec) {
 				msg := "Spawn failed"
 				if outStr != "" {
 					msg += ": " + outStr
+				} else if err != nil {
+					msg += ": " + err.Error()
 				}
 				app.footer.ShowStatus(msg, true)
 			})
@@ -247,6 +284,9 @@ func runSpawnFormSubmit(app *App, spec spawnFormSpec) {
 }
 
 func executeSpawnForm(spec spawnFormSpec) (string, error) {
+	if spec.docker && spec.dockerSocket {
+		return "", fmt.Errorf("--docker and --docker-socket are mutually exclusive")
+	}
 	spawnArgs := append(buildSpawnFormArgs(spec), "--background")
 	spawnOut, spawnErr := newAgentCmd(spawnArgs...).CombinedOutput()
 	return strings.TrimSpace(string(spawnOut)), spawnErr
@@ -254,15 +294,18 @@ func executeSpawnForm(spec spawnFormSpec) (string, error) {
 
 func buildSpawnFormArgs(spec spawnFormSpec) []string {
 	args := []string{"spawn", spec.agentType}
-	repoURL := normalizeSpawnRepoURL(spec.repoURL, spec.ssh)
+	sshEnabled := spec.ssh || repourl.UsesSSH(spec.repoURL)
+	repoURL := normalizeSpawnRepoURL(spec.repoURL, sshEnabled)
 	args = appendStringArg(args, "--repo", repoURL)
 	args = appendStringArg(args, "--name", spec.name)
 	args = appendStringArg(args, "--prompt", spec.prompt)
-	args = appendBoolArg(args, spec.ssh, "--ssh")
-	args = appendBoolArg(args, spec.reuseAuth, "--reuse-auth")
-	args = appendBoolArg(args, spec.reuseGHAuth, "--reuse-gh-auth")
+	args = appendBoolOverrideArg(args, sshEnabled, spec.defaults.ssh, "--ssh", "--no-ssh")
+	args = appendBoolOverrideArg(args, spec.reuseAuth, spec.defaults.reuseAuth, "--reuse-auth", "--no-reuse-auth")
+	args = appendBoolOverrideArg(args, spec.reuseGHAuth, spec.defaults.reuseGHAuth, "--reuse-gh-auth", "--no-reuse-gh-auth")
+	args = appendBoolOverrideArg(args, spec.seedAuth, spec.defaults.seedAuth, "--seed-auth", "--no-seed-auth")
 	args = appendStringArg(args, "--aws", spec.awsProfile)
-	args = appendBoolArg(args, spec.docker, "--docker")
+	args = appendBoolOverrideArg(args, spec.docker, spec.defaults.docker, "--docker", "--no-docker")
+	args = appendBoolOverrideArg(args, spec.dockerSocket, spec.defaults.dockerSocket, "--docker-socket", "--no-docker-socket")
 	args = appendStringArg(args, "--identity", spec.identity)
 	return args
 }
@@ -283,17 +326,25 @@ func appendStringArg(args []string, flag, value string) []string {
 	return append(args, flag, value)
 }
 
-func appendBoolArg(args []string, enabled bool, flag string) []string {
-	if !enabled {
+func appendBoolOverrideArg(args []string, value, defaultValue bool, enabledFlag, disabledFlag string) []string {
+	if value == defaultValue {
 		return args
 	}
-	return append(args, flag)
+	if value {
+		return append(args, enabledFlag)
+	}
+	return append(args, disabledFlag)
 }
 
 func spawnedContainerName(outStr string) string {
 	containerName := ""
 	for _, line := range strings.Split(outStr, "\n") {
 		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "Agent "); ok {
+			if _, name, found := strings.Cut(after, " started: "); found && strings.HasPrefix(name, "agent-") {
+				containerName = strings.TrimSpace(name)
+			}
+		}
 		if strings.HasPrefix(line, "agent-") {
 			containerName = line
 		}

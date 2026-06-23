@@ -1,0 +1,4 @@
+interface:
+  display_name: "Author Safe-Agentic Manifests"
+  short_description: "Create fleet and pipeline YAML for safe-ag"
+  default_prompt: "Use $agent-manifest-author to write or refine a safe-agentic fleet or pipeline manifest and validate it with dry runs."

@@ -15,9 +15,11 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/policy"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
+	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -33,11 +35,18 @@ type SpawnOpts struct {
 	Instructions      string
 	InstructionsFile  string
 	SSH               bool
+	NoSSH             bool
 	ReuseAuth         bool
+	NoReuseAuth       bool
 	EphemeralAuth     bool
 	ReuseGHAuth       bool
+	NoReuseGHAuth     bool
+	SeedAuth          bool
+	NoSeedAuth        bool
 	DockerAccess      bool
+	NoDocker          bool
 	DockerSocket      bool
+	NoDockerSocket    bool
 	Network           string
 	Memory            string
 	CPUs              string
@@ -54,6 +63,10 @@ type SpawnOpts struct {
 	FleetVolume       string
 	Hierarchy         string
 	AllowSetupScripts bool
+	Worktree          bool
+	WorktreeBranch    string
+	WorktreePath      string
+	WorktreeInclude   string
 	DryRun            bool
 }
 
@@ -83,11 +96,18 @@ func init() {
 	f.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
 	f.StringVar(&spawnOpts.InstructionsFile, "instructions-file", "", "Instructions from file")
 	f.BoolVar(&spawnOpts.SSH, "ssh", false, "Enable SSH agent forwarding")
+	f.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Disable default SSH agent forwarding")
 	f.BoolVar(&spawnOpts.ReuseAuth, "reuse-auth", false, "Reuse shared auth volume")
+	f.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Disable default shared auth volume")
 	f.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "Use ephemeral auth volume")
 	f.BoolVar(&spawnOpts.ReuseGHAuth, "reuse-gh-auth", false, "Reuse GitHub CLI auth")
+	f.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Disable default GitHub CLI auth reuse")
+	f.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Copy host Claude/Codex auth into this session")
+	f.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Disable default host auth seeding")
 	f.BoolVar(&spawnOpts.DockerAccess, "docker", false, "Enable Docker-in-Docker")
+	f.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Disable default Docker-in-Docker")
 	f.BoolVar(&spawnOpts.DockerSocket, "docker-socket", false, "Mount host Docker socket")
+	f.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Disable default host Docker socket")
 	f.StringVar(&spawnOpts.Network, "network", "", "Custom Docker network")
 	f.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit (e.g., 8g)")
 	f.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit")
@@ -103,6 +123,10 @@ func init() {
 	f.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Kill if estimated cost exceeds budget")
 	f.StringVar(&spawnOpts.Notify, "notify", "", "Notification targets")
 	f.StringVar(&spawnOpts.FleetVolume, "fleet-volume", "", "Shared fleet volume name")
+	f.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed host git worktree from the current checkout")
+	f.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
+	f.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
+	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "Include file for ignored local files; defaults to .safe-aginclude")
 	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Show what would run without executing")
 
 	rf := runCmd.Flags()
@@ -114,8 +138,19 @@ func init() {
 	rf.StringVar(&spawnOpts.Template, "template", "", "Prompt template")
 	rf.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable assignment (key=value)")
 	rf.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
+	rf.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Disable default SSH agent forwarding")
+	rf.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Disable default shared auth volume")
+	rf.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "Use ephemeral auth volume")
+	rf.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Disable default GitHub CLI auth reuse")
+	rf.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Copy host Claude/Codex auth into this session")
+	rf.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Disable default host auth seeding")
+	rf.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Disable default Docker-in-Docker")
+	rf.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Disable default host Docker socket")
 	rf.BoolVar(&spawnOpts.Background, "background", false, "Background mode")
 	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
+	rf.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed host git worktree from the current checkout")
+	rf.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
+	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Dry run")
 
 	rootCmd.AddCommand(spawnCmd, runCmd)
@@ -128,12 +163,12 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 func runQuickStart(cmd *cobra.Command, args []string) error {
 	var repos []string
-	var prompt string
+	var promptParts []string
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "http") || strings.HasPrefix(arg, "git@") || strings.HasPrefix(arg, "ssh://") {
 			repos = append(repos, arg)
 		} else {
-			prompt = arg
+			promptParts = append(promptParts, arg)
 		}
 	}
 	if len(repos) == 0 {
@@ -150,7 +185,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	opts := spawnOpts
 	opts.AgentType = "claude"
 	opts.Repos = repos
-	opts.Prompt = prompt
+	opts.Prompt = strings.Join(promptParts, " ")
 	opts.SSH = ssh
 	opts.Identity = identity
 	return executeSpawn(opts)
@@ -160,15 +195,29 @@ func executeSpawn(opts SpawnOpts) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
+	if err := validateSpawnModeConflicts(opts); err != nil {
+		return err
+	}
+	cfg, err := config.LoadDefaults(config.DefaultsPath())
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	opts = applySpawnConfigDefaults(opts, cfg)
 	if err := validateSpawnOpts(opts); err != nil {
 		return err
 	}
+	if err := enforceSpawnPolicy(opts, cfg); err != nil {
+		return err
+	}
 
-	resolved, err := prepareSpawnResolved(opts)
+	resolved, err := prepareSpawnResolved(opts, cfg)
 	if err != nil {
 		return err
 	}
 	if err := validateResolvedSpawn(resolved); err != nil {
+		return err
+	}
+	if err := prepareSpawnWorktree(opts, &resolved); err != nil {
 		return err
 	}
 	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
@@ -180,7 +229,9 @@ func executeSpawn(opts SpawnOpts) error {
 		return err
 	}
 	appendSpawnLabels(cmd, opts, resolved)
-	appendAuthVolumes(ctx, exec, cmd, opts, resolved)
+	if err := appendAuthVolumes(ctx, exec, cmd, opts, resolved); err != nil {
+		return err
+	}
 	appendGHAuth(cmd, opts)
 	appendHostConfig(cmd, opts)
 	if err := appendAWSConfig(cmd, opts); err != nil {
@@ -207,16 +258,41 @@ func executeSpawn(opts SpawnOpts) error {
 }
 
 type spawnResolved struct {
-	Config        config.Config
-	Memory        string
-	CPUs          string
-	PIDsLimit     int
-	GitName       string
-	GitEmail      string
-	ContainerName string
-	NetworkName   string
-	NetworkMode   string
-	ImageName     string
+	Config         config.Config
+	Memory         string
+	CPUs           string
+	PIDsLimit      int
+	GitName        string
+	GitEmail       string
+	ContainerName  string
+	NetworkName    string
+	NetworkMode    string
+	ImageName      string
+	WorktreePath   string
+	WorktreeBranch string
+}
+
+func prepareSpawnWorktree(opts SpawnOpts, resolved *spawnResolved) error {
+	if !opts.Worktree {
+		return nil
+	}
+	wt, err := worktrees.Prepare(worktrees.Options{
+		ContainerName: resolved.ContainerName,
+		Path:          opts.WorktreePath,
+		Branch:        opts.WorktreeBranch,
+		IncludeFile:   opts.WorktreeInclude,
+		DryRun:        opts.DryRun,
+	})
+	if err != nil {
+		return err
+	}
+	resolved.WorktreePath = wt.Path
+	resolved.WorktreeBranch = wt.Branch
+	fmt.Printf("Worktree: %s (%s)\n", wt.Path, wt.Branch)
+	if len(wt.Includes) > 0 {
+		fmt.Printf("Included local files: %s\n", strings.Join(wt.Includes, ", "))
+	}
+	return nil
 }
 
 func validateSpawnOpts(opts SpawnOpts) error {
@@ -224,6 +300,9 @@ func validateSpawnOpts(opts SpawnOpts) error {
 	case "claude", "codex", "shell":
 	default:
 		return fmt.Errorf("agent type must be claude, codex, or shell (got %q)", opts.AgentType)
+	}
+	if opts.Worktree && len(opts.Repos) > 0 {
+		return fmt.Errorf("--worktree uses the current git checkout; omit --repo")
 	}
 	if opts.Name != "" {
 		if err := validate.NameComponent(opts.Name, "container name"); err != nil {
@@ -250,6 +329,40 @@ func validateSpawnOpts(opts SpawnOpts) error {
 	return docker.EnsureSSHForRepos(opts.SSH, opts.Repos)
 }
 
+func enforceSpawnPolicy(opts SpawnOpts, cfg config.Config) error {
+	rules, err := policy.LoadDefault()
+	if err != nil {
+		return err
+	}
+	return policy.Enforce(rules, spawnPolicyRequest(opts, cfg))
+}
+
+func spawnPolicyRequest(opts SpawnOpts, cfg config.Config) policy.SpawnRequest {
+	network := opts.Network
+	if network == "" {
+		network = cfg.Defaults.Network
+	}
+	if network == "" {
+		network = policy.NetworkManaged
+	}
+	dockerMode := policy.DockerModeOff
+	if opts.DockerSocket {
+		dockerMode = policy.DockerModeHostSocket
+	} else if opts.DockerAccess {
+		dockerMode = policy.DockerModeDinD
+	}
+	return policy.SpawnRequest{
+		DockerMode:        dockerMode,
+		Network:           network,
+		AWSProfile:        opts.AWSProfile,
+		SSH:               opts.SSH,
+		ReuseAuth:         opts.ReuseAuth,
+		ReuseGHAuth:       opts.ReuseGHAuth,
+		SeedAuth:          opts.SeedAuth,
+		AllowSetupScripts: opts.AllowSetupScripts,
+	}
+}
+
 func validateResolvedSpawn(resolved spawnResolved) error {
 	if err := validate.MemoryLimit(resolved.Memory); err != nil {
 		return err
@@ -265,12 +378,8 @@ func validateResolvedSpawn(resolved spawnResolved) error {
 	return nil
 }
 
-func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
-	cfg, err := config.LoadDefaults(config.DefaultsPath())
-	if err != nil {
-		return spawnResolved{}, fmt.Errorf("load config: %w", err)
-	}
-
+func prepareSpawnResolved(opts SpawnOpts, cfg config.Config) (spawnResolved, error) {
+	var err error
 	resolved := spawnResolved{
 		Config:        cfg,
 		Memory:        coalesce(opts.Memory, cfg.Defaults.Memory),
@@ -301,6 +410,62 @@ func prepareSpawnResolved(opts SpawnOpts) (spawnResolved, error) {
 	return resolved, nil
 }
 
+func applySpawnConfigDefaults(opts SpawnOpts, cfg config.Config) SpawnOpts {
+	if opts.NoSSH {
+		opts.SSH = false
+	} else if cfg.Defaults.SSH {
+		opts.SSH = true
+	}
+	if opts.NoDocker {
+		opts.DockerAccess = false
+	} else if cfg.Defaults.Docker {
+		opts.DockerAccess = true
+	}
+	if opts.NoDockerSocket {
+		opts.DockerSocket = false
+	} else if cfg.Defaults.DockerSocket {
+		opts.DockerSocket = true
+	}
+	if opts.NoReuseAuth || opts.EphemeralAuth {
+		opts.ReuseAuth = false
+	} else if cfg.Defaults.ReuseAuth {
+		opts.ReuseAuth = true
+	}
+	if opts.NoReuseGHAuth {
+		opts.ReuseGHAuth = false
+	} else if cfg.Defaults.ReuseGHAuth {
+		opts.ReuseGHAuth = true
+	}
+	if opts.NoSeedAuth {
+		opts.SeedAuth = false
+	} else if cfg.Defaults.SeedAuth {
+		opts.SeedAuth = true
+	}
+	return opts
+}
+
+func validateSpawnModeConflicts(opts SpawnOpts) error {
+	if opts.SSH && opts.NoSSH {
+		return fmt.Errorf("--ssh and --no-ssh are mutually exclusive")
+	}
+	if opts.ReuseAuth && (opts.EphemeralAuth || opts.NoReuseAuth) {
+		return fmt.Errorf("--reuse-auth cannot be combined with --ephemeral-auth or --no-reuse-auth")
+	}
+	if opts.ReuseGHAuth && opts.NoReuseGHAuth {
+		return fmt.Errorf("--reuse-gh-auth and --no-reuse-gh-auth are mutually exclusive")
+	}
+	if opts.SeedAuth && opts.NoSeedAuth {
+		return fmt.Errorf("--seed-auth and --no-seed-auth are mutually exclusive")
+	}
+	if opts.DockerAccess && opts.NoDocker {
+		return fmt.Errorf("--docker and --no-docker are mutually exclusive")
+	}
+	if opts.DockerSocket && opts.NoDockerSocket {
+		return fmt.Errorf("--docker-socket and --no-docker-socket are mutually exclusive")
+	}
+	return nil
+}
+
 func prepareSpawnNetwork(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved *spawnResolved) error {
 	customNetwork := opts.Network
 	if customNetwork == "" {
@@ -328,14 +493,18 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 		cmd.AddEnv("GIT_COMMITTER_EMAIL", resolved.GitEmail)
 	}
 	docker.AppendRuntimeHardening(cmd, docker.HardeningOpts{
-		Network:   resolved.NetworkName,
-		Memory:    resolved.Memory,
-		CPUs:      resolved.CPUs,
-		PIDsLimit: resolved.PIDsLimit,
+		Network:         resolved.NetworkName,
+		Memory:          resolved.Memory,
+		CPUs:            resolved.CPUs,
+		PIDsLimit:       resolved.PIDsLimit,
+		WorkspaceSource: resolved.WorktreePath,
 	})
 	docker.AppendCacheMounts(cmd)
 	if opts.AutoTrust {
 		cmd.AddEnv("SAFE_AGENTIC_AUTO_TRUST", "1")
+	}
+	if resolved.WorktreePath != "" {
+		cmd.AddEnv("SAFE_AGENTIC_WORKTREE", "1")
 	}
 	if opts.AllowSetupScripts {
 		cmd.AddEnv("SAFE_AGENTIC_ALLOW_SETUP_SCRIPTS", "1")
@@ -357,35 +526,51 @@ func appendSpawnSSH(ctx context.Context, exec orb.Executor, cmd *docker.DockerRu
 func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) {
 	cmd.AddLabel(labels.AgentType, opts.AgentType)
 	cmd.AddLabel(labels.SSH, fmt.Sprintf("%v", opts.SSH))
+	cmd.AddLabel(labels.SeedAuth, fmt.Sprintf("%v", opts.SeedAuth))
 	cmd.AddLabel(labels.RepoDisplay, repourl.DisplayLabel(opts.Repos))
 	cmd.AddLabel(labels.NetworkMode, resolved.NetworkMode)
 	cmd.AddLabel(labels.Resources, fmt.Sprintf("cpu=%s,mem=%s,pids=%d", resolved.CPUs, resolved.Memory, resolved.PIDsLimit))
 	cmd.AddLabel(labels.Terminal, "tmux")
+	if resolved.WorktreePath != "" {
+		cmd.AddLabel(labels.Worktree, resolved.WorktreePath)
+	}
 }
 
-func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) {
+func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
+	destinations := authDestinations(opts.AgentType)
 	if opts.FleetVolume != "" && opts.ReuseAuth {
 		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
 		perContainerVol := resolved.ContainerName + "-auth"
 		if !opts.DryRun {
-			exec.Run(ctx, "docker", "volume", "create", perContainerVol)
-			exec.Run(ctx, "docker", "run", "--rm",
+			if err := docker.CreateLabeledVolume(ctx, exec, perContainerVol, "auth", resolved.ContainerName); err != nil {
+				return fmt.Errorf("create isolated auth volume: %w", err)
+			}
+			if _, err := exec.Run(ctx, "docker", "run", "--rm",
 				"-v", sharedVol+":/src:ro",
 				"-v", perContainerVol+":/dst",
 				"alpine", "sh", "-c",
-				"cp -a /src/. /dst/ 2>/dev/null; true")
+				"cp -a /src/. /dst/"); err != nil {
+				return fmt.Errorf("copy shared auth volume: %w", err)
+			}
 		}
 		cmd.AddLabel(labels.AuthType, "fleet-isolated")
-		cmd.AddNamedVolume(perContainerVol, authDestination(opts.AgentType))
-		return
+		for _, dst := range destinations {
+			cmd.AddNamedVolume(perContainerVol, dst)
+		}
+		return nil
 	}
 	if opts.ReuseAuth {
 		cmd.AddLabel(labels.AuthType, "shared")
-		cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, false, ""), authDestination(opts.AgentType))
-		return
+		for _, dst := range destinations {
+			cmd.AddNamedVolume(docker.AuthVolumeName(opts.AgentType, false, ""), dst)
+		}
+		return nil
 	}
 	cmd.AddLabel(labels.AuthType, "ephemeral")
-	cmd.AddTmpfsOwned(authDestination(opts.AgentType), "8m", true, true, 1000, 1000)
+	for _, dst := range destinations {
+		cmd.AddTmpfsOwned(dst, "8m", true, true, 1000, 1000)
+	}
+	return nil
 }
 
 func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {
@@ -410,18 +595,22 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	if opts.AgentType == "claude" || opts.AgentType == "shell" {
 		envs, err := inject.ReadClaudeConfig(claudeDir)
 		appendEnvMap(cmd, envs, err)
-		envs, err = inject.ReadClaudeOAuthToken()
-		appendEnvMap(cmd, envs, err)
-		envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))
-		appendEnvMap(cmd, envs, err)
+		if opts.SeedAuth {
+			envs, err = inject.ReadClaudeOAuthToken()
+			appendEnvMap(cmd, envs, err)
+			envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))
+			appendEnvMap(cmd, envs, err)
+		}
 		envs, err = inject.ReadClaudeSupportFiles(claudeDir)
 		appendEnvMap(cmd, envs, err)
 	}
 	if opts.AgentType == "codex" || opts.AgentType == "shell" {
 		envs, err := inject.ReadCodexConfig(codexHome)
 		appendEnvMap(cmd, envs, err)
-		envs, err = inject.ReadCodexAuth(codexHome)
-		appendEnvMap(cmd, envs, err)
+		if opts.SeedAuth {
+			envs, err = inject.ReadCodexAuth(codexHome)
+			appendEnvMap(cmd, envs, err)
+		}
 	}
 }
 
@@ -484,6 +673,7 @@ func appendPromptAndTemplate(cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 	}
 
 	if opts.Prompt != "" {
+		cmd.AddEnv("SAFE_AGENTIC_PROMPT_B64", inject.EncodeB64(opts.Prompt))
 		if opts.AgentType == "codex" {
 			cmd.AddCmdArgs(opts.Prompt)
 		} else {
@@ -519,9 +709,11 @@ func appendCallbacksAndMetadata(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	}
 	if opts.OnComplete != "" {
 		cmd.AddLabel(labels.OnCompleteB64, inject.EncodeB64(opts.OnComplete))
+		cmd.AddEnv("SAFE_AGENTIC_ON_COMPLETE_B64", inject.EncodeB64(opts.OnComplete))
 	}
 	if opts.OnFail != "" {
 		cmd.AddLabel(labels.OnFailB64, inject.EncodeB64(opts.OnFail))
+		cmd.AddEnv("SAFE_AGENTIC_ON_FAIL_B64", inject.EncodeB64(opts.OnFail))
 	}
 	if opts.MaxCost != "" {
 		cmd.AddLabel(labels.MaxCost, opts.MaxCost)
@@ -560,16 +752,20 @@ func appendDockerMode(ctx context.Context, exec orb.Executor, cmd *docker.Docker
 
 func startSpawnContainer(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	cmd.Detached = true
+	dindStarted := false
+	if opts.DockerAccess {
+		if err := docker.StartDinDRuntime(ctx, exec, resolved.ContainerName, resolved.NetworkName, resolved.ImageName); err != nil {
+			return fmt.Errorf("start Docker runtime: %w", err)
+		}
+		dindStarted = true
+	}
 	if _, err := exec.Run(ctx, cmd.Build()...); err != nil {
+		if dindStarted {
+			_ = docker.RemoveDinDRuntime(ctx, exec, resolved.ContainerName)
+		}
 		return fmt.Errorf("start container: %w", err)
 	}
 	fmt.Printf("Agent %s started: %s\n", opts.AgentType, resolved.ContainerName)
-	if !opts.DockerAccess {
-		return nil
-	}
-	if err := docker.StartDinDRuntime(ctx, exec, resolved.ContainerName, resolved.NetworkName, resolved.ImageName); err != nil {
-		return fmt.Errorf("start Docker runtime: %w", err)
-	}
 	return nil
 }
 
@@ -615,7 +811,7 @@ func resolveContainerName(agentType, name, timestamp string, repos []string) str
 				if len(short) > 20 {
 					short = short[:20]
 				}
-				return prefix + "-" + short
+				return prefix + "-" + short + "-" + timestamp
 			}
 		}
 	}
@@ -623,13 +819,19 @@ func resolveContainerName(agentType, name, timestamp string, repos []string) str
 }
 
 func authDestination(agentType string) string {
+	return authDestinations(agentType)[0]
+}
+
+func authDestinations(agentType string) []string {
 	switch agentType {
 	case "claude":
-		return "/home/agent/.claude"
+		return []string{"/home/agent/.claude"}
 	case "codex":
-		return "/home/agent/.codex"
+		return []string{"/home/agent/.codex"}
+	case "shell":
+		return []string{"/home/agent/.claude", "/home/agent/.codex"}
 	default:
-		return "/home/agent/.claude"
+		return []string{"/home/agent/.claude"}
 	}
 }
 

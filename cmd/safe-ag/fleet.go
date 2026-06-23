@@ -13,6 +13,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/profiles"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -40,14 +41,11 @@ func init() {
 }
 
 func runFleet(cmd *cobra.Command, args []string) error {
-	vars, repos, err := parseTemplateVars(fleetManifestVars, fleetManifestRepos, true)
+	parseOpts, err := fleetParseOptions(args[0])
 	if err != nil {
 		return err
 	}
-	m, err := fleet.ParseFleetWithOptions(args[0], fleet.ParseOptions{
-		Vars:         vars,
-		DefaultRepos: repos,
-	})
+	m, err := fleet.ParseFleetWithOptions(args[0], parseOpts)
 	if err != nil {
 		return err
 	}
@@ -126,16 +124,12 @@ var pipelineCmd = &cobra.Command{
 The manifest can be passed as a filesystem path or as a saved pipeline name
 from ~/.safe-ag/pipelines.
 
-Steps can declare dependencies via depends_on, on_failure, retry, when,
-and outputs fields. Stages with no unmet dependencies are spawned first;
-subsequent stages run once all their dependencies have completed.
+Steps can declare dependencies via depends_on. Stages with no unmet
+dependencies are spawned first; subsequent stages run once all their
+dependencies have completed successfully.
 
-Example manifest fields per step:
-  depends_on: <step-name>   # wait for this step to succeed
-  on_failure:  <step-name>  # run this step on failure
-  retry:       N            # retry up to N times
-  when:        <condition>  # skip step if condition not met
-  outputs:     <command>    # command to extract outputs for downstream steps`,
+Unsupported control fields such as on_failure, retry, when, and outputs are
+rejected instead of silently ignored.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPipeline,
 }
@@ -154,7 +148,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	parseOpts, err := pipelineParseOptions()
+	parseOpts, err := pipelineParseOptions(manifestPath)
 	if err != nil {
 		return err
 	}
@@ -198,16 +192,9 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 	if stateHome == "" {
 		stateHome = config.StateDir()
 	}
-	logDir := filepath.Join(stateHome, "pipelines")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return fmt.Errorf("create pipeline log dir: %w", err)
-	}
-
-	ts := time.Now().Format("20060102-150405")
-	logPath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", filepath.Base(manifestPath), ts))
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logPath, logFile, err := openDetachedPipelineLog(stateHome, manifestPath)
 	if err != nil {
-		return fmt.Errorf("open pipeline log: %w", err)
+		return err
 	}
 
 	childArgs := []string{"pipeline", manifestPath, "--background"}
@@ -231,6 +218,25 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 
 	fmt.Printf("Pipeline detached: pid=%d log=%s\n", cmd.Process.Pid, logPath)
 	return nil
+}
+
+func openDetachedPipelineLog(stateHome, manifestPath string) (string, *os.File, error) {
+	logDir := filepath.Join(stateHome, "pipelines")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return "", nil, fmt.Errorf("create pipeline log dir: %w", err)
+	}
+
+	ts := time.Now().Format("20060102-150405")
+	logPath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", filepath.Base(manifestPath), ts))
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return "", nil, fmt.Errorf("open pipeline log: %w", err)
+	}
+	if err := logFile.Chmod(0o600); err != nil {
+		_ = logFile.Close()
+		return "", nil, fmt.Errorf("chmod pipeline log: %w", err)
+	}
+	return logPath, logFile, nil
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
@@ -301,13 +307,32 @@ func appendFleetDryRunFlags(opts SpawnOpts) {
 	appendBoolFlag(opts.SSH, " --ssh")
 	appendBoolFlag(opts.ReuseAuth, " --reuse-auth")
 	appendBoolFlag(opts.ReuseGHAuth, " --reuse-gh-auth")
+	appendBoolFlag(opts.SeedAuth, " --seed-auth")
 	appendBoolFlag(opts.AutoTrust, " --auto-trust")
 	appendBoolFlag(opts.Background, " --background")
 	appendBoolFlag(opts.DockerAccess, " --docker")
+	appendBoolFlag(opts.DockerSocket, " --docker-socket")
+	appendBoolFlag(opts.AllowSetupScripts, " --allow-setup-scripts")
+	appendBoolFlag(opts.EphemeralAuth, " --ephemeral-auth")
+	appendStringFlag(opts.Template, " --template %s")
+	for _, variable := range opts.TemplateVars {
+		fmt.Printf(" --var %s", variable)
+	}
+	appendStringFlag(opts.Instructions, " --instructions %q")
+	appendStringFlag(opts.InstructionsFile, " --instructions-file %s")
 	appendStringFlag(opts.Network, " --network %s")
 	appendStringFlag(opts.Memory, " --memory %s")
 	appendStringFlag(opts.CPUs, " --cpus %s")
+	if opts.PIDsLimit > 0 {
+		fmt.Printf(" --pids-limit %d", opts.PIDsLimit)
+	}
+	appendStringFlag(opts.Identity, " --identity %q")
 	appendStringFlag(opts.AWSProfile, " --aws %s")
+	appendStringFlag(opts.MaxCost, " --max-cost %s")
+	appendStringFlag(opts.Notify, " --notify %s")
+	appendStringFlag(opts.OnExit, " --on-exit %q")
+	appendStringFlag(opts.OnComplete, " --on-complete %q")
+	appendStringFlag(opts.OnFail, " --on-fail %q")
 	if opts.Prompt != "" {
 		fmt.Printf(" --prompt %q", opts.Prompt)
 	}
@@ -407,16 +432,20 @@ func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.Pipeli
 	if stage.Pipeline != "" {
 		return nil, runSubPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 	}
-	return spawnPipelineStageAgents(stage, rootLabel, currentPath)
+	return spawnPipelineStageAgents(stage, rootLabel, currentPath, timestamp)
 }
 
 func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
 	fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
-	subManifest, err := fleet.ParsePipelineWithOptions(stage.Pipeline, parseOpts)
+	subOpts := parseOpts
+	for _, dir := range profileDirsForManifest(stage.Pipeline) {
+		subOpts.ProfileDirs = appendUniqueString(subOpts.ProfileDirs, dir)
+	}
+	subManifest, err := fleet.ParsePipelineWithOptions(stage.Pipeline, subOpts)
 	if err != nil {
 		return fmt.Errorf("stage %q: parse sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
-	if err := runPipelineManifest(ctx, exec, subManifest, parseOpts, dryRun, timestamp, rootLabel, currentPath); err != nil {
+	if err := runPipelineManifest(ctx, exec, subManifest, subOpts, dryRun, timestamp, rootLabel, currentPath); err != nil {
 		return fmt.Errorf("stage %q: sub-pipeline %q: %w", stage.Name, stage.Pipeline, err)
 	}
 	return nil
@@ -558,7 +587,19 @@ func pipelineNameFromFile(name string) string {
 	}
 }
 
-func pipelineParseOptions() (fleet.ParseOptions, error) {
+func fleetParseOptions(manifestPath string) (fleet.ParseOptions, error) {
+	vars, repos, err := parseTemplateVars(fleetManifestVars, fleetManifestRepos, true)
+	if err != nil {
+		return fleet.ParseOptions{}, err
+	}
+	return fleet.ParseOptions{
+		Vars:         vars,
+		DefaultRepos: repos,
+		ProfileDirs:  profileDirsForManifest(manifestPath),
+	}, nil
+}
+
+func pipelineParseOptions(manifestPath string) (fleet.ParseOptions, error) {
 	vars, repos, err := parseTemplateVars(pipelineManifestVars, pipelineManifestRepos, true)
 	if err != nil {
 		return fleet.ParseOptions{}, err
@@ -566,7 +607,32 @@ func pipelineParseOptions() (fleet.ParseOptions, error) {
 	return fleet.ParseOptions{
 		Vars:         vars,
 		DefaultRepos: repos,
+		ProfileDirs:  profileDirsForManifest(manifestPath),
 	}, nil
+}
+
+func profileDirsForManifest(manifestPath string) []string {
+	var dirs []string
+	dirs = appendUniqueString(dirs, profiles.UserDir())
+	if wd, err := os.Getwd(); err == nil {
+		dirs = appendUniqueString(dirs, profiles.ProjectDir(wd))
+	}
+	if manifestPath != "" {
+		dirs = appendUniqueString(dirs, profiles.ProjectDir(filepath.Dir(manifestPath)))
+	}
+	return dirs
+}
+
+func appendUniqueString(values []string, value string) []string {
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func runPipelineInspect(cmd *cobra.Command, args []string) error {
@@ -574,7 +640,7 @@ func runPipelineInspect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	parseOpts, err := pipelineParseOptions()
+	parseOpts, err := pipelineParseOptions(asset.Path)
 	if err != nil {
 		return err
 	}
@@ -618,7 +684,7 @@ func runPipelineRender(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	parseOpts, err := pipelineParseOptions()
+	parseOpts, err := pipelineParseOptions(manifestPath)
 	if err != nil {
 		return err
 	}
@@ -639,7 +705,7 @@ func runPipelineValidate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	parseOpts, err := pipelineParseOptions()
+	parseOpts, err := pipelineParseOptions(manifestPath)
 	if err != nil {
 		return err
 	}
@@ -650,10 +716,10 @@ func runPipelineValidate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, currentPath []string) ([]string, error) {
+func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, currentPath []string, timestamp string) ([]string, error) {
 	var containerNames []string
 	for _, spec := range stage.Agents {
-		name, err := spawnPipelineAgent(stage, spec, rootLabel, currentPath)
+		name, err := spawnPipelineAgent(stage, spec, rootLabel, currentPath, timestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -664,21 +730,62 @@ func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, curre
 	return containerNames, nil
 }
 
-func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLabel string, currentPath []string) (string, error) {
+func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLabel string, currentPath []string, timestamp string) (string, error) {
 	if spec.Type == "" {
 		return "", nil
 	}
 	opts := specToSpawnOpts(spec, rootLabel)
+	opts.Name = pipelineContainerSuffix(stage, spec, currentPath, timestamp)
 	opts.Hierarchy = pipelineStageHierarchy(currentPath, stage.Name)
 	opts.Background = true
 	if err := executeSpawn(opts); err != nil {
 		return "", fmt.Errorf("stage %q: spawn %q: %w", stage.Name, spec.Name, err)
 	}
-	return resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos), nil
+	return resolveContainerName(opts.AgentType, opts.Name, timestamp, opts.Repos), nil
 }
 
 func pipelineStageHierarchy(currentPath []string, stageName string) string {
 	return strings.Join(append(append([]string{}, currentPath...), stageName), "/")
+}
+
+func pipelineContainerSuffix(stage fleet.PipelineStage, spec fleet.AgentSpec, currentPath []string, timestamp string) string {
+	parts := append(append([]string{}, currentPath...), stage.Name)
+	if spec.Name != "" {
+		parts = append(parts, spec.Name)
+	} else {
+		parts = append(parts, spec.Type)
+	}
+	parts = append(parts, timestamp)
+	return safeNameComponent(strings.Join(parts, "-"), 96)
+}
+
+func safeNameComponent(value string, maxLen int) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		allowed := (r >= 'A' && r <= 'Z') ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-'
+		if allowed {
+			if r == '-' && lastDash {
+				continue
+			}
+			b.WriteRune(r)
+			lastDash = r == '-'
+		} else if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+		if maxLen > 0 && b.Len() >= maxLen {
+			break
+		}
+	}
+	safe := strings.Trim(b.String(), ".-_")
+	if safe == "" {
+		return "pipeline"
+	}
+	return safe
 }
 
 func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage) {
@@ -740,21 +847,36 @@ func specToSpawnOpts(spec fleet.AgentSpec, fleetVolume string) SpawnOpts {
 		repos = []string{spec.Repo}
 	}
 	return SpawnOpts{
-		AgentType:    spec.Type,
-		Repos:        repos,
-		Name:         spec.Name,
-		Prompt:       spec.Prompt,
-		SSH:          spec.SSH,
-		ReuseAuth:    spec.ReuseAuth,
-		ReuseGHAuth:  spec.ReuseGHAuth,
-		AutoTrust:    spec.AutoTrust,
-		Background:   spec.Background,
-		DockerAccess: spec.Docker,
-		Network:      spec.Network,
-		Memory:       spec.Memory,
-		CPUs:         spec.CPUs,
-		AWSProfile:   spec.AWS,
-		FleetVolume:  fleetVolume,
+		AgentType:         spec.Type,
+		Repos:             repos,
+		Name:              spec.Name,
+		Prompt:            spec.Prompt,
+		Template:          spec.Template,
+		TemplateVars:      spec.TemplateVars,
+		Instructions:      spec.Instructions,
+		InstructionsFile:  spec.InstructionsFile,
+		SSH:               spec.SSH,
+		ReuseAuth:         spec.ReuseAuth,
+		EphemeralAuth:     spec.EphemeralAuth,
+		ReuseGHAuth:       spec.ReuseGHAuth,
+		SeedAuth:          spec.SeedAuth,
+		AutoTrust:         spec.AutoTrust,
+		Background:        spec.Background,
+		DockerAccess:      spec.Docker,
+		DockerSocket:      spec.DockerSocket,
+		Network:           spec.Network,
+		Memory:            spec.Memory,
+		CPUs:              spec.CPUs,
+		PIDsLimit:         spec.PIDsLimit,
+		Identity:          spec.Identity,
+		AWSProfile:        spec.AWS,
+		MaxCost:           spec.MaxCost,
+		Notify:            spec.Notify,
+		OnExit:            spec.OnExit,
+		OnComplete:        spec.OnComplete,
+		OnFail:            spec.OnFail,
+		AllowSetupScripts: spec.AllowSetupScripts,
+		FleetVolume:       fleetVolume,
 	}
 }
 

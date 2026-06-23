@@ -311,6 +311,8 @@ if [ -n "${REPOS:-}" ]; then
     }
     cd "/workspace/$clone_path"
   fi
+elif [ "${SAFE_AGENTIC_WORKTREE:-}" = "1" ]; then
+  cd /workspace
 fi
 
 # ---------------------------------------------------------------------------
@@ -322,13 +324,11 @@ run_lifecycle_script() {
 
   [ "${SAFE_AGENTIC_ALLOW_SETUP_SCRIPTS:-}" = "1" ] || return 0
 
-  # Find safe-agentic.json in any cloned repo
-  config_file=$(find /workspace -mindepth 1 -maxdepth 3 -type f -name safe-agentic.json 2>/dev/null | sort | head -1 || true)
+  while IFS= read -r config_file; do
+    [ -n "$config_file" ] || continue
 
-  [ -n "$config_file" ] || return 0
-
-  local script_cmd
-  script_cmd=$(python3 -c "
+    local script_cmd
+    script_cmd=$(python3 -c "
 import json, sys
 try:
     with open(sys.argv[1]) as f:
@@ -338,12 +338,13 @@ except Exception:
     pass
 " "$config_file" "$script_name" 2>/dev/null || true)
 
-  [ -n "$script_cmd" ] || return 0
+    [ -n "$script_cmd" ] || continue
 
-  echo "[entrypoint] Running $script_name script from safe-agentic.json..."
-  (cd "$(dirname "$config_file")" && bash -c "$script_cmd") || {
-    echo "[entrypoint] WARNING: $script_name script failed (exit $?)" >&2
-  }
+    echo "[entrypoint] Running $script_name script from $config_file..."
+    (cd "$(dirname "$config_file")" && bash -c "$script_cmd") || {
+      echo "[entrypoint] WARNING: $script_name script failed (exit $?)" >&2
+    }
+  done < <(find /workspace -mindepth 1 -maxdepth 3 -type f -name safe-agentic.json 2>/dev/null | sort)
 }
 
 run_lifecycle_script "setup"
@@ -362,18 +363,65 @@ if [ -n "${SAFE_AGENTIC_INSTRUCTIONS_B64:-}" ]; then
   fi
 fi
 
+# shellcheck disable=SC2317,SC2329 # Invoked indirectly by EXIT trap.
 run_on_exit_callback() {
-  local on_exit_cmd=""
-  if [ -n "${SAFE_AGENTIC_ON_EXIT_B64:-}" ]; then
-    on_exit_cmd=$(printf '%s' "$SAFE_AGENTIC_ON_EXIT_B64" | base64 -d 2>/dev/null || true)
-  fi
-  if [ -n "$on_exit_cmd" ]; then
-    echo "[entrypoint] Running on-exit callback..."
-    bash -c "$on_exit_cmd" || {
-      echo "[entrypoint] WARNING: on-exit callback exited with status $?" >&2
-    }
+  run_callback "on-exit" "${SAFE_AGENTIC_ON_EXIT_B64:-}"
+}
+
+run_callback() {
+  local name="$1"
+  local encoded="${2:-}"
+  local callback_cmd=""
+
+  [ -n "$encoded" ] || return 0
+  callback_cmd=$(printf '%s' "$encoded" | base64 -d 2>/dev/null || true)
+  [ -n "$callback_cmd" ] || return 0
+
+  echo "[entrypoint] Running $name callback..."
+  bash -c "$callback_cmd" || {
+    echo "[entrypoint] WARNING: $name callback exited with status $?" >&2
+  }
+}
+
+run_completion_callback() {
+  local exit_code="${1:-1}"
+
+  if [ "$exit_code" = "0" ]; then
+    run_callback "on-complete" "${SAFE_AGENTIC_ON_COMPLETE_B64:-}"
+  else
+    run_callback "on-fail" "${SAFE_AGENTIC_ON_FAIL_B64:-}"
   fi
 }
+
+session_exit_code() {
+  local events_file="$SESSION_STATE_DIR/session-events.jsonl"
+
+  [ -f "$events_file" ] || {
+    printf '1\n'
+    return 0
+  }
+
+  python3 - "$events_file" <<'PY' 2>/dev/null || printf '1\n'
+import json
+import sys
+
+exit_code = 1
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            if event.get("type") == "session.end":
+                data = event.get("data") or {}
+                exit_code = int(data.get("exit_code", 1))
+except Exception:
+    pass
+print(exit_code)
+PY
+}
+
 trap run_on_exit_callback EXIT
 
 # ---------------------------------------------------------------------------
@@ -402,7 +450,10 @@ case "$AGENT_TYPE" in
     if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
       # Background mode: run directly, no tmux. Output goes to docker logs.
       echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      exec "$AGENT_SESSION_LIB" "${launch_args[@]}"
+      agent_status=0
+      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
+      run_completion_callback "$agent_status"
+      exit "$agent_status"
     fi
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
@@ -414,7 +465,7 @@ case "$AGENT_TYPE" in
       exit 1
     }
     # Decode base64 prompt from Go CLI if present
-    if [ -n "${SAFE_AGENTIC_PROMPT_B64:-}" ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+    if [ -n "${SAFE_AGENTIC_PROMPT_B64:-}" ] && [ "${#launch_args[@]}" -eq 0 ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       mkdir -p "$SESSION_STATE_DIR"
       echo "$SAFE_AGENTIC_PROMPT_B64" | base64 -d > "$SESSION_STATE_DIR/pending-prompt"
     fi
@@ -439,13 +490,19 @@ case "$AGENT_TYPE" in
       ) &
     fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
+    agent_status=$(session_exit_code)
+    run_completion_callback "$agent_status"
+    exit "$agent_status"
     ;;
   codex)
     echo "[entrypoint] Launching Codex..."
     echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
     if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
       echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      exec "$AGENT_SESSION_LIB" "${launch_args[@]}"
+      agent_status=0
+      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
+      run_completion_callback "$agent_status"
+      exit "$agent_status"
     fi
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
@@ -465,14 +522,20 @@ case "$AGENT_TYPE" in
       ) &
     fi
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
+    agent_status=$(session_exit_code)
+    run_completion_callback "$agent_status"
+    exit "$agent_status"
     ;;
   *)
     echo "[entrypoint] No agent type set. Starting interactive shell."
     echo "[entrypoint] All tools available. Repos in /workspace/."
+    shell_status=0
     if [ "${#launch_args[@]}" -gt 0 ]; then
-      exec bash -l "${launch_args[@]}"
+      bash -l "${launch_args[@]}" || shell_status=$?
     else
-      exec bash -l
+      bash -l || shell_status=$?
     fi
+    run_completion_callback "$shell_status"
+    exit "$shell_status"
     ;;
 esac

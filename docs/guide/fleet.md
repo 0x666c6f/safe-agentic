@@ -67,30 +67,38 @@ Pipeline behavior:
 | Field | Meaning |
 |---|---|
 | `name` | human-readable agent/stage name |
+| `profile` | profile name from `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml` |
 | `type` | `claude` or `codex` |
 | `repo` / `repos` | one or many repos |
 | `prompt` | task |
+| `template`, `template_vars` | prompt template and variables |
+| `instructions`, `instructions_file` | extra agent instructions |
 | `ssh` | SSH forwarding |
 | `reuse_auth` | shared Claude/Codex auth |
 | `reuse_gh_auth` | shared `gh` auth |
+| `seed_auth` | copy host Claude/Codex auth into this session |
+| `ephemeral_auth` | force per-session auth |
 | `docker` | DinD access |
+| `docker_socket` | direct VM Docker socket access |
+| `allow_setup_scripts` | allow repo-provided `safe-agentic.json` setup hooks |
 | `aws` | AWS profile |
 | `network` | custom Docker network |
-| `memory`, `cpus` | resource limits |
+| `memory`, `cpus`, `pids_limit` | resource limits |
+| `max_cost`, `notify`, `on_exit`, `on_complete`, `on_fail` | metadata and callbacks |
 | `background` | spawn without attach |
 | `auto_trust` | skip trust prompt |
+
+Profiles can be used in `defaults` or per agent. Manifest fields override profile fields.
 
 Pipeline-only fields:
 
 | Field | Meaning |
 |---|---|
 | `depends_on` | dependency edge |
-| `retry` | retry count |
-| `on_failure` | failure handler |
-| `when` | conditional marker for downstream logic |
-| `outputs` | command/output convention for later stages |
 | `models` | duplicate a stage across models |
 | `pipeline` | nested pipeline file |
+
+Unsupported control fields such as `retry`, `on_failure`, `when`, and `outputs` are rejected for now instead of being silently ignored.
 
 ## Real examples
 
@@ -109,7 +117,7 @@ Use a fleet when:
 
 Use a pipeline when:
 - later work depends on earlier output
-- you need retries or stage ordering
+- you need stage ordering
 
 Use both when:
 - parallel review or analysis feeds a later consolidation/fix stage

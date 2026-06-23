@@ -64,9 +64,20 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	exec := newExecutor()
 
 	target := targetFromArgs(cmd, args)
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	lines, err := loadRenderedLogs(ctx, exec, target, logsLines)
 	if err != nil {
 		return err
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func loadRenderedLogs(ctx context.Context, exec orb.Executor, target string, lineLimit int) ([]string, error) {
+	name, err := docker.ResolveTarget(ctx, exec, target)
+	if err != nil {
+		return nil, err
 	}
 
 	// Detect agent type for config dir
@@ -94,23 +105,24 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	out, err := readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, logsLines*3, running)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	count := 0
+	var renderedLines []string
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := scanner.Text()
 		rendered := renderLogEntry(line)
 		if rendered != "" {
-			fmt.Println(rendered)
+			renderedLines = append(renderedLines, rendered)
 			count++
-			if count >= logsLines {
+			if count >= lineLimit {
 				break
 			}
 		}
 	}
-	return nil
+	return renderedLines, scanner.Err()
 }
 
 func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDir string, searchDirs []string, findCmd string, tailCount int, running bool) ([]byte, error) {
@@ -190,7 +202,7 @@ if best_file:
 		if jsonlPath == "" {
 			return nil, fmt.Errorf("no session log found in %s", configDir)
 		}
-		tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, jsonlPath)
+		tailCmd := fmt.Sprintf("tail -n %d %s", tailCount, shellQuote(jsonlPath))
 		out, err = exec.Run(ctx, "docker", "exec", name, "bash", "-c", tailCmd)
 		if err != nil {
 			return readLatestSessionLog(ctx, exec, name, configDir, searchDirs, findCmd, tailCount, false)

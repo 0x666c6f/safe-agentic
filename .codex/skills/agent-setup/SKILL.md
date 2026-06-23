@@ -75,6 +75,17 @@ safe-ag vm ssh
 
 **Important:** Always use `safe-ag vm start` instead of `orb start` directly — it re-applies filesystem hardening that OrbStack may reset on restart.
 
+## Policy rules
+
+Spawn-time policy lives outside the VM:
+
+```bash
+~/.safe-ag/rules.toml
+.safe-ag/rules.toml
+```
+
+Rules deny risky options before networks, worktrees, or containers are created. Use them to lock down Docker mode, networks, AWS profiles, SSH forwarding, shared auth, auth seeding, and repo setup scripts.
+
 ## Troubleshooting
 
 ### "VM not found" error
@@ -104,8 +115,16 @@ safe-ag update --full
 safe-ag vm start   # Re-applies hardening
 ```
 
+### Spawn blocked by policy
+```bash
+cat ~/.safe-ag/rules.toml
+find .. -path '*/.safe-ag/rules.toml'
+```
+
+Use a command that matches the allowlist; do not widen policy unless the user explicitly asks.
+
 ### Need to start over
 ```bash
-safe-ag cleanup            # Remove all containers, auth, networks
+safe-ag cleanup            # Remove containers and networks; keep auth volumes
 safe-ag update --full      # Rebuild image from scratch
 ```

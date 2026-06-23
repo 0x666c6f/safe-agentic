@@ -71,6 +71,33 @@ func TestRunPipeline_BackgroundDelegatesToLauncher(t *testing.T) {
 	}
 }
 
+func TestOpenDetachedPipelineLogCreatesPrivateLog(t *testing.T) {
+	stateHome := t.TempDir()
+
+	logPath, logFile, err := openDetachedPipelineLog(stateHome, "pipeline.yaml")
+	if err != nil {
+		t.Fatalf("openDetachedPipelineLog() error = %v", err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatalf("close log file: %v", err)
+	}
+
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat log file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("pipeline log mode = %o, want 600", got)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(logPath))
+	if err != nil {
+		t.Fatalf("stat log dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("pipeline log dir mode = %o, want 700", got)
+	}
+}
+
 func TestSpawnPipelineAgentIncludesStageInHierarchy(t *testing.T) {
 	_, cleanup := testSetup(t)
 	defer cleanup()
@@ -95,6 +122,49 @@ func TestSpawnPipelineAgentIncludesStageInHierarchy(t *testing.T) {
 
 	if !strings.Contains(output, "safe-agentic.hierarchy=double-review-reconcile/claude-reviews") {
 		t.Fatalf("dry-run missing stage hierarchy label:\n%s", output)
+	}
+}
+
+func TestPipelineContainerSuffixIsSafeAndStable(t *testing.T) {
+	got := pipelineContainerSuffix(
+		fleet.PipelineStage{Name: "review/stage"},
+		fleet.AgentSpec{Name: "code review $(touch /tmp/pwned)", Type: "claude"},
+		[]string{"root pipeline"},
+		"20260410-120000",
+	)
+	want := "root-pipeline-review-stage-code-review-touch-tmp-pwned-20260410-120000"
+	if got != want {
+		t.Fatalf("pipelineContainerSuffix() = %q, want %q", got, want)
+	}
+}
+
+func TestSpawnPipelineAgentReturnsActualContainerName(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	stage := fleet.PipelineStage{Name: "review"}
+	spec := fleet.AgentSpec{
+		Name:   "code-review",
+		Type:   "claude",
+		Repo:   "https://github.com/org/repo.git",
+		Prompt: "review",
+	}
+
+	got, err := spawnPipelineAgent(stage, spec, "pipeline-123", []string{"root"}, "20260410-120000")
+	if err != nil {
+		t.Fatalf("spawnPipelineAgent() error = %v", err)
+	}
+	want := "agent-claude-root-review-code-review-20260410-120000"
+	if got != want {
+		t.Fatalf("spawnPipelineAgent() name = %q, want %q", got, want)
+	}
+	cmds := fake.CommandsMatching("docker run")
+	if len(cmds) == 0 {
+		t.Fatal("expected docker run command")
+	}
+	joined := strings.Join(cmds[0], " ")
+	if !strings.Contains(joined, "--name "+want) {
+		t.Fatalf("docker run used different container name:\n%s", joined)
 	}
 }
 

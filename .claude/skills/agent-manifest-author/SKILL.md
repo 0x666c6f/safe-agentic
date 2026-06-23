@@ -17,14 +17,16 @@ Use this skill for reusable orchestration, not one-off `spawn` commands.
 1. map work units, repos, auth needs, and dependency edges
 2. keep prompts task-specific; do not hide orchestration in one vague mega-prompt
 3. encode shared defaults once, override only when needed
-4. dry-run first with `safe-ag fleet ... --dry-run` or `safe-ag pipeline ... --dry-run`
-5. keep example manifests and real manifests small and reviewable
+4. use `profile:` when a role already exists in `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml`
+5. dry-run first with `safe-ag fleet ... --dry-run` or `safe-ag pipeline ... --dry-run`
+6. keep example manifests and real manifests small and reviewable
 
 ## Fleet starter
 
 ```yaml
 agents:
   - name: api-review
+    profile: reviewer
     type: claude
     repo: git@github.com:org/api.git
     ssh: true
@@ -54,8 +56,11 @@ steps:
     ssh: true
     prompt: "Address the review findings and run tests"
     depends_on: review
-    retry: 1
 ```
+
+Only use implemented pipeline controls. `depends_on` is supported. `retry`, `on_failure`, `when`, and `outputs` are rejected for now.
+
+Supported agent fields include `profile`, `template`, `template_vars`, `instructions`, `instructions_file`, `ephemeral_auth`, `docker_socket`, `pids_limit`, `identity`, `max_cost`, `notify`, `on_exit`, `on_complete`, and `on_fail`. Manifest fields override profile fields.
 
 ## Validation
 

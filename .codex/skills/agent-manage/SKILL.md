@@ -1,11 +1,11 @@
 ---
 name: agent-manage
-description: List, attach to, stop, or clean up running safe-agentic containers. Use when the user asks to check agents, stop agents, attach to an agent, clean up, or manage running containers.
+description: List, attach to, steer, search, run actions for, stop, or clean up running safe-agentic containers. Use when the user asks to check agents, send follow-up instructions, run a configured action, find prior output, stop agents, attach to an agent, clean up, or manage running containers.
 ---
 
 # Manage Safe Agents
 
-List, attach to, stop, export sessions, or clean up agent containers.
+List, attach to, steer, search, run actions for, stop, export sessions, or clean up agent containers.
 
 ## Commands
 
@@ -25,6 +25,97 @@ safe-ag attach <name>
 
 If the container is running, opens a shell into it. If stopped, restarts it.
 The name can be the full container name (e.g., `agent-codex-cardinality-restrictions`) or the suffix (e.g., `cardinality-restrictions`).
+
+### Steer an agent
+
+```bash
+safe-ag steer <name> "focus on the failing test only"
+safe-ag steer --latest "continue, but keep the change narrow"
+```
+
+Sends follow-up text into a tmux-backed session without attaching. If the container is stopped, it starts it first.
+
+### Search agent logs
+
+```bash
+safe-ag search "error text"
+safe-ag search "Needle" <name> --case-sensitive
+```
+
+Searches rendered session logs across all agents by default, or one target with `<name>` / `--latest`.
+
+### Timeline and inbox
+
+```bash
+safe-ag timeline
+safe-ag inbox
+safe-ag inbox --all
+```
+
+Use `timeline` for recent event/audit history. Use `inbox` for classified statuses such as `failed`, `failed-tests`, `needs-auth`, `stuck`, `ready-for-review`, and `ready-for-pr`.
+
+### Run configured actions
+
+```bash
+safe-ag action list
+safe-ag action show test
+safe-ag action run test --latest
+safe-ag action run lint <name>
+```
+
+Loads actions from `~/.safe-ag/actions.toml` then `.safe-ag/actions.toml`. Project actions override user actions. Commands run inside the target agent workspace.
+
+### Track review comments
+
+```bash
+safe-ag review-comments add <name> cmd/main.go 42 "Handle empty input first"
+safe-ag review-comments list <name>
+safe-ag review-comments resolve rc-123
+safe-ag review-comments clear <name>
+```
+
+Stores local file/line review notes in `~/.safe-ag/state/review-comments.jsonl`. Use with `safe-ag steer` when an agent needs to address review feedback without losing context.
+
+### Stage or revert workspace files
+
+```bash
+safe-ag workspace stage <name> src/app.go
+safe-ag workspace unstage <name> src/app.go
+safe-ag workspace revert <name> src/app.go --yes
+safe-ag workspace stage-patch <name> selected.patch
+safe-ag workspace revert-patch <name> selected.patch --yes
+```
+
+Use `workspace revert` or `revert-patch` only when the user asked to discard those changes or the scope is clearly confirmed. Patch commands are for selected hunks from a unified diff.
+
+### Capture browser verification artifacts
+
+```bash
+safe-ag browser capture http://localhost:3000 --mode auto --annotation "login button visible"
+safe-ag browser capture https://example.com --mode chrome --out /tmp/browser-artifact
+```
+
+Captures DOM, headers, and artifact metadata. Chrome mode also captures screenshot, console, and network data without reusing host browser profiles/cookies.
+
+### JSON protocol for clients
+
+```bash
+safe-ag server --stdio
+SAFE_AGENTIC_SERVER_TOKEN=secret safe-ag server --listen 127.0.0.1:8765
+```
+
+Use for client integrations that need `schema`, `ping`, `timeline`, `inbox`, `agents.list`, `agent.logs`, `agent.diff`, `actions.list`, or `actions.run` without scraping human CLI output. HTTP mode requires a bearer token.
+
+### Handoff workspaces
+
+```bash
+safe-ag handoff <name> --to-worktree
+safe-ag handoff <name> --to-local ./workspace-copy
+safe-ag worktree list
+safe-ag worktree cleanup --dry-run
+```
+
+Use `--to-worktree` for agents spawned with `--worktree`; it prints the managed host checkout path. Use `--to-local` to copy `/workspace` out of any agent container.
 
 ### Stop and remove agents
 
@@ -208,7 +299,7 @@ Shows the append-only operation log (`~/.config/safe-agentic/audit.jsonl`). Ever
 ### Full cleanup
 
 ```bash
-safe-ag cleanup          # keeps shared auth volumes
+safe-ag cleanup          # keeps auth volumes
 safe-ag cleanup --auth   # also removes auth volumes
 ```
 
@@ -217,7 +308,7 @@ This:
 2. Removes all containers (running + stopped)
 3. Removes managed per-container networks
 4. Prunes dangling images
-5. With `--auth`: also removes shared auth volumes
+5. With `--auth`: also removes shared and isolated auth volumes
 
 ## TUI keybindings
 
@@ -242,16 +333,22 @@ This:
 | `e` | Export sessions |
 | `/` | Filter agents |
 | `?` | Help overlay (all keybindings) |
+| `:action <name>` | Run configured action in selected agent |
+| `:comments` | Show review comments for selected agent |
+| `:timeline` | Show recent events |
+| `:inbox` | Show events needing attention |
 | `:fleet <file>` | Spawn from manifest |
 | `:pipeline <file>` | Run pipeline |
 
 ## Workflow
 
 1. **Check agents** with `safe-ag list`
-2. **Attach** to resume a stopped agent or get a second shell
-3. **Export sessions** before stopping if you want to keep history on host
-4. **Stop** individual agents or all at once
-5. **Cleanup** periodically to free resources
+2. **Peek/search** to understand current or prior output
+3. **Steer** with a focused follow-up instead of attaching when possible
+4. **Run actions** for repo-native checks inside the agent workspace
+5. **Export sessions** before stopping if you want to keep history on host
+6. **Stop** individual agents or all at once
+7. **Cleanup** periodically to free resources
 
 ## Examples
 

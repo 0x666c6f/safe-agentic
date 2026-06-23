@@ -9,6 +9,7 @@ import (
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
 	"github.com/0x666c6f/safe-agentic/pkg/orb"
@@ -243,6 +244,7 @@ func stopOneContainer(ctx context.Context, exec orb.Executor, name string) error
 
 	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
 	auditLogger.Log("stop", name, nil)
+	events.Emit(events.DefaultEventsPath(), "agent.stopped", map[string]string{"container": name})
 	return nil
 }
 
@@ -331,12 +333,19 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 				exec.Run(ctx, "docker", "volume", "rm", vol)
 			}
 		}
+		isolatedOut, _ := exec.Run(ctx, "docker", "volume", "ls",
+			"--filter", "label=safe-agentic.type=auth",
+			"--format", "{{.Name}}")
+		for _, vol := range splitLines(string(isolatedOut)) {
+			exec.Run(ctx, "docker", "volume", "rm", vol)
+		}
 	}
 
 	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
 	auditLogger.Log("cleanup", "", map[string]string{
 		"auth": fmt.Sprintf("%v", cleanupAuth),
 	})
+	events.Emit(events.DefaultEventsPath(), "cleanup.completed", map[string]string{"auth": fmt.Sprintf("%v", cleanupAuth)})
 
 	fmt.Println("Cleanup complete.")
 	return nil
@@ -417,6 +426,9 @@ func reconstructSpawnOpts(ctx context.Context, exec orb.Executor, name string) (
 
 func applyReconstructedLabels(opts *SpawnOpts, getLabel func(string) string) {
 	opts.SSH = getLabel(labels.SSH) == "true"
+	opts.NoSSH = !opts.SSH
+	opts.SeedAuth = getLabel(labels.SeedAuth) == "true"
+	opts.NoSeedAuth = !opts.SeedAuth
 	applyReconstructedAuth(opts, getLabel(labels.AuthType), getLabel(labels.GHAuth))
 	applyReconstructedDockerMode(opts, getLabel(labels.DockerMode))
 	opts.MaxCost = getLabel(labels.MaxCost)
@@ -430,14 +442,21 @@ func applyReconstructedAuth(opts *SpawnOpts, authType, ghAuth string) {
 	opts.EphemeralAuth = authType == "ephemeral"
 	opts.ReuseAuth = authType == "shared"
 	opts.ReuseGHAuth = ghAuth == "shared"
+	opts.NoReuseAuth = authType == "ephemeral"
+	opts.NoReuseGHAuth = !opts.ReuseGHAuth
 }
 
 func applyReconstructedDockerMode(opts *SpawnOpts, dockerMode string) {
 	switch dockerMode {
 	case "dind":
 		opts.DockerAccess = true
+		opts.NoDockerSocket = true
 	case "host-socket":
 		opts.DockerSocket = true
+		opts.NoDocker = true
+	case "off":
+		opts.NoDocker = true
+		opts.NoDockerSocket = true
 	}
 }
 

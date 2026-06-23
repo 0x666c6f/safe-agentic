@@ -133,6 +133,7 @@ func TestReconstructSpawnOpts_Basic(t *testing.T) {
 		"safe-agentic.ssh":        "true",
 		"safe-agentic.auth":       "shared",
 		"safe-agentic.gh-auth":    "",
+		"safe-agentic.seed-auth":  "true",
 		"safe-agentic.docker":     "off",
 		"safe-agentic.max-cost":   "5.00",
 		"safe-agentic.aws":        "",
@@ -162,11 +163,23 @@ func TestReconstructSpawnOpts_Basic(t *testing.T) {
 	if !opts.SSH {
 		t.Error("SSH should be true")
 	}
+	if opts.NoSSH {
+		t.Error("NoSSH should be false when original had SSH")
+	}
 	if !opts.ReuseAuth {
 		t.Error("ReuseAuth should be true")
 	}
 	if opts.EphemeralAuth {
 		t.Error("EphemeralAuth should be false")
+	}
+	if !opts.SeedAuth {
+		t.Error("SeedAuth should be true")
+	}
+	if opts.NoSeedAuth {
+		t.Error("NoSeedAuth should be false when original had seed auth")
+	}
+	if !opts.NoReuseGHAuth {
+		t.Error("NoReuseGHAuth should be true when original lacked GH auth reuse")
 	}
 	if opts.MaxCost != "5.00" {
 		t.Errorf("MaxCost = %q, want %q", opts.MaxCost, "5.00")
@@ -215,11 +228,20 @@ func TestReconstructSpawnOpts_EphemeralAuth(t *testing.T) {
 	if opts.SSH {
 		t.Error("SSH should be false")
 	}
+	if !opts.NoSSH {
+		t.Error("NoSSH should be true when original lacked SSH")
+	}
 	if !opts.EphemeralAuth {
 		t.Error("EphemeralAuth should be true")
 	}
+	if !opts.NoReuseAuth {
+		t.Error("NoReuseAuth should be true when original used ephemeral auth")
+	}
 	if !opts.DockerAccess {
 		t.Error("DockerAccess should be true for dind")
+	}
+	if !opts.NoDockerSocket {
+		t.Error("NoDockerSocket should be true for dind retry")
 	}
 	if len(opts.Repos) == 0 || !strings.Contains(opts.Repos[0], "private") {
 		t.Errorf("Repos = %v", opts.Repos)

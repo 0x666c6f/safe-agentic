@@ -78,6 +78,7 @@ func runReviewPreset(name string, assignments, repos []string, dryRun bool) erro
 	parseOpts := fleet.ParseOptions{
 		Vars:         vars,
 		DefaultRepos: defaultRepos,
+		ProfileDirs:  profileDirsForManifest(asset.Path),
 	}
 	m, err := fleet.ParsePipelineWithOptions(asset.Path, parseOpts)
 	if err != nil {

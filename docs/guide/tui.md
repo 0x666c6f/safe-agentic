@@ -42,6 +42,10 @@ safe-ag tui
 - `attach` will restart a stopped container when needed
 - on macOS, `attach` and `resume` open iTerm2 by default and fall back to Terminal.app when iTerm2 is not installed
 - preview uses session/log fallbacks depending on what is available
+- `:profile <name> [prompt]` runs a saved agent profile
+- `:action <name>` runs a configured action in the selected agent
+- `:comments` opens saved review comments for the selected agent
+- `:timeline` and `:inbox` open event views
 - filtering is case-insensitive
 - narrow terminals automatically hide lower-priority columns
 
@@ -57,8 +61,10 @@ Press `n` to open the spawn form. It lets you set:
 - SSH
 - auth reuse
 - GitHub auth reuse
+- host auth seeding
 - AWS profile
 - Docker access
+- Docker socket access
 - git identity
 
-The spawned agent is launched in background mode; reconnect from the table when ready.
+The spawn form starts from `~/.safe-ag/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. The spawned agent is launched in background mode; reconnect from the table when ready.

@@ -7,12 +7,13 @@ These are the defaults that shape a normal safe-agentic session.
 | SSH agent | off |
 | Claude/Codex auth reuse | off |
 | GitHub auth reuse | off |
+| Host Claude/Codex auth seeding | off |
 | AWS credentials | off |
 | Docker access | off |
 | Root filesystem | read-only |
 | Linux capabilities | all dropped |
 | Privilege escalation | blocked |
-| Network | managed per-agent bridge |
+| Network | managed per-agent bridge with private-range egress guardrails |
 | Resources | 8g / 4 CPU / 512 PIDs |
 | Host key trust | pinned GitHub host keys |
 | Sudo | unavailable |
@@ -28,6 +29,7 @@ The default session is intentionally useful but narrow:
 ```bash
 safe-ag spawn claude --ssh --repo git@github.com:org/private.git
 safe-ag spawn claude --reuse-auth --repo https://github.com/org/repo.git
+safe-ag spawn claude --seed-auth --repo https://github.com/org/repo.git
 safe-ag spawn claude --aws my-profile --repo git@github.com:org/infra.git
 safe-ag spawn claude --docker --repo https://github.com/org/repo.git
 ```
