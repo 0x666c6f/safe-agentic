@@ -72,8 +72,8 @@ Difference:
 Push files into a container:
 
 ```bash
-orb run -m safe-agentic docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
-orb run -m safe-agentic docker cp ./dist/. api-refactor:/workspace/dist
+container machine run -n safe-agentic -u root -- docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
+container machine run -n safe-agentic -u root -- docker cp ./dist/. api-refactor:/workspace/dist
 ```
 
 Export session history:

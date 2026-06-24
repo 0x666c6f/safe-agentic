@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -9,12 +9,12 @@ import (
 
 // newExecutor creates the executor used by all commands.
 // Override in tests with a FakeExecutor.
-var newExecutor = func() orb.Executor {
+var newExecutor = func() vmexec.Executor {
 	vmName := os.Getenv("SAFE_AGENTIC_VM_NAME")
 	if vmName == "" {
 		vmName = "safe-agentic"
 	}
-	return &orb.OrbExecutor{VMName: vmName}
+	return &vmexec.MachineExecutor{VMName: vmName}
 }
 
 // addLatestFlag registers a --latest boolean flag on the given command.

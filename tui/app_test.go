@@ -26,14 +26,14 @@ func TestNewAppLoadingAndExecAfterArgs(t *testing.T) {
 		t.Fatalf("front page = %q, want main", name)
 	}
 
-	a.ExecAfterExit([]string{"orb", "run"})
-	if got := a.ExecAfterArgs(); len(got) != 2 || got[0] != "orb" || got[1] != "run" {
+	a.ExecAfterExit([]string{"container", "machine"})
+	if got := a.ExecAfterArgs(); len(got) != 2 || got[0] != "container" || got[1] != "machine" {
 		t.Fatalf("ExecAfterArgs() = %#v", got)
 	}
 }
 
 func TestAppUpdatePreviewHandleCommandAndOverlayHelpers(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 	oldLogs := previewLogsFunc
 	previewLogsFunc = func(name string, lines int) (string, error) {
 		return "logs:" + name, nil

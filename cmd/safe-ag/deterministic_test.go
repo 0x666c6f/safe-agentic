@@ -37,8 +37,8 @@ func cleanupDetContainers() {
 func removeContainerIfExists(name string) bool {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		_, _ = orbExec.Run(ctx, "docker", "rm", "-f", name)
-		if _, err := orbExec.Run(ctx, "docker", "inspect", name); err != nil {
+		_, _ = vmExec.Run(ctx, "docker", "rm", "-f", name)
+		if _, err := vmExec.Run(ctx, "docker", "inspect", name); err != nil {
 			return true
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -95,14 +95,14 @@ func ensureSharedContainer(t *testing.T) {
 			"-lc", "sleep 600",
 		}
 
-		if _, err := orbExec.Run(ctx, args...); err != nil {
+		if _, err := vmExec.Run(ctx, args...); err != nil {
 			t.Logf("failed to create shared container: %v", err)
 			return
 		}
 
 		// Wait for running + entrypoint to finish (clone etc.)
 		for i := 0; i < 40; i++ {
-			out, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", detSharedContainer)
+			out, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", detSharedContainer)
 			if err == nil && strings.TrimSpace(string(out)) == "running" {
 				// Give entrypoint time to clone the repo
 				time.Sleep(5 * time.Second)
@@ -112,7 +112,7 @@ func ensureSharedContainer(t *testing.T) {
 			time.Sleep(1 * time.Second)
 		}
 
-		logs, _ := orbExec.Run(ctx, "docker", "logs", detSharedContainer)
+		logs, _ := vmExec.Run(ctx, "docker", "logs", detSharedContainer)
 		t.Logf("shared container did not start in 40s. Logs:\n%s", logs)
 	})
 
@@ -125,7 +125,7 @@ func ensureSharedContainer(t *testing.T) {
 func detExec(t *testing.T, cmd ...string) string {
 	t.Helper()
 	args := append([]string{"docker", "exec", detSharedContainer}, cmd...)
-	out, err := orbExec.Run(context.Background(), args...)
+	out, err := vmExec.Run(context.Background(), args...)
 	if err != nil {
 		t.Fatalf("docker exec %s %v: %v\noutput: %s", detSharedContainer, cmd, err, out)
 	}
@@ -137,7 +137,7 @@ func detExec(t *testing.T, cmd ...string) string {
 func detExecMayFail(t *testing.T, cmd ...string) (string, error) {
 	t.Helper()
 	args := append([]string{"docker", "exec", detSharedContainer}, cmd...)
-	out, err := orbExec.Run(context.Background(), args...)
+	out, err := vmExec.Run(context.Background(), args...)
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -518,7 +518,7 @@ func TestDet_MultipleRepos(t *testing.T) {
 	name := "agent-shell-e2e-det-multi"
 
 	// Cleanup from previous runs
-	orbExec.Run(ctx, "docker", "rm", "-f", name)
+	vmExec.Run(ctx, "docker", "rm", "-f", name)
 
 	args := []string{
 		"docker", "run", "-d",
@@ -543,21 +543,21 @@ func TestDet_MultipleRepos(t *testing.T) {
 		"-lc", "sleep 300",
 	}
 
-	_, err := orbExec.Run(ctx, args...)
+	_, err := vmExec.Run(ctx, args...)
 	if err != nil {
 		t.Fatalf("docker run: %v", err)
 	}
-	defer orbExec.Run(ctx, "docker", "rm", "-f", name)
+	defer vmExec.Run(ctx, "docker", "rm", "-f", name)
 
 	// Wait for container + cloning
 	for i := 0; i < 40; i++ {
-		out, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
+		out, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
 		if err == nil && strings.TrimSpace(string(out)) == "running" {
 			time.Sleep(8 * time.Second)
 			break
 		}
 		if i == 39 {
-			logs, _ := orbExec.Run(ctx, "docker", "logs", name)
+			logs, _ := vmExec.Run(ctx, "docker", "logs", name)
 			t.Fatalf("multi-repo container not running after 40s. Logs:\n%s", logs)
 		}
 		time.Sleep(1 * time.Second)
@@ -566,7 +566,7 @@ func TestDet_MultipleRepos(t *testing.T) {
 	multiExec := func(cmd ...string) string {
 		t.Helper()
 		a := append([]string{"docker", "exec", name}, cmd...)
-		out, err := orbExec.Run(ctx, a...)
+		out, err := vmExec.Run(ctx, a...)
 		if err != nil {
 			t.Fatalf("exec %v: %v\n%s", cmd, err, out)
 		}

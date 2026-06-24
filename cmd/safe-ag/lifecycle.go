@@ -12,8 +12,8 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
 )
@@ -173,7 +173,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 }
 
 // containerState returns the .State.Status of a container.
-func containerState(ctx context.Context, exec orb.Executor, name string) (string, error) {
+func containerState(ctx context.Context, exec vmexec.Executor, name string) (string, error) {
 	out, err := exec.Run(ctx, "docker", "inspect",
 		"--format", "{{.State.Status}}", name)
 	if err != nil {
@@ -182,7 +182,7 @@ func containerState(ctx context.Context, exec orb.Executor, name string) (string
 	return strings.TrimSpace(string(out)), nil
 }
 
-func containerExitCode(ctx context.Context, exec orb.Executor, name string) (int, error) {
+func containerExitCode(ctx context.Context, exec vmexec.Executor, name string) (int, error) {
 	out, err := exec.Run(ctx, "docker", "inspect",
 		"--format", "{{.State.ExitCode}}", name)
 	if err != nil {
@@ -228,7 +228,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 	return stopOneContainer(ctx, exec, name)
 }
 
-func stopOneContainer(ctx context.Context, exec orb.Executor, name string) error {
+func stopOneContainer(ctx context.Context, exec vmexec.Executor, name string) error {
 	fmt.Printf("Stopping %s...\n", name)
 	if _, err := exec.Run(ctx, "docker", "stop", "-t", "30", name); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: stop %s: %v\n", name, err)
@@ -248,7 +248,7 @@ func stopOneContainer(ctx context.Context, exec orb.Executor, name string) error
 	return nil
 }
 
-func stopAllContainers(ctx context.Context, exec orb.Executor) error {
+func stopAllContainers(ctx context.Context, exec vmexec.Executor) error {
 	out, err := exec.Run(ctx, "docker", "ps", "-a",
 		"--filter", "name=^agent-",
 		"--format", "{{.Names}}")
@@ -400,7 +400,7 @@ func runRetry(cmd *cobra.Command, args []string) error {
 
 // reconstructSpawnOpts reads labels and env vars from an existing container
 // and builds a SpawnOpts that reproduces it.
-func reconstructSpawnOpts(ctx context.Context, exec orb.Executor, name string) (SpawnOpts, error) {
+func reconstructSpawnOpts(ctx context.Context, exec vmexec.Executor, name string) (SpawnOpts, error) {
 	getLabel := func(l string) string {
 		v, _ := docker.InspectLabel(ctx, exec, name, l)
 		return v
@@ -499,7 +499,7 @@ func reconstructedIdentity(getEnv func(string) string) string {
 
 // containerEnvVar reads a specific env var from a running or stopped container
 // by inspecting the container config.
-func containerEnvVar(ctx context.Context, exec orb.Executor, name, envName string) (string, error) {
+func containerEnvVar(ctx context.Context, exec vmexec.Executor, name, envName string) (string, error) {
 	// Use docker inspect to list all env vars then search for the one we want
 	out, err := exec.Run(ctx, "docker", "inspect",
 		"--format", "{{range .Config.Env}}{{println .}}{{end}}", name)

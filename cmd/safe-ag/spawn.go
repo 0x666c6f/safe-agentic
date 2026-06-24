@@ -14,11 +14,11 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/policy"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 
 	"github.com/spf13/cobra"
@@ -245,8 +245,8 @@ func executeSpawn(opts SpawnOpts) error {
 		return err
 	}
 	if opts.DryRun {
-		fmt.Println("Would execute:")
-		fmt.Printf("  orb run -m safe-agentic %s\n", cmd.Render())
+		fmt.Printf("Would execute inside VM %s:\n", configuredVMName())
+		fmt.Printf("  %s\n", cmd.Render())
 		return nil
 	}
 
@@ -466,7 +466,7 @@ func validateSpawnModeConflicts(opts SpawnOpts) error {
 	return nil
 }
 
-func prepareSpawnNetwork(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved *spawnResolved) error {
+func prepareSpawnNetwork(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
 	customNetwork := opts.Network
 	if customNetwork == "" {
 		customNetwork = resolved.Config.Defaults.Network
@@ -512,7 +512,7 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	return cmd
 }
 
-func appendSpawnSSH(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts) error {
+func appendSpawnSSH(ctx context.Context, exec vmexec.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts) error {
 	if !opts.SSH {
 		return nil
 	}
@@ -536,7 +536,7 @@ func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnR
 	}
 }
 
-func appendAuthVolumes(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
+func appendAuthVolumes(ctx context.Context, exec vmexec.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	destinations := authDestinations(opts.AgentType)
 	if opts.FleetVolume != "" && opts.ReuseAuth {
 		sharedVol := docker.AuthVolumeName(opts.AgentType, false, "")
@@ -731,7 +731,7 @@ func appendCallbacksAndMetadata(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	}
 }
 
-func appendDockerMode(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
+func appendDockerMode(ctx context.Context, exec vmexec.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	if opts.DockerSocket {
 		if !opts.DryRun {
 			if err := docker.AppendHostDockerSocket(ctx, exec, cmd); err != nil {
@@ -750,7 +750,7 @@ func appendDockerMode(ctx context.Context, exec orb.Executor, cmd *docker.Docker
 	return nil
 }
 
-func startSpawnContainer(ctx context.Context, exec orb.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
+func startSpawnContainer(ctx context.Context, exec vmexec.Executor, cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnResolved) error {
 	cmd.Detached = true
 	dindStarted := false
 	if opts.DockerAccess {
@@ -783,7 +783,7 @@ func logSpawnEvent(opts SpawnOpts, resolved spawnResolved) {
 	})
 }
 
-func maybeAttachSpawn(ctx context.Context, exec orb.Executor, opts SpawnOpts, resolved spawnResolved) error {
+func maybeAttachSpawn(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved spawnResolved) error {
 	if opts.Background || opts.AgentType == "shell" {
 		return nil
 	}

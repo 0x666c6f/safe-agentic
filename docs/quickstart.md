@@ -5,7 +5,7 @@ Get from zero to a live agent session with the fewest moving parts.
 If you want the shortest working path, this is it:
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
 brew install safe-agentic
 safe-ag setup
@@ -17,10 +17,10 @@ Use `--ssh` instead of a public HTTPS repo when the repository is private.
 
 ## 1. Install the prerequisites
 
-Homebrew:
+Install Apple container from the signed pkg on GitHub Releases, then install safe-agentic:
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
 brew install safe-agentic
 ```
@@ -28,7 +28,7 @@ brew install safe-agentic
 From source:
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 git clone git@github.com:0x666c6f/safe-agentic.git
 cd safe-agentic
 make build-all
@@ -50,7 +50,8 @@ safe-ag diagnose
 
 `safe-ag setup` will:
 
-- create the OrbStack VM if needed
+- create the Apple container machine if needed
+- configure Apple vmnet host NAT for VM and nested Docker egress
 - reapply VM hardening
 - build the local Docker image
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"github.com/spf13/cobra"
 )
 
@@ -80,7 +80,7 @@ func latestFlag(cmd *cobra.Command) bool {
 	return latest
 }
 
-func searchAgentLog(ctx context.Context, exec orb.Executor, name, query string, lines int, caseSensitive bool) ([]string, error) {
+func searchAgentLog(ctx context.Context, exec vmexec.Executor, name, query string, lines int, caseSensitive bool) ([]string, error) {
 	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
 	configDir := "/home/agent/.claude"
 	if agentType == "codex" {

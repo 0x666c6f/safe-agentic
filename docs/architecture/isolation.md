@@ -2,17 +2,17 @@
 
 safe-agentic relies on three boundaries, not one.
 
-## Boundary 1: macOS host -> OrbStack VM
+## Boundary 1: macOS host -> Apple container machine
 
 Purpose:
 - keep agent containers away from the host filesystem and host process space
 
 Main controls:
-- dedicated OrbStack VM
+- dedicated Apple container machine
 - VM hardening from `vm/setup.sh`
 - blocked or overlaid macOS mount paths
 
-## Boundary 2: OrbStack VM -> container
+## Boundary 2: Apple container machine -> container
 
 Purpose:
 - limit what an agent can do even if it runs arbitrary commands

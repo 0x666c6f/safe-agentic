@@ -179,26 +179,25 @@ func probeProcessActivity(name, agentType string) string {
 		`sleep 1; ` +
 		`sum2=0; for p in $pids; do t=$(awk '{print $14+$15}' /proc/$p/stat 2>/dev/null) && sum2=$((sum2+t)); done; ` +
 		`[ "$sum2" -gt "$sum1" ] && echo working`
-	out, err := execOrb("docker", "exec", name, "bash", "-c", script)
+	out, err := execVM("docker", "exec", name, "bash", "-c", script)
 	if err == nil && strings.TrimSpace(string(out)) == "working" {
 		return "Working"
 	}
 	return "Idle"
 }
 
-func execOrb(args ...string) ([]byte, error) {
-	return execOrbTimeout(5*time.Second, args...)
+func execVM(args ...string) ([]byte, error) {
+	return execVMTimeout(5*time.Second, args...)
 }
 
-func execOrbLong(args ...string) ([]byte, error) {
-	return execOrbTimeout(30*time.Second, args...)
+func execVMLong(args ...string) ([]byte, error) {
+	return execVMTimeout(30*time.Second, args...)
 }
 
-func execOrbTimeout(timeout time.Duration, args ...string) ([]byte, error) {
+func execVMTimeout(timeout time.Duration, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	fullArgs := append([]string{"run", "-m", vmName}, args...)
-	cmd := exec.CommandContext(ctx, "orb", fullArgs...)
+	cmd := exec.CommandContext(ctx, "container", machineRunArgs(args...)...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -222,7 +221,7 @@ func fetchAgents() ([]Agent, error) {
 		`{{.Label "safe-agentic.hierarchy"}}`,
 		"{{.Status}}",
 	}, "\t")
-	psData, psErr := execOrb("docker", "ps", "-a",
+	psData, psErr := execVM("docker", "ps", "-a",
 		"--filter", "name=^"+containerPrefix+"-",
 		"--format", format)
 	if psErr != nil {
@@ -240,7 +239,7 @@ func fetchAgents() ([]Agent, error) {
 	}
 	if len(running) > 0 {
 		args := append([]string{"docker", "stats", "--no-stream", "--format", "{{json .}}"}, running...)
-		statsData, _ := execOrb(args...)
+		statsData, _ := execVM(args...)
 		mergeStats(agents, statsData)
 	}
 

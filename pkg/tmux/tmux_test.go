@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 func TestSessionName_Default(t *testing.T) {
@@ -26,7 +26,7 @@ func TestSessionName_EnvOverride(t *testing.T) {
 }
 
 func TestHasSession_ReturnsTrueWhenDockerExecSucceeds(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	// Default fake executor returns no error — simulates success
 	has, err := HasSession(context.Background(), f, "mycontainer")
 	if err != nil {
@@ -38,7 +38,7 @@ func TestHasSession_ReturnsTrueWhenDockerExecSucceeds(t *testing.T) {
 }
 
 func TestHasSession_ReturnsFalseWhenDockerExecFails(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	f.SetError("docker exec mycontainer tmux has-session", "exit status 1")
 
 	has, err := HasSession(context.Background(), f, "mycontainer")
@@ -51,7 +51,7 @@ func TestHasSession_ReturnsFalseWhenDockerExecFails(t *testing.T) {
 }
 
 func TestHasSession_UsesCorrectArgs(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	_, _ = HasSession(context.Background(), f, "mycontainer")
 
 	if len(f.Log) != 1 {
@@ -120,7 +120,7 @@ func TestBuildCapturePaneArgs_ReturnsCorrectArgs(t *testing.T) {
 }
 
 func TestWaitForSession_SucceedsImmediately(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	// Default fake returns success, so session is immediately available
 	err := WaitForSession(context.Background(), f, "mycontainer")
 	if err != nil {
@@ -129,7 +129,7 @@ func TestWaitForSession_SucceedsImmediately(t *testing.T) {
 }
 
 func TestWaitForSession_ReturnsErrorOnContextCancel(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	// Make has-session always fail so WaitForSession has to wait
 	f.SetError("docker exec mycontainer tmux has-session", "exit status 1")
 
@@ -143,7 +143,7 @@ func TestWaitForSession_ReturnsErrorOnContextCancel(t *testing.T) {
 }
 
 func TestAttach_CallsRunInteractiveWithCorrectArgs(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 
 	err := Attach(f, "mycontainer")
 	if err != nil {
@@ -162,7 +162,7 @@ func TestAttach_CallsRunInteractiveWithCorrectArgs(t *testing.T) {
 }
 
 func TestAttach_ReturnsErrorFromExecutor(t *testing.T) {
-	f := orb.NewFake()
+	f := vmexec.NewFake()
 	// RunInteractive on FakeExecutor always returns nil, so we verify no error in normal flow.
 	// The executor interface contract is satisfied; the FakeExecutor doesn't simulate errors
 	// for RunInteractive, so just confirm the call is made.

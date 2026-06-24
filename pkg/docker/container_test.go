@@ -2,13 +2,13 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"testing"
 )
 
 func TestContainerExists_Found(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect mycontainer", "some output")
 	found, err := ContainerExists(context.Background(), fake, "mycontainer")
 	if err != nil {
@@ -20,7 +20,7 @@ func TestContainerExists_Found(t *testing.T) {
 }
 
 func TestContainerExists_NotFound(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker inspect nocontainer", "no such container")
 	found, err := ContainerExists(context.Background(), fake, "nocontainer")
 	if err != nil {
@@ -32,7 +32,7 @@ func TestContainerExists_NotFound(t *testing.T) {
 }
 
 func TestResolveLatest_Found(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", "agent-claude-abc")
 	name, err := ResolveLatest(context.Background(), fake)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestResolveLatest_Found(t *testing.T) {
 }
 
 func TestResolveLatest_Empty(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", "")
 	_, err := ResolveLatest(context.Background(), fake)
 	if err == nil {
@@ -56,7 +56,7 @@ func TestResolveLatest_Empty(t *testing.T) {
 }
 
 func TestResolveTarget_ExactMatch(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", "agent-claude-abc\nagent-claude-xyz")
 	name, err := ResolveTarget(context.Background(), fake, "agent-claude-abc")
 	if err != nil {
@@ -68,7 +68,7 @@ func TestResolveTarget_ExactMatch(t *testing.T) {
 }
 
 func TestResolveTarget_PartialMatch(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", "agent-claude-abc\nagent-claude-xyz")
 	name, err := ResolveTarget(context.Background(), fake, "abc")
 	if err != nil {
@@ -80,7 +80,7 @@ func TestResolveTarget_PartialMatch(t *testing.T) {
 }
 
 func TestResolveTarget_Latest(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", "agent-claude-latest")
 	name, err := ResolveTarget(context.Background(), fake, "--latest")
 	if err != nil {
@@ -92,7 +92,7 @@ func TestResolveTarget_Latest(t *testing.T) {
 }
 
 func TestResolveTarget_EmptyNameUsesLatest(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", "agent-claude-latest")
 	name, err := ResolveTarget(context.Background(), fake, "")
 	if err != nil {
@@ -104,7 +104,7 @@ func TestResolveTarget_EmptyNameUsesLatest(t *testing.T) {
 }
 
 func TestResolveTarget_NotFound(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", "agent-claude-abc")
 	_, err := ResolveTarget(context.Background(), fake, "notexist")
 	if err == nil {
@@ -116,7 +116,7 @@ func TestResolveTarget_NotFound(t *testing.T) {
 }
 
 func TestInspectLabel(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format", "claude")
 	val, err := InspectLabel(context.Background(), fake, "mycontainer", "safe-agentic.agent-type")
 	if err != nil {
@@ -128,7 +128,7 @@ func TestInspectLabel(t *testing.T) {
 }
 
 func TestIsRunning_True(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format {{.State.Running}}", "true")
 	running, err := IsRunning(context.Background(), fake, "mycontainer")
 	if err != nil {
@@ -140,7 +140,7 @@ func TestIsRunning_True(t *testing.T) {
 }
 
 func TestIsRunning_False(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format {{.State.Running}}", "false")
 	running, err := IsRunning(context.Background(), fake, "mycontainer")
 	if err != nil {
@@ -152,7 +152,7 @@ func TestIsRunning_False(t *testing.T) {
 }
 
 func TestInspectLabel_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker inspect", "not found")
 	_, err := InspectLabel(context.Background(), fake, "missing", "some-label")
 	if err == nil {
@@ -161,7 +161,7 @@ func TestInspectLabel_Error(t *testing.T) {
 }
 
 func TestIsRunning_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker inspect --format {{.State.Running}}", "not found")
 	running, err := IsRunning(context.Background(), fake, "missing")
 	if err == nil {

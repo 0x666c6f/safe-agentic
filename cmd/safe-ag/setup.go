@@ -2,7 +2,9 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -31,18 +33,27 @@ var (
 	runVMBootstrap        = runVMBootstrapImpl
 	startVM               = startVMImpl
 	installVMSupportFiles = installVMSupportFilesImpl
+	configureHostNAT      = configureHostNATImpl
 )
 
 func vmExistsImpl(vmName string) bool {
-	out, err := exec.Command("orbctl", "list", "-q").Output()
+	out, err := exec.Command("container", "machine", "list", "--format", "json").Output()
 	if err != nil {
-		out, err = exec.Command("orb", "list", "-q").Output()
-		if err != nil {
-			return false
+		return false
+	}
+	var machines []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &machines); err == nil {
+		for _, machine := range machines {
+			if machine.ID == vmName {
+				return true
+			}
 		}
+		return false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.TrimSpace(line) == vmName {
+		if strings.Contains(line, vmName) {
 			return true
 		}
 	}
@@ -50,14 +61,14 @@ func vmExistsImpl(vmName string) bool {
 }
 
 func startVMImpl(vmName string) error {
-	start := exec.Command("orb", "start", vmName)
+	start := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/true")
 	start.Stdout = os.Stdout
 	start.Stderr = os.Stderr
 	return start.Run()
 }
 
 func runVMBootstrapImpl(vmName string) ([]byte, error) {
-	return exec.Command("orb", "run", "-m", vmName, "bash", "/tmp/setup.sh").CombinedOutput()
+	return exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/sh", "/tmp/setup.sh").CombinedOutput()
 }
 
 func installVMSupportFilesImpl(vmName, buildRoot string) error {
@@ -65,11 +76,17 @@ func installVMSupportFilesImpl(vmName, buildRoot string) error {
 	if err := copyFileToVM(vmName, seccompSrc, "/tmp/seccomp.json"); err != nil {
 		return err
 	}
-	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
-		"sudo mkdir -p /etc/safe-agentic && sudo cp /tmp/seccomp.json /etc/safe-agentic/seccomp.json && sudo chmod 0644 /etc/safe-agentic/seccomp.json")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("install VM support files: %w\n%s", err, string(out))
+	commands := [][]string{
+		{"container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/mkdir", "-p", "/etc/safe-agentic"},
+		{"container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/cp", "/tmp/seccomp.json", "/etc/safe-agentic/seccomp.json"},
+		{"container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/chmod", "0644", "/etc/safe-agentic/seccomp.json"},
+	}
+	for _, args := range commands {
+		cmd := exec.Command(args[0], args[1:]...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("install VM support files: %w\n%s", err, string(out))
+		}
 	}
 	return nil
 }
@@ -125,20 +142,35 @@ func copyFileToVMImpl(vmName, srcPath, destPath string) error {
 	}
 
 	destDir := filepath.Dir(destPath)
-	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
-		fmt.Sprintf("mkdir -p %s && cat > %s && chmod +x %s",
-			shellQuote(destDir), shellQuote(destPath), shellQuote(destPath)))
-	cmd.Stdin = strings.NewReader(string(data))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("copy %s to %s: %w\n%s", srcPath, destPath, err, string(out))
+	mkdir := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/mkdir", "-p", destDir)
+	if out, err := mkdir.CombinedOutput(); err != nil {
+		return fmt.Errorf("create %s in VM: %w\n%s", destDir, err, string(out))
+	}
+	cmd := exec.Command("container", "machine", "run", "-i", "-n", vmName, "-u", "root", "--", "/usr/bin/tee", destPath)
+	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stdout = io.Discard
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("copy %s to %s: %w\n%s", srcPath, destPath, err, stderr.String())
+	}
+	chmod := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/chmod", "+x", destPath)
+	if out, err := chmod.CombinedOutput(); err != nil {
+		return fmt.Errorf("chmod %s in VM: %w\n%s", destPath, err, string(out))
 	}
 	return nil
 }
 
 func syncBuildContextToVMImpl(vmName, root string) error {
-	cmd := exec.Command("orb", "run", "-m", vmName, "sh", "-lc",
-		"rm -rf /tmp/build-context && mkdir -p /tmp/build-context && tar xf - -C /tmp/build-context")
+	if out, err := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/rm", "-rf", "/tmp/build-context").CombinedOutput(); err != nil {
+		return fmt.Errorf("clear build context: %w\n%s", err, string(out))
+	}
+	if out, err := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/mkdir", "-p", "/tmp/build-context").CombinedOutput(); err != nil {
+		return fmt.Errorf("create build context: %w\n%s", err, string(out))
+	}
+	cmd := exec.Command("container", "machine", "run", "-i", "-n", vmName, "-u", "root", "--", "/bin/tar", "xf", "-", "-C", "/tmp/build-context")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
@@ -161,7 +193,7 @@ func syncBuildContextToVMImpl(vmName, root string) error {
 		return writeErr
 	}
 	if waitErr != nil {
-		return fmt.Errorf("sync build context: %w", waitErr)
+		return fmt.Errorf("sync build context: %w\n%s", waitErr, stderr.String())
 	}
 	return nil
 }
@@ -260,6 +292,130 @@ func buildContextFiles(root string) ([]string, error) {
 	return files, nil
 }
 
+func ensureContainerSystemRunning(stdout, stderr io.Writer) error {
+	status := exec.Command("container", "system", "status")
+	if err := status.Run(); err == nil {
+		return nil
+	}
+	start := exec.Command("container", "system", "start")
+	start.Stdin = strings.NewReader("y\n")
+	start.Stdout = stdout
+	start.Stderr = stderr
+	if err := start.Run(); err != nil {
+		return fmt.Errorf("container system start: %w", err)
+	}
+	return nil
+}
+
+func configureHostNATImpl(stdout, stderr io.Writer) error {
+	subnets, err := appleContainerNATSubnets()
+	if err != nil {
+		return err
+	}
+	subnets = append(subnets, "172.20.0.0/16")
+	iface, err := defaultHostInterface()
+	if err != nil {
+		return err
+	}
+	var rules []string
+	seen := map[string]bool{}
+	for _, subnet := range subnets {
+		if seen[subnet] {
+			continue
+		}
+		seen[subnet] = true
+		rules = append(rules, fmt.Sprintf("nat on %s from %s to any -> (%s)", iface, subnet, iface))
+	}
+	script := strings.Join([]string{
+		"/usr/sbin/sysctl -w net.inet.ip.forwarding=1 >/dev/null",
+		"printf " + shellSingleQuote(strings.Join(rules, "\n")+"\n") + " | /sbin/pfctl -a com.apple/safe-agentic -f -",
+		"{ /sbin/pfctl -E >/dev/null 2>&1 || true; }",
+	}, " && ")
+	if err := exec.Command("sh", "-c", script).Run(); err == nil {
+		return nil
+	}
+	osaCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	osa := exec.CommandContext(osaCtx, "osascript", "-e", "do shell script "+appleScriptQuote(script)+" with administrator privileges")
+	osa.Stdout = stdout
+	osa.Stderr = stderr
+	if err := osa.Run(); err != nil {
+		if osaCtx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("configure Apple container host NAT: admin prompt timed out; run: sudo sh -c %s", shellSingleQuote(script))
+		}
+		return fmt.Errorf("configure Apple container host NAT: %w", err)
+	}
+	return nil
+}
+
+func appleContainerNATSubnets() ([]string, error) {
+	out, err := exec.Command("container", "network", "list", "--format", "json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list Apple container networks: %w", err)
+	}
+	return parseAppleContainerNATSubnets(out)
+}
+
+func parseAppleContainerNATSubnets(out []byte) ([]string, error) {
+	var networks []struct {
+		Configuration struct {
+			Mode       string `json:"mode"`
+			IPv4Subnet string `json:"ipv4Subnet"`
+		} `json:"configuration"`
+		Status struct {
+			IPv4Subnet string `json:"ipv4Subnet"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(out, &networks); err != nil {
+		return nil, fmt.Errorf("parse Apple container networks: %w", err)
+	}
+	seen := map[string]bool{}
+	var subnets []string
+	for _, network := range networks {
+		if network.Configuration.Mode != "nat" {
+			continue
+		}
+		subnet := network.Status.IPv4Subnet
+		if subnet == "" {
+			subnet = network.Configuration.IPv4Subnet
+		}
+		if subnet == "" || seen[subnet] {
+			continue
+		}
+		seen[subnet] = true
+		subnets = append(subnets, subnet)
+	}
+	return subnets, nil
+}
+
+func defaultHostInterface() (string, error) {
+	out, err := exec.Command("route", "-n", "get", "default").Output()
+	if err != nil {
+		return "", fmt.Errorf("detect default host interface: %w", err)
+	}
+	return parseDefaultHostInterface(out)
+}
+
+func parseDefaultHostInterface(out []byte) (string, error) {
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "interface:" {
+			return fields[1], nil
+		}
+	}
+	return "", fmt.Errorf("detect default host interface: no interface in route output")
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+func appleScriptQuote(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	return "\"" + s + "\""
+}
+
 // ─── setup ─────────────────────────────────────────────────────────────────
 
 var setupCmd = &cobra.Command{
@@ -278,21 +434,25 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Step 1: Check if orb is installed.
-	if _, err := exec.LookPath("orb"); err != nil {
-		return fmt.Errorf("orb not found in PATH: install OrbStack from https://orbstack.dev")
+	// Step 1: Check if Apple container is installed and running.
+	if _, err := exec.LookPath("container"); err != nil {
+		return fmt.Errorf("container not found in PATH: install Apple container from https://github.com/apple/container")
 	}
-	fmt.Println("✓ orb found")
+	fmt.Println("✓ container found")
+	if err := ensureContainerSystemRunning(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		return err
+	}
+	fmt.Println("✓ container system running")
 
 	ctx := context.Background()
 
-	// Step 2: Check if VM exists (orb list gives a line per VM).
+	// Step 2: Check if Apple container machine exists.
 	vmExists := vmExists(vmName)
 
 	// Step 3: Create VM if needed.
 	if !vmExists {
-		fmt.Printf("Creating VM %s (ubuntu:noble)…\n", vmName)
-		create := exec.Command("orb", "create", "ubuntu:noble", vmName)
+		fmt.Printf("Creating VM %s (alpine:3.22)…\n", vmName)
+		create := exec.Command("container", "machine", "create", "alpine:3.22", "--name", vmName, "--cpus", "4", "--memory", "8G", "--home-mount", "none")
 		create.Stdout = cmd.OutOrStdout()
 		create.Stderr = cmd.ErrOrStderr()
 		if err := create.Run(); err != nil {
@@ -304,9 +464,16 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		time.Sleep(3 * time.Second)
 	} else {
 		fmt.Printf("✓ VM %s already exists\n", vmName)
+		if err := startVM(vmName); err != nil {
+			return fmt.Errorf("start VM: %w", err)
+		}
 	}
+	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		return err
+	}
+	fmt.Println("✓ Apple container host NAT configured")
 
-	orbRunner := newExecutor()
+	vmRunner := newExecutor()
 
 	// Step 4: Copy and run setup script automatically.
 	fmt.Println("Bootstrapping VM…")
@@ -324,7 +491,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Println("✓ VM support files installed")
 
 	// Step 5: Verify Docker.
-	if _, err := orbRunner.Run(ctx, "docker", "info"); err != nil {
+	if _, err := vmRunner.Run(ctx, "docker", "info"); err != nil {
 		return fmt.Errorf("docker not available after bootstrap: %w", err)
 	}
 
@@ -333,7 +500,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Println("✓ Build context synced")
-	if err := runDockerBuild(ctx, orbRunner); err != nil {
+	if err := runDockerBuild(ctx, vmRunner); err != nil {
 		return err
 	}
 	return nil
@@ -360,7 +527,7 @@ func init() {
 
 func runUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	orbRunner := newExecutor()
+	vmRunner := newExecutor()
 	vmName := configuredVMName()
 	buildRoot, err := findBuildRoot()
 	if err != nil {
@@ -371,10 +538,10 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Println("✓ Build context synced")
-	return runDockerBuild(ctx, orbRunner)
+	return runDockerBuild(ctx, vmRunner)
 }
 
-func runDockerBuild(ctx context.Context, orbRunner interface {
+func runDockerBuild(ctx context.Context, vmRunner interface {
 	Run(context.Context, ...string) ([]byte, error)
 }) error {
 	buildArgs := []string{"docker", "build", "-t", "safe-agentic:latest", "/tmp/build-context"}
@@ -388,7 +555,7 @@ func runDockerBuild(ctx context.Context, orbRunner interface {
 	}
 
 	fmt.Println("Building safe-agentic:latest…")
-	out, err := orbRunner.Run(ctx, buildArgs...)
+	out, err := vmRunner.Run(ctx, buildArgs...)
 	if err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
@@ -401,7 +568,7 @@ func runDockerBuild(ctx context.Context, orbRunner interface {
 
 var vmCmd = &cobra.Command{
 	Use:   "vm",
-	Short: "Manage the OrbStack VM",
+	Short: "Manage the Apple container machine",
 }
 
 var vmSSHCmd = &cobra.Command{
@@ -430,8 +597,8 @@ func init() {
 }
 
 func runVMSSH(cmd *cobra.Command, args []string) error {
-	orbRunner := newExecutor()
-	return orbRunner.RunInteractive()
+	vmRunner := newExecutor()
+	return vmRunner.RunInteractive()
 }
 
 func runVMStart(cmd *cobra.Command, args []string) error {
@@ -442,7 +609,7 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Starting VM %s…\n", vmName)
 	if err := startVM(vmName); err != nil {
-		return fmt.Errorf("orb start: %w", err)
+		return fmt.Errorf("start VM: %w", err)
 	}
 	fmt.Println("✓ VM started")
 	fmt.Println("Re-applying VM hardening…")
@@ -464,11 +631,11 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 func runVMStop(cmd *cobra.Command, args []string) error {
 	vmName := configuredVMName()
 	fmt.Printf("Stopping VM %s…\n", vmName)
-	stop := exec.Command("orb", "stop", vmName)
+	stop := exec.Command("container", "machine", "stop", vmName)
 	stop.Stdout = cmd.OutOrStdout()
 	stop.Stderr = cmd.ErrOrStderr()
 	if err := stop.Run(); err != nil {
-		return fmt.Errorf("orb stop: %w", err)
+		return fmt.Errorf("stop VM: %w", err)
 	}
 	fmt.Println("✓ VM stopped")
 	return nil
@@ -535,26 +702,21 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	fmt.Println("safe-agentic diagnostics")
 	fmt.Println("─────────────────────────")
 
-	// 1. Check orb installed.
-	_, orbErr := exec.LookPath("orb")
-	check("orb installed", orbErr == nil, "")
+	// 1. Check Apple container installed and running.
+	_, containerErr := exec.LookPath("container")
+	check("container installed", containerErr == nil, "")
 
-	if orbErr != nil {
+	if containerErr != nil {
 		fmt.Println()
-		fmt.Println("Install OrbStack: https://orbstack.dev")
+		fmt.Println("Install Apple container: https://github.com/apple/container")
 		return nil
 	}
 
+	systemErr := exec.Command("container", "system", "status").Run()
+	check("container system running", systemErr == nil, "")
+
 	// 2. Check VM exists.
-	vmExists := false
-	if out, err := exec.Command("orb", "list").Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, vmName) {
-				vmExists = true
-				break
-			}
-		}
-	}
+	vmExists := vmExists(vmName)
 	check("VM "+vmName+" exists", vmExists, "")
 
 	if !vmExists {
@@ -563,14 +725,14 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	orbRunner := newExecutor()
+	vmRunner := newExecutor()
 
 	// 3. Check Docker running in VM.
-	_, dockerErr := orbRunner.Run(ctx, "docker", "info")
+	_, dockerErr := vmRunner.Run(ctx, "docker", "info")
 	check("Docker running in VM", dockerErr == nil, "")
 
 	// 4. Check image exists.
-	imgOut, imgErr := orbRunner.Run(ctx, "docker", "images", "safe-agentic:latest", "-q")
+	imgOut, imgErr := vmRunner.Run(ctx, "docker", "images", "safe-agentic:latest", "-q")
 	imageExists := imgErr == nil && strings.TrimSpace(string(imgOut)) != ""
 	imageDetail := ""
 	if imageExists {
@@ -579,7 +741,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	check("Docker image safe-agentic:latest", imageExists, imageDetail)
 
 	fmt.Println()
-	if orbErr == nil && vmExists && dockerErr == nil && imageExists {
+	if containerErr == nil && systemErr == nil && vmExists && dockerErr == nil && imageExists {
 		fmt.Println("All checks passed. Environment is ready.")
 	} else {
 		fmt.Println("Some checks failed. Run: safe-ag setup")

@@ -30,7 +30,7 @@ Layout:
 ```
 
 For isolated harnesses, set `SAFE_AGENTIC_CONFIG_HOME` to relocate this tree
-without changing `HOME` for tools such as OrbStack:
+without changing `HOME` for host tools:
 
 ```bash
 SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home safe-ag list
@@ -267,7 +267,7 @@ SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home
 SAFE_AGENTIC_STATE_HOME=/tmp/safe-ag-state
 ```
 
-`SAFE_AGENTIC_VM_NAME` points the CLI at a different OrbStack VM.
+`SAFE_AGENTIC_VM_NAME` points the CLI at a different Apple container machine.
 `SAFE_AGENTIC_CONFIG_HOME` and `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic
 files while keeping the process `HOME` intact for host tools.
 

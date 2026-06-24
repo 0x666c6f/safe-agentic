@@ -12,7 +12,7 @@ var Version = "dev"
 var rootCmd = &cobra.Command{
 	Use:   "safe-ag",
 	Short: "Isolated environment for running AI coding agents",
-	Long:  "Sandboxed AI agent environment with per-agent Docker containers in an OrbStack VM.",
+	Long:  "Sandboxed AI agent environment with per-agent Docker containers in an Apple container machine.",
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},

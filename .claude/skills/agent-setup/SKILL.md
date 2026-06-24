@@ -14,17 +14,20 @@ safe-ag setup
 ```
 
 This is idempotent and does everything:
-1. Creates the OrbStack VM (`safe-agentic`)
-2. Hardens the VM (blocks macOS filesystem, removes integration commands)
-3. Installs Docker CE inside the VM
-4. Builds the agent Docker image
+1. Starts Apple container if needed
+2. Creates the Apple container machine (`safe-agentic`)
+3. Hardens the VM (blocks macOS filesystem mounts)
+4. Configures Apple vmnet host NAT for VM and nested Docker egress
+5. Installs Docker inside the VM
+6. Builds the agent Docker image
 
 ### Prerequisites
 
 Check before running setup:
 ```bash
-# OrbStack must be installed
-command -v orb && echo "OK" || echo "Install: brew install orbstack"
+# Apple container must be installed
+command -v container && echo "OK" || echo "Install: https://github.com/apple/container/releases"
+container system status || container system start
 ```
 
 For SSH repos, enable 1Password SSH agent:
@@ -63,7 +66,7 @@ safe-ag update --full
 ## VM management
 
 ```bash
-# Start VM and re-apply hardening (use instead of `orb start`)
+# Start VM and re-apply hardening
 safe-ag vm start
 
 # Stop the VM
@@ -73,7 +76,7 @@ safe-ag vm stop
 safe-ag vm ssh
 ```
 
-**Important:** Always use `safe-ag vm start` instead of `orb start` directly — it re-applies filesystem hardening that OrbStack may reset on restart.
+**Important:** Prefer `safe-ag vm start` over raw `container machine run` because it re-applies filesystem hardening.
 
 ## Policy rules
 
@@ -93,9 +96,9 @@ Rules deny risky options before networks, worktrees, or containers are created. 
 safe-ag setup   # Creates the VM
 ```
 
-### "'orb' is required but not installed"
+### "'container' is required but not installed"
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 ```
 
 ### Image build fails
@@ -110,7 +113,10 @@ exit
 safe-ag update --full
 ```
 
-### OrbStack restored macOS mounts
+### Apple container egress times out
+`safe-ag setup` loads host PF NAT rules under `com.apple/safe-agentic` and enables IP forwarding. If the admin prompt times out, rerun `safe-ag setup` in an interactive macOS session and approve the prompt.
+
+### macOS mounts became visible
 ```bash
 safe-ag vm start   # Re-applies hardening
 ```

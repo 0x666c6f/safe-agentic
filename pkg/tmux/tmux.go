@@ -3,7 +3,7 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"os"
 	"time"
 )
@@ -17,7 +17,7 @@ func SessionName() string {
 	return defaultSessionName
 }
 
-func HasSession(ctx context.Context, exec orb.Executor, containerName string) (bool, error) {
+func HasSession(ctx context.Context, exec vmexec.Executor, containerName string) (bool, error) {
 	_, err := exec.Run(ctx, "docker", "exec", containerName,
 		"tmux", "has-session", "-t", SessionName())
 	if err != nil {
@@ -26,7 +26,7 @@ func HasSession(ctx context.Context, exec orb.Executor, containerName string) (b
 	return true, nil
 }
 
-func WaitForSession(ctx context.Context, exec orb.Executor, containerName string) error {
+func WaitForSession(ctx context.Context, exec vmexec.Executor, containerName string) error {
 	for i := 0; i < 300; i++ {
 		has, _ := HasSession(ctx, exec, containerName)
 		if has {
@@ -55,6 +55,6 @@ func BuildCapturePaneArgs(containerName string, lines int) []string {
 	}
 }
 
-func Attach(exec orb.Executor, containerName string) error {
+func Attach(exec vmexec.Executor, containerName string) error {
 	return exec.RunInteractive(BuildAttachArgs(containerName)...)
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/profiles"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -240,7 +240,7 @@ func openDetachedPipelineLog(stateHome, manifestPath string) (string, *os.File, 
 }
 
 // runPipelineManifest executes a pipeline manifest. Extracted for recursive sub-pipeline support.
-func runPipelineManifest(ctx context.Context, exec orb.Executor, m *fleet.PipelineManifest, parseOpts fleet.ParseOptions, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
+func runPipelineManifest(ctx context.Context, exec vmexec.Executor, m *fleet.PipelineManifest, parseOpts fleet.ParseOptions, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
 	name, rootLabel, currentPath := pipelineContext(m, timestamp, rootLabel, parentPath)
 	completed := make(map[string]bool)
 	remaining := append([]fleet.PipelineStage{}, m.Stages...)
@@ -350,7 +350,7 @@ func appendStringFlag(value, format string) {
 	}
 }
 
-func createFleetVolume(ctx context.Context, exec orb.Executor, fleetVolume string) error {
+func createFleetVolume(ctx context.Context, exec vmexec.Executor, fleetVolume string) error {
 	if _, err := exec.Run(ctx, "docker", "volume", "create",
 		"--label", "app=safe-agentic",
 		"--label", "safe-agentic.type=fleet",
@@ -415,7 +415,7 @@ func stageNames(stages []fleet.PipelineStage) []string {
 	return names
 }
 
-func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runReadyStages(ctx context.Context, exec vmexec.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	var containerNames []string
 	for _, stage := range ready {
 		names, err := runPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
@@ -427,7 +427,7 @@ func runReadyStages(ctx context.Context, exec orb.Executor, ready []fleet.Pipeli
 	return containerNames, nil
 }
 
-func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runPipelineStage(ctx context.Context, exec vmexec.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
 	fmt.Printf("Running stage: %s\n", stage.Name)
 	if stage.Pipeline != "" {
 		return nil, runSubPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
@@ -435,7 +435,7 @@ func runPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.Pipeli
 	return spawnPipelineStageAgents(stage, rootLabel, currentPath, timestamp)
 }
 
-func runSubPipelineStage(ctx context.Context, exec orb.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
+func runSubPipelineStage(ctx context.Context, exec vmexec.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) error {
 	fmt.Printf("  Sub-pipeline: %s\n", stage.Pipeline)
 	subOpts := parseOpts
 	for _, dir := range profileDirsForManifest(stage.Pipeline) {
@@ -795,7 +795,7 @@ func markStagesCompleted(completed map[string]bool, ready []fleet.PipelineStage)
 }
 
 // waitForContainers polls docker inspect until all containers exit successfully.
-func waitForContainers(ctx context.Context, exec orb.Executor, names []string) error {
+func waitForContainers(ctx context.Context, exec vmexec.Executor, names []string) error {
 	if len(names) == 0 {
 		return nil
 	}

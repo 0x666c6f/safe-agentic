@@ -10,7 +10,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 func TestRunPipeline_DryRunNestedExample(t *testing.T) {
@@ -169,7 +169,7 @@ func TestSpawnPipelineAgentReturnsActualContainerName(t *testing.T) {
 }
 
 func TestWaitForContainers_FetchesExitCodeOnceOnSuccess(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format {{.State.Status}} agent-1", "exited")
 	fake.SetResponse("docker inspect --format {{.State.ExitCode}} agent-1", "0")
 

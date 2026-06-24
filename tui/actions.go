@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,6 +43,22 @@ func resolveCLIBinaryFrom(self string) string {
 
 func mcpLoginArgs(server, container string) []string {
 	return []string{"mcp-login", server, container}
+}
+
+func machineRunArgs(args ...string) []string {
+	base := []string{"machine", "run", "-n", vmName, "-u", "root"}
+	if len(args) == 0 {
+		return base
+	}
+	wrapped := []string{"/usr/local/bin/safe-ag-exec", args[0]}
+	for _, arg := range args[1:] {
+		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
+	}
+	return append(append(base, "--"), wrapped...)
+}
+
+func machineCommandArgs(args ...string) []string {
+	return append([]string{"container"}, machineRunArgs(args...)...)
 }
 
 func sshLabelAllowsPush(v string) bool {
@@ -86,7 +103,7 @@ func (ac *Actions) Attach() {
 	running := agent.Running
 	if containerUsesTmux(name) {
 		if !running {
-			startCmd := exec.Command("orb", "run", "-m", vmName, "docker", "start", name)
+			startCmd := exec.Command("container", machineRunArgs("docker", "start", name)...)
 			if err := startCmd.Run(); err != nil {
 				ac.app.footer.ShowStatus(fmt.Sprintf("Failed to start container: %v", err), true)
 				return
@@ -101,9 +118,9 @@ func (ac *Actions) Attach() {
 	}
 
 	if running {
-		ac.openInteractive([]string{"orb", "run", "-m", vmName, "docker", "exec", "-it", name, "bash", "-l"})
+		ac.openInteractive(machineCommandArgs("docker", "exec", "-it", name, "bash", "-l"))
 	} else {
-		ac.openInteractive([]string{"orb", "run", "-m", vmName, "docker", "start", "-ai", name})
+		ac.openInteractive(machineCommandArgs("docker", "start", "-ai", name))
 	}
 }
 
@@ -117,7 +134,7 @@ func (ac *Actions) Resume() {
 	}
 	if containerUsesTmux(agent.Name) {
 		if !agent.Running {
-			startCmd := exec.Command("orb", "run", "-m", vmName, "docker", "start", agent.Name)
+			startCmd := exec.Command("container", machineRunArgs("docker", "start", agent.Name)...)
 			if err := startCmd.Run(); err != nil {
 				ac.app.footer.ShowStatus(fmt.Sprintf("Failed to start container: %v", err), true)
 				return
@@ -147,7 +164,7 @@ func (ac *Actions) Resume() {
 		cwd = meta.CWD
 	}
 
-	startCmd := exec.Command("orb", "run", "-m", vmName, "docker", "start", agent.Name)
+	startCmd := exec.Command("container", machineRunArgs("docker", "start", agent.Name)...)
 	if err := startCmd.Run(); err != nil {
 		ac.app.footer.ShowStatus(fmt.Sprintf("Failed to start container: %v", err), true)
 		return
@@ -180,11 +197,11 @@ func resumeSupported(agentType string) bool {
 }
 
 func buildAttachArgs(name string) []string {
-	return []string{"orb", "run", "-m", vmName, "docker", "attach", "--sig-proxy=false", name}
+	return machineCommandArgs("docker", "attach", "--sig-proxy=false", name)
 }
 
 func buildTmuxAttachArgs(name string) []string {
-	return []string{"orb", "run", "-m", vmName, "docker", "exec", "-it", name, "tmux", "attach", "-t", tmuxSessionName}
+	return machineCommandArgs("docker", "exec", "-it", name, "tmux", "attach", "-t", tmuxSessionName)
 }
 
 func buildResumeExecArgs(agentType, name, cwd string) ([]string, error) {
@@ -196,7 +213,7 @@ func buildResumeExecArgs(agentType, name, cwd string) ([]string, error) {
 		cwd = defaultResumeCWD
 	}
 	script := "cd " + shellQuoteArgs([]string{cwd}) + " && exec " + shellQuoteArgs(resumeArgs)
-	return []string{"orb", "run", "-m", vmName, "docker", "exec", "-it", name, "bash", "-lc", script}, nil
+	return machineCommandArgs("docker", "exec", "-it", name, "bash", "-lc", script), nil
 }
 
 func resumeCLIArgs(agentType string) ([]string, error) {
@@ -253,13 +270,13 @@ func parseSessionMeta(data []byte) (sessionMeta, error) {
 }
 
 func containerUsesTmux(name string) bool {
-	out, err := execOrb("docker", "inspect", "--format", "{{index .Config.Labels \"safe-agentic.terminal\"}}", name)
+	out, err := execVM("docker", "inspect", "--format", "{{index .Config.Labels \"safe-agentic.terminal\"}}", name)
 	return err == nil && strings.TrimSpace(string(out)) == "tmux"
 }
 
 func waitForTmuxSession(name string, attempts int) bool {
 	for i := 0; i < attempts; i++ {
-		if _, err := execOrb("docker", "exec", name, "tmux", "has-session", "-t", tmuxSessionName); err == nil {
+		if _, err := execVM("docker", "exec", name, "tmux", "has-session", "-t", tmuxSessionName); err == nil {
 			return true
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -518,13 +535,13 @@ func inspectLogContext(name string) (string, string, string, bool) {
 	repo := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.repo-display"}}`)
 	agentType := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.agent-type"}}`)
 	configDir := logConfigDir(strings.TrimSpace(agentType))
-	createdOut, _ := execOrb("docker", "inspect", "--format", "{{.Created}}", name)
-	stateOut, _ := execOrb("docker", "inspect", "--format", "{{.State.Status}}", name)
+	createdOut, _ := execVM("docker", "inspect", "--format", "{{.Created}}", name)
+	stateOut, _ := execVM("docker", "inspect", "--format", "{{.State.Status}}", name)
 	return strings.TrimSpace(repo), configDir, strings.TrimSpace(string(createdOut)), strings.TrimSpace(string(stateOut)) == "running"
 }
 
 func inspectLogLabel(name, format string) string {
-	out, _ := execOrb("docker", "inspect", "--format", format, name)
+	out, _ := execVM("docker", "inspect", "--format", format, name)
 	return strings.TrimSpace(string(out))
 }
 
@@ -545,7 +562,7 @@ func fetchRunningSessionLogs(name, tailLines, containerCreated string, searchDir
 }
 
 func findSessionLogPath(args ...string) string {
-	result, err := execOrbTimeout(15*time.Second, args...)
+	result, err := execVMTimeout(15*time.Second, args...)
 	if err != nil {
 		return ""
 	}
@@ -554,17 +571,17 @@ func findSessionLogPath(args ...string) string {
 
 func readSessionLogPath(name, tailLines, path string) []byte {
 	if tailLines == "0" {
-		data, _ := execOrbTimeout(60*time.Second, "docker", "exec", name, "cat", path)
+		data, _ := execVMTimeout(60*time.Second, "docker", "exec", name, "cat", path)
 		return data
 	}
-	data, _ := execOrbLong("docker", "exec", name, "tail", "-"+tailLines, path)
+	data, _ := execVMLong("docker", "exec", name, "tail", "-"+tailLines, path)
 	return data
 }
 
 func fetchStoppedSessionLogs(name, tailLines, configDir, containerCreated string, searchDirs []string, matchScript string) []byte {
 	tmpDir := "/tmp/satui-logs-" + name
-	execOrb("rm", "-rf", tmpDir)
-	defer execOrb("rm", "-rf", tmpDir)
+	execVM("rm", "-rf", tmpDir)
+	defer execVM("rm", "-rf", tmpDir)
 	copyStoppedSearchDirs(name, configDir, searchDirs, tmpDir)
 	localSearchDirs := localStoppedSearchDirs(configDir, searchDirs, tmpDir)
 	args := append([]string{"python3", "-c", matchScript, containerCreated}, localSearchDirs...)
@@ -573,10 +590,10 @@ func fetchStoppedSessionLogs(name, tailLines, configDir, containerCreated string
 		return nil
 	}
 	if tailLines == "0" {
-		data, _ := execOrbTimeout(60*time.Second, "cat", path)
+		data, _ := execVMTimeout(60*time.Second, "cat", path)
 		return data
 	}
-	data, _ := execOrbLong("tail", "-"+tailLines, path)
+	data, _ := execVMLong("tail", "-"+tailLines, path)
 	return data
 }
 
@@ -587,7 +604,7 @@ func copyStoppedSearchDirs(name, configDir string, searchDirs []string, tmpDir s
 		if dir == configDir {
 			src = configDir + "/history.jsonl"
 		}
-		execOrbLong("docker", "cp", name+":"+src, dst)
+		execVMLong("docker", "cp", name+":"+src, dst)
 	}
 }
 
@@ -631,7 +648,7 @@ func fetchPlainDockerLogs(name, tailLines string) []byte {
 		args = append(args, "--tail", tailLines)
 	}
 	args = append(args, name)
-	data, _ := execOrbLong(args...)
+	data, _ := execVMLong(args...)
 	return data
 }
 
@@ -658,7 +675,7 @@ func (ac *Actions) refreshLogsNow(tv *tview.TextView, name string, state *logsSt
 
 func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
 	configDir := strings.TrimSuffix(sessionsDir, "/sessions/")
-	latestFile, err := execOrbLong("docker", "exec", name, "bash", "-c",
+	latestFile, err := execVMLong("docker", "exec", name, "bash", "-c",
 		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", configDir))
 	if err != nil {
 		return nil, err
@@ -667,7 +684,7 @@ func readSessionViaExec(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrbLong("docker", "exec", name, "cat", path)
+	return execVMLong("docker", "exec", name, "cat", path)
 }
 
 func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
@@ -677,15 +694,15 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 
 	// Find latest file via docker cp of just the directory listing
 	tmpDir := "/tmp/satui-sessions-" + name
-	execOrb("rm", "-rf", tmpDir)
-	defer execOrb("rm", "-rf", tmpDir)
+	execVM("rm", "-rf", tmpDir)
+	defer execVM("rm", "-rf", tmpDir)
 
-	_, err := execOrbLong("docker", "cp", name+":"+configDir, tmpDir+"/")
+	_, err := execVMLong("docker", "cp", name+":"+configDir, tmpDir+"/")
 	if err != nil {
 		return nil, err
 	}
 
-	latestFile, err := execOrbLong("bash", "-c",
+	latestFile, err := execVMLong("bash", "-c",
 		fmt.Sprintf("find %s -name '*.jsonl' ! -name '._*' ! -name 'history.jsonl' ! -path '*/subagents/*' -type f -printf '%%T@ %%p\\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-", tmpDir))
 	if err != nil {
 		return nil, err
@@ -694,7 +711,7 @@ func readSessionViaCp(name, sessionsDir string) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("no session files")
 	}
-	return execOrbLong("cat", path)
+	return execVMLong("cat", path)
 }
 
 // Checkpoint creates a named git stash checkpoint of the agent's current working tree.
@@ -790,7 +807,7 @@ func (ac *Actions) Describe() {
 	if agent == nil {
 		return
 	}
-	data, err := execOrb("docker", "inspect", agent.Name)
+	data, err := execVM("docker", "inspect", agent.Name)
 	if err != nil {
 		ac.app.footer.ShowStatus("Failed to inspect container", true)
 		return
@@ -1417,7 +1434,7 @@ func (ac *Actions) CreatePR() {
 	name := agent.Name
 
 	// Check SSH label first (needed for push)
-	sshLabel, err := execOrb("docker", "inspect", "--format",
+	sshLabel, err := execVM("docker", "inspect", "--format",
 		`{{index .Config.Labels "safe-agentic.ssh"}}`, name)
 	if err != nil || !sshLabelAllowsPush(string(sshLabel)) {
 		ac.app.footer.ShowStatus(fmt.Sprintf("%s was not spawned with --ssh; push requires SSH", name), true)

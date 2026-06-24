@@ -1,8 +1,9 @@
-package orb
+package vmexec
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,27 +16,35 @@ type Executor interface {
 	RunInteractive(args ...string) error
 }
 
-type OrbExecutor struct {
+type MachineExecutor struct {
 	VMName string
 }
 
-func (e *OrbExecutor) buildArgs(args ...string) []string {
-	return append([]string{"run", "-m", e.VMName}, args...)
+func (e *MachineExecutor) buildArgs(args ...string) []string {
+	base := []string{"machine", "run", "-n", e.VMName, "-u", "root"}
+	if len(args) == 0 {
+		return base
+	}
+	wrapped := []string{"/usr/local/bin/safe-ag-exec", args[0]}
+	for _, arg := range args[1:] {
+		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
+	}
+	return append(append(base, "--"), wrapped...)
 }
 
-func (e *OrbExecutor) Run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "orb", e.buildArgs(args...)...)
+func (e *MachineExecutor) Run(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "container", e.buildArgs(args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), fmt.Errorf("orb run %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr.String())
+		return stdout.Bytes(), fmt.Errorf("container machine run %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
 }
 
-func (e *OrbExecutor) RunInteractive(args ...string) error {
-	cmd := exec.Command("orb", e.buildArgs(args...)...)
+func (e *MachineExecutor) RunInteractive(args ...string) error {
+	cmd := exec.Command("container", e.buildArgs(args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 func TestBuildAttachArgs(t *testing.T) {
 	got := buildAttachArgs("agent-codex-demo")
-	want := []string{"orb", "run", "-m", vmName, "docker", "attach", "--sig-proxy=false", "agent-codex-demo"}
+	want := machineCommandArgs("docker", "attach", "--sig-proxy=false", "agent-codex-demo")
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildAttachArgs() = %#v, want %#v", got, want)
 	}
@@ -16,7 +17,7 @@ func TestBuildAttachArgs(t *testing.T) {
 
 func TestBuildTmuxAttachArgs(t *testing.T) {
 	got := buildTmuxAttachArgs("agent-codex-demo")
-	want := []string{"orb", "run", "-m", vmName, "docker", "exec", "-it", "agent-codex-demo", "tmux", "attach", "-t", tmuxSessionName}
+	want := machineCommandArgs("docker", "exec", "-it", "agent-codex-demo", "tmux", "attach", "-t", tmuxSessionName)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildTmuxAttachArgs() = %#v, want %#v", got, want)
 	}
@@ -27,12 +28,9 @@ func TestBuildResumeExecArgsCodex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildResumeExecArgs() error = %v", err)
 	}
-	want := []string{
-		"orb", "run", "-m", vmName,
-		"docker", "exec", "-it", "agent-codex-demo",
+	want := machineCommandArgs("docker", "exec", "-it", "agent-codex-demo",
 		"bash", "-lc",
-		"cd /workspace/org/repo && exec codex --yolo resume --last",
-	}
+		"cd /workspace/org/repo && exec codex --yolo resume --last")
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildResumeExecArgs() = %#v, want %#v", got, want)
 	}
@@ -43,7 +41,11 @@ func TestBuildResumeExecArgsDefaultsCWD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildResumeExecArgs() error = %v", err)
 	}
-	script := got[len(got)-1]
+	decoded, err := base64.StdEncoding.DecodeString(got[len(got)-1])
+	if err != nil {
+		t.Fatalf("decode resume script: %v", err)
+	}
+	script := string(decoded)
 	want := "cd /workspace && exec claude --dangerously-skip-permissions --continue"
 	if script != want {
 		t.Fatalf("resume script = %q, want %q", script, want)

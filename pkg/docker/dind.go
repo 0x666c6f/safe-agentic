@@ -3,7 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"time"
 )
@@ -31,7 +31,7 @@ func AppendDinDAccess(cmd *DockerRunCmd, containerName string) {
 	cmd.AddNamedVolume(socketVolume, dockerInternalSocketDir)
 }
 
-func AppendHostDockerSocket(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) error {
+func AppendHostDockerSocket(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd) error {
 	const hostSocketPath = "/run/docker-host.sock"
 	out, err := exec.Run(ctx, "bash", "-c", "stat -c %g /var/run/docker.sock")
 	if err != nil {
@@ -44,7 +44,7 @@ func AppendHostDockerSocket(ctx context.Context, exec orb.Executor, cmd *DockerR
 	return nil
 }
 
-func StartDinDRuntime(ctx context.Context, exec orb.Executor, containerName, networkName, image string) error {
+func StartDinDRuntime(ctx context.Context, exec vmexec.Executor, containerName, networkName, image string) error {
 	dindName := DinDContainerName(containerName)
 	socketVol := DinDSocketVolume(containerName)
 	dataVol := DinDDataVolume(containerName)
@@ -73,7 +73,7 @@ func StartDinDRuntime(ctx context.Context, exec orb.Executor, containerName, net
 	return waitForDinD(ctx, exec, dindName)
 }
 
-func waitForDinD(ctx context.Context, exec orb.Executor, dindName string) error {
+func waitForDinD(ctx context.Context, exec vmexec.Executor, dindName string) error {
 	for i := 0; i < 40; i++ {
 		_, err := exec.Run(ctx, "docker", "exec", dindName, "docker", "info")
 		if err == nil {
@@ -88,7 +88,7 @@ func waitForDinD(ctx context.Context, exec orb.Executor, dindName string) error 
 	return fmt.Errorf("DinD daemon did not start within 20s")
 }
 
-func RemoveDinDRuntime(ctx context.Context, exec orb.Executor, containerName string) error {
+func RemoveDinDRuntime(ctx context.Context, exec vmexec.Executor, containerName string) error {
 	dindName := DinDContainerName(containerName)
 	exec.Run(ctx, "docker", "rm", "-f", dindName)
 	exec.Run(ctx, "docker", "volume", "rm", DinDSocketVolume(containerName))
@@ -96,7 +96,7 @@ func RemoveDinDRuntime(ctx context.Context, exec orb.Executor, containerName str
 	return nil
 }
 
-func CleanupAllDinD(ctx context.Context, exec orb.Executor) error {
+func CleanupAllDinD(ctx context.Context, exec vmexec.Executor) error {
 	// List containers with docker-runtime label, then remove each individually.
 	out, _ := exec.Run(ctx, "docker", "ps", "-aq", "--filter", "label=safe-agentic.type=docker-runtime")
 	ids := strings.TrimSpace(string(out))

@@ -14,7 +14,7 @@ func sharedWorkspaceVolume(t *testing.T) string {
 	t.Helper()
 	ensureSharedContainer(t)
 	ctx := context.Background()
-	out, err := orbExec.Run(ctx, "docker", "inspect", "--format",
+	out, err := vmExec.Run(ctx, "docker", "inspect", "--format",
 		`{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Name}}{{end}}{{end}}`,
 		detSharedContainer)
 	if err != nil {
@@ -30,7 +30,7 @@ func sharedWorkspaceVolume(t *testing.T) string {
 func startTempShellContainer(t *testing.T, name string) {
 	t.Helper()
 	ctx := context.Background()
-	orbExec.Run(ctx, "docker", "rm", "-f", name)
+	vmExec.Run(ctx, "docker", "rm", "-f", name)
 	workspaceVol := sharedWorkspaceVolume(t)
 
 	args := []string{
@@ -61,18 +61,18 @@ func startTempShellContainer(t *testing.T, name string) {
 		"-lc", "sleep 600",
 	}
 
-	if _, err := orbExec.Run(ctx, args...); err != nil {
+	if _, err := vmExec.Run(ctx, args...); err != nil {
 		t.Fatalf("docker run %s: %v", name, err)
 	}
 
 	for i := 0; i < 20; i++ {
-		out, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
+		out, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
 		if err == nil && strings.TrimSpace(string(out)) == "running" {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	logs, _ := orbExec.Run(ctx, "docker", "logs", name)
+	logs, _ := vmExec.Run(ctx, "docker", "logs", name)
 	t.Fatalf("container %s not running. logs:\n%s", name, logs)
 }
 
@@ -131,9 +131,9 @@ func TestDet_StoppedContainerDiffAndOutputFiles(t *testing.T) {
 	name := "agent-shell-e2e-det-stopped"
 	repo := "/workspace/octocat/Hello-World"
 	startTempShellContainer(t, name)
-	defer orbExec.Run(context.Background(), "docker", "rm", "-f", name)
+	defer vmExec.Run(context.Background(), "docker", "rm", "-f", name)
 
-	trackedOut, err := orbExec.Run(context.Background(), "docker", "exec", name, "bash", "-lc",
+	trackedOut, err := vmExec.Run(context.Background(), "docker", "exec", name, "bash", "-lc",
 		fmt.Sprintf("cd %s && git ls-files | head -1", repo))
 	if err != nil {
 		t.Fatalf("resolve tracked file: %v", err)
@@ -143,11 +143,11 @@ func TestDet_StoppedContainerDiffAndOutputFiles(t *testing.T) {
 		t.Fatal("expected at least one tracked file in temp repo")
 	}
 
-	if _, err := orbExec.Run(context.Background(), "docker", "exec", name, "bash", "-lc",
+	if _, err := vmExec.Run(context.Background(), "docker", "exec", name, "bash", "-lc",
 		fmt.Sprintf("cd %s && echo 'stopped-diff-marker' >> %q && printf 'stopped\\n' > det-stopped.txt", repo, trackedFile)); err != nil {
 		t.Fatalf("seed stopped-container changes: %v", err)
 	}
-	if _, err := orbExec.Run(context.Background(), "docker", "stop", "-t", "5", name); err != nil {
+	if _, err := vmExec.Run(context.Background(), "docker", "stop", "-t", "5", name); err != nil {
 		t.Fatalf("stop temp container: %v", err)
 	}
 

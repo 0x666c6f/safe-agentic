@@ -22,7 +22,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
 	"github.com/0x666c6f/safe-agentic/pkg/inject"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 )
 
@@ -30,9 +30,9 @@ import (
 
 // testSetup replaces the global executor with a FakeExecutor and returns it +
 // a cleanup function that restores the original.
-func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
+func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	t.Helper()
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	t.Setenv("HOME", t.TempDir())
 	original := newExecutor
 	origFindBuildRoot := findBuildRoot
@@ -42,7 +42,8 @@ func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 	origRunVMBootstrap := runVMBootstrap
 	origStartVM := startVM
 	origInstallVMSupportFiles := installVMSupportFiles
-	newExecutor = func() orb.Executor { return fake }
+	origConfigureHostNAT := configureHostNAT
+	newExecutor = func() vmexec.Executor { return fake }
 	findBuildRoot = func() (string, error) { return t.TempDir(), nil }
 	syncBuildContextToVM = func(vmName, root string) error { return nil }
 	copyFileToVM = func(vmName, srcPath, destPath string) error { return nil }
@@ -50,6 +51,7 @@ func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 	runVMBootstrap = func(vmName string) ([]byte, error) { return []byte("bootstrap ok\n"), nil }
 	startVM = func(vmName string) error { return nil }
 	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
+	configureHostNAT = func(stdout, stderr io.Writer) error { return nil }
 	return fake, func() {
 		newExecutor = original
 		findBuildRoot = origFindBuildRoot
@@ -59,6 +61,7 @@ func testSetup(t *testing.T) (*orb.FakeExecutor, func()) {
 		runVMBootstrap = origRunVMBootstrap
 		startVM = origStartVM
 		installVMSupportFiles = origInstallVMSupportFiles
+		configureHostNAT = origConfigureHostNAT
 	}
 }
 
@@ -76,12 +79,12 @@ func captureOutput(fn func()) string {
 	return buf.String()
 }
 
-func installFakeOrbBinary(t *testing.T) {
+func installFakeContainerBinary(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "orb")
+	path := filepath.Join(dir, "container")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake orb: %v", err)
+		t.Fatalf("write fake container: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
@@ -1906,7 +1909,7 @@ func TestUpdateCommand_Full(t *testing.T) {
 // ─── containerEnvVar ──────────────────────────────────────────────────────────
 
 func TestContainerEnvVar(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format {{range .Config.Env}}{{println .}}{{end}}", "FOO=bar\nBAZ=qux\nAGENT_TYPE=claude\n")
 
 	val, err := containerEnvVar(context.Background(), fake, "mycontainer", "FOO")
@@ -1919,7 +1922,7 @@ func TestContainerEnvVar(t *testing.T) {
 }
 
 func TestContainerEnvVar_NotFound(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format {{range .Config.Env}}{{println .}}{{end}}", "FOO=bar\n")
 
 	val, err := containerEnvVar(context.Background(), fake, "mycontainer", "MISSING")
@@ -3089,7 +3092,7 @@ func TestRunCostHistory(t *testing.T) {
 		}
 	}()
 
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	output := captureOutput(func() {
 		err := runCostHistory(context.Background(), fake, "7d")
 		if err != nil {
@@ -3251,8 +3254,7 @@ func TestDiagnoseCommand_AllOK(t *testing.T) {
 		}
 	})
 
-	// orb is found on the system (it's a real binary in CI) OR the "orb installed" check runs
-	// The function doesn't return an error even if orb is missing; it just prints a ✗
+	// The function doesn't return an error even if container is missing; it just prints a ✗
 	// We just verify it completes without panic.
 	_ = output
 }
@@ -3282,7 +3284,7 @@ func TestDiagnoseCommand_DockerReady(t *testing.T) {
 func TestSetupCommand_DockerAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
-	installFakeOrbBinary(t)
+	installFakeContainerBinary(t)
 
 	// Simulate docker info succeeding (Docker already running in VM)
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
@@ -3306,7 +3308,7 @@ func TestSetupCommand_DockerAvailable(t *testing.T) {
 func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
-	installFakeOrbBinary(t)
+	installFakeContainerBinary(t)
 
 	// Docker is verified after bootstrap in the current flow.
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
@@ -4413,7 +4415,7 @@ func TestRunCostHistory_WithAuditEntries(t *testing.T) {
 	}
 	f.Close()
 
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	output := captureOutput(func() {
 		if err := runCostHistory(context.Background(), fake, "7d"); err != nil {
 			t.Fatalf("runCostHistory() error = %v", err)
@@ -4440,7 +4442,7 @@ func TestRunCostHistory_PeriodWeeks(t *testing.T) {
 		}
 	}()
 
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	output := captureOutput(func() {
 		if err := runCostHistory(context.Background(), fake, "2w"); err != nil {
 			t.Fatalf("runCostHistory() with weeks error = %v", err)
@@ -4464,7 +4466,7 @@ func TestRunCostHistory_PeriodHours(t *testing.T) {
 		}
 	}()
 
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	output := captureOutput(func() {
 		if err := runCostHistory(context.Background(), fake, "24h"); err != nil {
 			t.Fatalf("runCostHistory() with hours error = %v", err)

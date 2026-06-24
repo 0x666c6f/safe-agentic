@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
 )
@@ -273,7 +273,7 @@ func init() {
 }
 
 // readTodos fetches the todos.json from the container.
-func readTodos(ctx context.Context, exec orb.Executor, containerName string) ([]todoItem, error) {
+func readTodos(ctx context.Context, exec vmexec.Executor, containerName string) ([]todoItem, error) {
 	out, err := exec.Run(ctx, "docker", "exec", containerName,
 		"bash", "-c", "cat /workspace/.safe-agentic/todos.json 2>/dev/null || echo '[]'")
 	if err != nil {
@@ -288,7 +288,7 @@ func readTodos(ctx context.Context, exec orb.Executor, containerName string) ([]
 }
 
 // writeTodos writes todos back to the container.
-func writeTodos(ctx context.Context, exec orb.Executor, containerName string, items []todoItem) error {
+func writeTodos(ctx context.Context, exec vmexec.Executor, containerName string, items []todoItem) error {
 	data, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal todos: %w", err)

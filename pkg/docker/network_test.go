@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -28,7 +28,7 @@ func TestManagedBridgeName(t *testing.T) {
 }
 
 func TestCreateManagedNetwork(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	name, err := CreateManagedNetwork(context.Background(), fake, "agent-claude-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -56,7 +56,7 @@ func TestCreateManagedNetwork(t *testing.T) {
 }
 
 func TestCreateManagedNetwork_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker network create", "network already exists")
 	_, err := CreateManagedNetwork(context.Background(), fake, "agent-claude-abc")
 	if err == nil {
@@ -68,7 +68,7 @@ func TestCreateManagedNetwork_Error(t *testing.T) {
 }
 
 func TestRemoveManagedNetwork(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	err := RemoveManagedNetwork(context.Background(), fake, "agent-claude-abc-net")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -80,7 +80,7 @@ func TestRemoveManagedNetwork(t *testing.T) {
 }
 
 func TestRemoveManagedNetwork_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker network rm", "network not found")
 	err := RemoveManagedNetwork(context.Background(), fake, "agent-claude-abc-net")
 	if err == nil {
@@ -92,7 +92,7 @@ func TestRemoveManagedNetwork_Error(t *testing.T) {
 }
 
 func TestPrepareNetwork_Managed(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	name, mode, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,7 +106,7 @@ func TestPrepareNetwork_Managed(t *testing.T) {
 }
 
 func TestPrepareNetwork_ManagedDryRun(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	name, mode, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -125,7 +125,7 @@ func TestPrepareNetwork_ManagedDryRun(t *testing.T) {
 }
 
 func TestPrepareNetwork_None(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	name, mode, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "none", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -139,7 +139,7 @@ func TestPrepareNetwork_None(t *testing.T) {
 }
 
 func TestPrepareNetwork_Custom(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker network inspect my-custom-net", "exists")
 	name, mode, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "my-custom-net", false)
 	if err != nil {
@@ -154,7 +154,7 @@ func TestPrepareNetwork_Custom(t *testing.T) {
 }
 
 func TestPrepareNetwork_CustomNotExists(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker network inspect my-missing-net", "network not found")
 	_, _, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "my-missing-net", false)
 	if err == nil {
@@ -166,7 +166,7 @@ func TestPrepareNetwork_CustomNotExists(t *testing.T) {
 }
 
 func TestPrepareNetwork_InvalidCustom(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	_, _, err := PrepareNetwork(context.Background(), fake, "agent-claude-abc", "host", false)
 	if err == nil {
 		t.Fatal("expected error for unsafe network mode")

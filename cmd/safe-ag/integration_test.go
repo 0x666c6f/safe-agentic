@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 const (
 	testPrefix = "agent-e2e-test"
 )
 
-var orbExec *orb.OrbExecutor
+var vmExec *vmexec.MachineExecutor
 var testVMName = "safe-agentic"
 var integrationHome string
 
@@ -71,11 +71,11 @@ func TestMain(m *testing.M) {
 	}
 
 	// Verify VM + Docker
-	orbExec = &orb.OrbExecutor{VMName: testVMName}
+	vmExec = &vmexec.MachineExecutor{VMName: testVMName}
 	ctx := context.Background()
 	var infoErr error
 	for i := 0; i < 6; i++ {
-		if _, infoErr = orbExec.Run(ctx, "docker", "info"); infoErr == nil {
+		if _, infoErr = vmExec.Run(ctx, "docker", "info"); infoErr == nil {
 			break
 		}
 		time.Sleep(5 * time.Second)
@@ -175,24 +175,24 @@ func skipIntegrationHostEnv(key string) bool {
 func cleanupTestContainers() {
 	ctx := context.Background()
 	// Find all containers with test prefix
-	out, _ := orbExec.Run(ctx, "docker", "ps", "-aq", "--filter", "name="+testPrefix)
+	out, _ := vmExec.Run(ctx, "docker", "ps", "-aq", "--filter", "name="+testPrefix)
 	ids := strings.TrimSpace(string(out))
 	if ids != "" {
 		for _, id := range strings.Split(ids, "\n") {
 			id = strings.TrimSpace(id)
 			if id != "" {
-				orbExec.Run(ctx, "docker", "rm", "-f", id)
+				vmExec.Run(ctx, "docker", "rm", "-f", id)
 			}
 		}
 	}
 	// Cleanup networks
-	out, _ = orbExec.Run(ctx, "docker", "network", "ls", "-q", "--filter", "name="+testPrefix)
+	out, _ = vmExec.Run(ctx, "docker", "network", "ls", "-q", "--filter", "name="+testPrefix)
 	nets := strings.TrimSpace(string(out))
 	if nets != "" {
 		for _, n := range strings.Split(nets, "\n") {
 			n = strings.TrimSpace(n)
 			if n != "" {
-				orbExec.Run(ctx, "docker", "network", "rm", n)
+				vmExec.Run(ctx, "docker", "network", "rm", n)
 			}
 		}
 	}
@@ -212,7 +212,7 @@ func waitForContainer(t *testing.T, name string) bool {
 	t.Helper()
 	ctx := context.Background()
 	for i := 0; i < 60; i++ {
-		_, err := orbExec.Run(ctx, "docker", "inspect", name)
+		_, err := vmExec.Run(ctx, "docker", "inspect", name)
 		if err == nil {
 			return true
 		}
@@ -225,7 +225,7 @@ func waitForContainer(t *testing.T, name string) bool {
 func dockerInspectField(t *testing.T, container, format string) string {
 	t.Helper()
 	ctx := context.Background()
-	out, err := orbExec.Run(ctx, "docker", "inspect", "--format", format, container)
+	out, err := vmExec.Run(ctx, "docker", "inspect", "--format", format, container)
 	if err != nil {
 		t.Fatalf("inspect %s with %q: %v", container, format, err)
 	}
@@ -236,8 +236,8 @@ func dockerInspectField(t *testing.T, container, format string) string {
 func stopAndRemove(t *testing.T, name string) {
 	t.Helper()
 	ctx := context.Background()
-	orbExec.Run(ctx, "docker", "rm", "-f", name)
-	orbExec.Run(ctx, "docker", "network", "rm", name+"-net")
+	vmExec.Run(ctx, "docker", "rm", "-f", name)
+	vmExec.Run(ctx, "docker", "network", "rm", name+"-net")
 }
 
 // containerFullName returns the full container name as created by spawn.
@@ -291,8 +291,8 @@ func TestE2E_DiagnoseChecks(t *testing.T) {
 	if !strings.Contains(out, "✓") {
 		t.Fatalf("diagnose should show check marks:\n%s", out)
 	}
-	if !strings.Contains(out, "orb installed") {
-		t.Fatalf("diagnose should check orb:\n%s", out)
+	if !strings.Contains(out, "container installed") {
+		t.Fatalf("diagnose should check container:\n%s", out)
 	}
 }
 
@@ -316,7 +316,7 @@ func TestE2E_SpawnDryRunDoesNotCreateContainer(t *testing.T) {
 
 	// Verify no container was created
 	ctx := context.Background()
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName)
 	if err == nil {
 		stopAndRemove(t, fullName)
 		t.Fatal("dry-run should not create container")
@@ -445,7 +445,7 @@ func checkSpawnNetworkModeLabel(t *testing.T, fullName string) {
 
 func checkSpawnRunsAsNonRoot(t *testing.T, fullName string) {
 	ctx := context.Background()
-	out, err := orbExec.Run(ctx, "docker", "exec", fullName, "id", "-u")
+	out, err := vmExec.Run(ctx, "docker", "exec", fullName, "id", "-u")
 	if err != nil {
 		t.Skipf("container may have exited: %v", err)
 	}
@@ -457,7 +457,7 @@ func checkSpawnRunsAsNonRoot(t *testing.T, fullName string) {
 
 func checkSpawnManagedNetwork(t *testing.T, fullName string) {
 	ctx := context.Background()
-	if _, err := orbExec.Run(ctx, "docker", "network", "inspect", fullName+"-net"); err != nil {
+	if _, err := vmExec.Run(ctx, "docker", "network", "inspect", fullName+"-net"); err != nil {
 		t.Fatal("managed network not created")
 	}
 }
@@ -581,10 +581,10 @@ func TestE2E_SpawnWithCustomNetwork(t *testing.T) {
 
 	ctx := context.Background()
 	// Create custom network
-	orbExec.Run(ctx, "docker", "network", "create", netName)
+	vmExec.Run(ctx, "docker", "network", "create", netName)
 	defer func() {
 		stopAndRemove(t, fullName)
-		orbExec.Run(ctx, "docker", "network", "rm", netName)
+		vmExec.Run(ctx, "docker", "network", "rm", netName)
 	}()
 
 	out, err := runSafeAg(t, "spawn", "claude",
@@ -698,14 +698,14 @@ func TestE2E_StopRemovesContainer(t *testing.T) {
 	// Verify container is gone
 	ctx := context.Background()
 	time.Sleep(2 * time.Second)
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName)
 	if err == nil {
 		stopAndRemove(t, fullName)
 		t.Fatal("container should be removed after stop")
 	}
 
 	// Verify network is also gone
-	_, err = orbExec.Run(ctx, "docker", "network", "inspect", fullName+"-net")
+	_, err = vmExec.Run(ctx, "docker", "network", "inspect", fullName+"-net")
 	if err == nil {
 		t.Fatal("managed network should be removed after stop")
 	}
@@ -741,11 +741,11 @@ func TestE2E_CleanupRemovesAll(t *testing.T) {
 	// Both should be gone
 	ctx := context.Background()
 	time.Sleep(2 * time.Second)
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName1)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName1)
 	if err == nil {
 		t.Fatal("container 1 should be removed after cleanup")
 	}
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName2)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName2)
 	if err == nil {
 		t.Fatal("container 2 should be removed after cleanup")
 	}
@@ -946,12 +946,12 @@ func TestE2E_StopAll(t *testing.T) {
 
 	ctx := context.Background()
 	time.Sleep(2 * time.Second)
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName1)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName1)
 	if err == nil {
 		stopAndRemove(t, fullName1)
 		t.Fatal("container 1 should be removed after stop --all")
 	}
-	_, err = orbExec.Run(ctx, "docker", "inspect", fullName2)
+	_, err = vmExec.Run(ctx, "docker", "inspect", fullName2)
 	if err == nil {
 		stopAndRemove(t, fullName2)
 		t.Fatal("container 2 should be removed after stop --all")

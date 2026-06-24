@@ -22,21 +22,21 @@ func requireDeepIntegration(t *testing.T) {
 
 func cleanupNamedArtifacts(name string) {
 	ctx := context.Background()
-	orbExec.Run(ctx, "docker", "rm", "-f", name)
-	orbExec.Run(ctx, "docker", "rm", "-f", "safe-agentic-docker-"+name)
-	orbExec.Run(ctx, "docker", "network", "rm", name+"-net")
-	orbExec.Run(ctx, "docker", "volume", "rm", name+"-docker-sock")
-	orbExec.Run(ctx, "docker", "volume", "rm", name+"-docker-data")
-	orbExec.Run(ctx, "docker", "volume", "rm", name+"-auth")
+	vmExec.Run(ctx, "docker", "rm", "-f", name)
+	vmExec.Run(ctx, "docker", "rm", "-f", "safe-agentic-docker-"+name)
+	vmExec.Run(ctx, "docker", "network", "rm", name+"-net")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-docker-sock")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-docker-data")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-auth")
 }
 
 func cleanupArtifactsByLabel(label string) {
 	ctx := context.Background()
-	out, _ := orbExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+	out, _ := vmExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
 	for _, id := range strings.Fields(string(out)) {
-		nameOut, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", id)
+		nameOut, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", id)
 		if err != nil {
-			orbExec.Run(ctx, "docker", "rm", "-f", id)
+			vmExec.Run(ctx, "docker", "rm", "-f", id)
 			continue
 		}
 		name := strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
@@ -50,10 +50,10 @@ func waitForContainerByLabel(t *testing.T, label string) string {
 	t.Helper()
 	ctx := context.Background()
 	for i := 0; i < 60; i++ {
-		out, _ := orbExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+		out, _ := vmExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
 		names := strings.Fields(string(out))
 		if len(names) > 0 {
-			nameOut, err := orbExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", names[0])
+			nameOut, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", names[0])
 			if err == nil {
 				return strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
 			}
@@ -92,7 +92,7 @@ func waitForDockerLogs(t *testing.T, name, needle string) string {
 	ctx := context.Background()
 	var logs string
 	for i := 0; i < 30; i++ {
-		out, _ := orbExec.Run(ctx, "docker", "logs", name)
+		out, _ := vmExec.Run(ctx, "docker", "logs", name)
 		logs = string(out)
 		if strings.Contains(logs, needle) {
 			return logs
@@ -221,7 +221,7 @@ func TestE2E_SpawnDockerModes(t *testing.T) {
 		dindName := "safe-agentic-docker-" + fullName
 		cleanupNamedArtifacts(fullName)
 		defer stopAndRemove(t, fullName)
-		defer orbExec.Run(context.Background(), "docker", "rm", "-f", dindName)
+		defer vmExec.Run(context.Background(), "docker", "rm", "-f", dindName)
 
 		out, err := runSafeAg(t, "spawn", "shell",
 			"--name", suffix,
@@ -243,7 +243,7 @@ func TestE2E_SpawnDockerModes(t *testing.T) {
 		if got := dockerInspectField(t, fullName, `{{index .Config.Labels "safe-agentic.docker"}}`); got != "dind" {
 			t.Fatalf("docker label = %q, want dind", got)
 		}
-		if _, err := orbExec.Run(context.Background(), "docker", "exec", dindName, "docker", "info"); err != nil {
+		if _, err := vmExec.Run(context.Background(), "docker", "exec", dindName, "docker", "info"); err != nil {
 			t.Fatalf("dind docker info failed: %v", err)
 		}
 	})

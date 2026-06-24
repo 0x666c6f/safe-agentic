@@ -50,7 +50,7 @@ func TestParseSessionMetaErrorsAndLogsTitle(t *testing.T) {
 }
 
 func TestWaitForTmuxSession(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	if !waitForTmuxSession("agent-beta", 1) {
 		t.Fatal("waitForTmuxSession(agent-beta) = false, want true")

@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -90,32 +90,33 @@ func execAfterExit(app *App) {
 }
 
 func preflight() error {
-	if _, err := exec.LookPath("orb"); err != nil {
-		return fmt.Errorf("'orb' not found in PATH. Install OrbStack first")
+	if _, err := exec.LookPath("container"); err != nil {
+		return fmt.Errorf("'container' not found in PATH. Install Apple container first")
 	}
-
-	if orbctl, err := exec.LookPath("orbctl"); err == nil {
-		statusOut, statusErr := exec.Command(orbctl, "status").Output()
-		if len(statusOut) > 0 && strings.Contains(string(statusOut), "Stopped") {
-			return fmt.Errorf("OrbStack is stopped. Start OrbStack and run 'safe-ag vm start'")
-		}
-		if statusErr == nil && len(statusOut) > 0 && strings.Contains(string(statusOut), "Running") {
-			// Good enough; continue to VM existence check.
-		}
+	if err := exec.Command("container", "system", "status").Run(); err != nil {
+		return fmt.Errorf("Apple container system is stopped. Run 'safe-ag vm start'")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "orb", "list", "-q").Output()
+	out, err := exec.CommandContext(ctx, "container", "machine", "list", "--format", "json").Output()
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("timed out listing VMs. Check OrbStack and run 'safe-ag vm start'")
+		return fmt.Errorf("timed out listing VMs. Check Apple container and run 'safe-ag vm start'")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to list VMs: %w", err)
 	}
-	if !strings.Contains(string(out), configuredVMName()) {
-		return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", configuredVMName())
+	var machines []struct {
+		ID string `json:"id"`
 	}
-	return nil
+	if err := json.Unmarshal(out, &machines); err != nil {
+		return fmt.Errorf("failed to parse VM list: %w", err)
+	}
+	for _, machine := range machines {
+		if machine.ID == configuredVMName() {
+			return nil
+		}
+	}
+	return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", configuredVMName())
 }

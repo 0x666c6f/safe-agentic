@@ -70,7 +70,7 @@ func ShowCopyForm(app *App, containerName string) {
 
 		app.footer.ShowStatus("Copying...", false)
 		go func() {
-			out, err := execOrb("docker", "cp", containerName+":"+containerPath, hostPath)
+			out, err := execVM("docker", "cp", containerName+":"+containerPath, hostPath)
 			app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
 					app.footer.ShowStatus("Copy failed: "+string(out), true)
@@ -95,7 +95,7 @@ func ShowCopyForm(app *App, containerName string) {
 
 		app.footer.ShowStatus("Pushing...", false)
 		go func() {
-			out, err := execOrb("docker", "cp", hostPath, containerName+":"+containerPath)
+			out, err := execVM("docker", "cp", hostPath, containerName+":"+containerPath)
 			app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
 					app.footer.ShowStatus("Push failed: "+string(out), true)

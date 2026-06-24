@@ -431,17 +431,17 @@ func runMCPLogin(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 2 {
 		container := args[1]
-		orbRunner := newExecutor()
-		return orbRunner.RunInteractive("docker", "exec", "-it", container, "mcp-login", service)
+		vmRunner := newExecutor()
+		return vmRunner.RunInteractive("docker", "exec", "-it", container, "mcp-login", service)
 	}
 
 	// Resolve the most recent running container, if any.
 	ctx := context.Background()
-	orbRunner := newExecutor()
-	name, err := docker.ResolveTarget(ctx, orbRunner, "--latest")
+	vmRunner := newExecutor()
+	name, err := docker.ResolveTarget(ctx, vmRunner, "--latest")
 	if err == nil {
 		fmt.Printf("Logging in to MCP service %q in container %s…\n", service, name)
-		return orbRunner.RunInteractive("docker", "exec", "-it", name, "mcp-login", service)
+		return vmRunner.RunInteractive("docker", "exec", "-it", name, "mcp-login", service)
 	}
 
 	// No running container — print instructions.
@@ -470,7 +470,7 @@ func init() {
 
 func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	orbRunner := newExecutor()
+	vmRunner := newExecutor()
 
 	target := ""
 	profileArg := ""
@@ -490,7 +490,7 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 		profileArg = args[1]
 	}
 
-	name, err := docker.ResolveTarget(ctx, orbRunner, target)
+	name, err := docker.ResolveTarget(ctx, vmRunner, target)
 	if err != nil {
 		return err
 	}
@@ -498,7 +498,7 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	// Determine AWS profile: explicit arg > container label.
 	profile := profileArg
 	if profile == "" {
-		profile, _ = docker.InspectLabel(ctx, orbRunner, name, labels.AWS)
+		profile, _ = docker.InspectLabel(ctx, vmRunner, name, labels.AWS)
 	}
 	if profile == "" {
 		return fmt.Errorf("no AWS profile specified and container %s has no %s label", name, labels.AWS)
@@ -522,7 +522,7 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 		"umask 177; mkdir -p /home/agent/.aws && printf %%s %s | base64 -d > /home/agent/.aws/credentials",
 		shellQuote(inject.EncodeB64(credsContent)),
 	)
-	if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", writeCmd); err != nil {
+	if _, err := vmRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", writeCmd); err != nil {
 		return fmt.Errorf("write container credentials: %w", err)
 	}
 
@@ -530,7 +530,7 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	if p, ok := envs["AWS_PROFILE"]; ok {
 		exportLine := "export AWS_PROFILE=" + shellQuote(p)
 		exportCmd := fmt.Sprintf("printf '\\n%%s\\n' %s >> ~/.bashrc", shellQuote(exportLine))
-		if _, err := orbRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", exportCmd); err != nil {
+		if _, err := vmRunner.Run(ctx, "docker", "exec", name, "bash", "-lc", exportCmd); err != nil {
 			return fmt.Errorf("persist AWS profile: %w", err)
 		}
 	}

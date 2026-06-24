@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -45,7 +45,7 @@ func TestAppendDinDAccess(t *testing.T) {
 }
 
 func TestAppendHostDockerSocket(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c stat -c %g /var/run/docker.sock", "999")
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendHostDockerSocket(context.Background(), fake, cmd)
@@ -65,7 +65,7 @@ func TestAppendHostDockerSocket(t *testing.T) {
 }
 
 func TestAppendHostDockerSocket_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("bash -c stat -c %g /var/run/docker.sock", "stat failed")
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendHostDockerSocket(context.Background(), fake, cmd)
@@ -78,7 +78,7 @@ func TestAppendHostDockerSocket_Error(t *testing.T) {
 }
 
 func TestStartDinDRuntime(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	// Simulate docker exec succeeding on first try (waitForDinD)
 	fake.SetResponse("docker exec safe-agentic-docker-agent-claude-abc docker info", "ok")
 	err := StartDinDRuntime(context.Background(), fake, "agent-claude-abc", "agent-claude-abc-net", "docker:dind")
@@ -100,7 +100,7 @@ func TestStartDinDRuntime(t *testing.T) {
 }
 
 func TestRemoveDinDRuntime(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	err := RemoveDinDRuntime(context.Background(), fake, "agent-claude-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -117,7 +117,7 @@ func TestRemoveDinDRuntime(t *testing.T) {
 }
 
 func TestRemoveDinDRuntime_VolumesRemoved(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	err := RemoveDinDRuntime(context.Background(), fake, "agent-claude-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,7 +129,7 @@ func TestRemoveDinDRuntime_VolumesRemoved(t *testing.T) {
 }
 
 func TestCleanupAllDinD(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	// Simulate docker ps and docker volume ls returning IDs to clean up.
 	fake.SetResponse("docker ps -aq", "abc123\ndef456")
 	fake.SetResponse("docker volume ls -q", "vol1\nvol2")
@@ -149,7 +149,7 @@ func TestCleanupAllDinD(t *testing.T) {
 }
 
 func TestCleanupAllDinD_NoContainers(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	// No containers or volumes — should succeed without issuing rm commands.
 	err := CleanupAllDinD(context.Background(), fake)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestCleanupAllDinD_NoContainers(t *testing.T) {
 }
 
 func TestWaitForDinD_ContextCancel(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker exec", "not ready")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-An isolated environment for running AI coding agents (Claude Code, Codex) inside an OrbStack VM with per-agent Docker containers. The design philosophy is **safe by default** — dangerous features (SSH forwarding, auth persistence) require explicit opt-in flags.
+An isolated environment for running AI coding agents (Claude Code, Codex) inside an Apple container machine with per-agent Docker containers. The design philosophy is **safe by default** — dangerous features (SSH forwarding, auth persistence) require explicit opt-in flags.
 
 ## Installation
 
@@ -24,7 +24,7 @@ All documentation below uses `safe-ag` as the command name.
 
 ```
 macOS Host (safe-ag Go CLI)
-  └── OrbStack VM "safe-agentic" (Ubuntu 24.04, hardened)
+  └── Apple container machine "safe-agentic" (Alpine 3.22, hardened)
        └── Docker containers (ephemeral, per-agent)
             ├── Read-only rootfs + tmpfs scratch
             ├── cap-drop ALL + no-new-privileges
@@ -33,7 +33,7 @@ macOS Host (safe-ag Go CLI)
             └── SSH agent OFF unless --ssh
 ```
 
-Three isolation boundaries: macOS ↔ VM (OrbStack + hardening + userns-remap), VM ↔ container (Docker), container ↔ container (separate volumes/networks/namespaces).
+Three isolation boundaries: macOS ↔ VM (Apple container + hardening + userns-remap), VM ↔ container (Docker), container ↔ container (separate volumes/networks/namespaces).
 
 Full diagrams in `docs/architecture.md`.
 
@@ -42,7 +42,7 @@ Full diagrams in `docs/architecture.md`.
 ### Go CLI (runs on macOS host)
 
 - **`cmd/safe-ag/`** — Cobra CLI binary. `main.go` (root command), `spawn.go` (spawn/run), `lifecycle.go` (list/attach/stop/cleanup/retry), `observe.go` (peek/output/summary/cost/audit/sessions/replay), `workflow.go` (diff/checkpoint/todo/pr/review), `fleet.go` (fleet/pipeline), `setup.go` (setup/update/vm/diagnose), `config_cmd.go` (config/template/mcp-login/aws-refresh).
-- **`pkg/orb/`** — `Executor` interface wrapping `orb run -m safe-agentic`. All Docker/VM commands go through this. `FakeExecutor` for testing.
+- **`pkg/vmexec/`** — `Executor` interface wrapping `container machine run -n safe-agentic`. All Docker/VM commands go through this. `FakeExecutor` for testing.
 - **`pkg/docker/`** — `DockerRunCmd` builder (type-safe replacement for bash arrays), container/volume/network/SSH/DinD management.
 - **`pkg/validate/`** — Input validation: container names, network names, PIDs limits.
 - **`pkg/repourl/`** — URL parsing with traversal prevention.
@@ -57,7 +57,7 @@ Full diagrams in `docs/architecture.md`.
 
 ### Container-side (runs inside Docker)
 
-- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens OrbStack, installs Docker CE with `userns-remap`, installs socat for SSH relay.
+- **`vm/setup.sh`** — Idempotent VM bootstrap. Hardens Apple container machine, installs Docker with `userns-remap`, installs socat for SSH relay.
 - **`Dockerfile`** — Pinned Codex/npm install plus checksum or GPG verification for several direct downloads. Uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`. Non-root `agent` user, no sudo.
 - **`entrypoint.sh`** — Container init: SSH config, git config, host config injection, security preamble, repo cloning, agent launch.
 - **`bin/agent-session.sh`** — Agent session wrapper inside tmux. Handles Claude/Codex/shell modes.
@@ -213,7 +213,7 @@ go test ./pkg/docker/ -v
 
 Go test packages in `pkg/` and `cmd/safe-ag/`:
 - `pkg/validate` — name, network, PIDs validation
-- `pkg/orb` — Executor interface and FakeExecutor
+- `pkg/vmexec` — Executor interface and FakeExecutor
 - `pkg/repourl` — URL parsing, traversal prevention
 - `pkg/config` — defaults loading, identity parsing
 - `pkg/inject` — base64, config injection
@@ -229,11 +229,11 @@ Shell runtime verification lives in focused smoke or integration tests rather th
 
 ## Conventions
 
-- Go CLI uses cobra for commands, `pkg/orb.Executor` interface for all VM/Docker interaction.
+- Go CLI uses cobra for commands, `pkg/vmexec.Executor` interface for all VM/Docker interaction.
 - `DockerRunCmd` builder replaces bash `docker_cmd=()` arrays with type-safe methods.
 - All container/network names validated via `pkg/validate` before use.
 - Repo clone paths validated by `pkg/repourl.ClonePath()`: rejects traversal, dot-prefixed names, special characters.
-- Tests use `orb.FakeExecutor` — no real OrbStack/Docker needed.
+- Tests use `vmexec.FakeExecutor` — no real Apple container/Docker needed.
 - Container-side scripts (entrypoint, agent-session) remain bash — they run inside Docker where Go isn't installed.
 - Dockerfile uses `SHELL ["/bin/bash", "-o", "pipefail", "-c"]` and verifies all downloads (SHA256 or GPG).
 - Build context uses `git ls-files -c` filtered by `test -e` — only tracked files that exist on disk.
@@ -280,7 +280,7 @@ Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
 
 ## Known Limitations
 
-- OrbStack VM hardening is best-effort — no per-VM file sharing disable yet ([#169](https://github.com/orbstack/orbstack/issues/169)). Re-harden on VM restart with `safe-ag vm start`.
+- Apple container machine hardening assumes the machine was created with `--home-mount none`. Re-harden on VM restart with `safe-ag vm start`.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
 - Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
 - Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.

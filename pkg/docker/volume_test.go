@@ -2,13 +2,13 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"testing"
 )
 
 func TestVolumeExists_Found(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker volume inspect myvolume", "some output")
 	found, err := VolumeExists(context.Background(), fake, "myvolume")
 	if err != nil {
@@ -20,7 +20,7 @@ func TestVolumeExists_Found(t *testing.T) {
 }
 
 func TestVolumeExists_NotFound(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker volume inspect novolume", "no such volume")
 	found, err := VolumeExists(context.Background(), fake, "novolume")
 	if err != nil {
@@ -32,7 +32,7 @@ func TestVolumeExists_NotFound(t *testing.T) {
 }
 
 func TestCreateLabeledVolume_VerifyLabels(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	err := CreateLabeledVolume(context.Background(), fake, "myvol", "auth", "agent-claude-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -57,7 +57,7 @@ func TestCreateLabeledVolume_VerifyLabels(t *testing.T) {
 }
 
 func TestCreateLabeledVolume_Error(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker volume create", "permission denied")
 	err := CreateLabeledVolume(context.Background(), fake, "myvol", "auth", "parent")
 	if err == nil {

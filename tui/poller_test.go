@@ -10,13 +10,30 @@ import (
 	"time"
 )
 
-func installFakeOrb(t *testing.T) {
+func installFakeContainer(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "orb")
+	path := filepath.Join(dir, "container")
 	script := `#!/bin/sh
-cmd="$*"
+cmd=""
+decode=0
+for arg in "$@"; do
+  if [ "$decode" = "1" ]; then
+    cmd="$arg"
+    decode=2
+    continue
+  fi
+  if [ "$decode" = "2" ]; then
+    decoded=$(printf '%s' "$arg" | base64 -d)
+    cmd="$cmd $decoded"
+    continue
+  fi
+  if [ "$arg" = "/usr/local/bin/safe-ag-exec" ]; then
+    decode=1
+  fi
+done
+[ -n "$cmd" ] || cmd="$*"
 case "$cmd" in
   *"docker ps -a"*)
     cat <<'EOF'
@@ -42,7 +59,7 @@ EOF
     echo tmux
     ;;
   *"docker stop agent-beta"*)
-    echo "$cmd" >> "$SAFE_AGENTIC_TEST_ORB_LOG"
+    echo "$cmd" >> "$SAFE_AGENTIC_TEST_CONTAINER_LOG"
     ;;
   *)
     exit 1
@@ -50,11 +67,11 @@ EOF
 esac
 `
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
-		t.Fatalf("write fake orb: %v", err)
+		t.Fatalf("write fake container: %v", err)
 	}
 
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SAFE_AGENTIC_TEST_ORB_LOG", filepath.Join(dir, "orb.log"))
+	t.Setenv("SAFE_AGENTIC_TEST_CONTAINER_LOG", filepath.Join(dir, "container.log"))
 }
 
 func TestParsePSOutputAndHelpers(t *testing.T) {
@@ -95,7 +112,7 @@ func TestParsePSOutputAndHelpers(t *testing.T) {
 }
 
 func TestFetchAgentsProbeActivitiesAndContainerTmux(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	agents, err := fetchAgents()
 	if err != nil {
@@ -127,7 +144,7 @@ func TestFetchAgentsProbeActivitiesAndContainerTmux(t *testing.T) {
 }
 
 func TestPollerPollGetAgentsAndErrorStale(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	var (
 		gotAgents []Agent
@@ -173,7 +190,7 @@ func TestPollerPollGetAgentsAndErrorStale(t *testing.T) {
 }
 
 func TestPollerRestartAndStopSafe(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	p := NewPoller(nil)
 	p.Start()
@@ -185,7 +202,7 @@ func TestPollerRestartAndStopSafe(t *testing.T) {
 }
 
 func TestPollerForceRefresh(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	ch := make(chan string, 1)
 	p := NewPoller(func(agents []Agent, stale bool) {
@@ -204,7 +221,7 @@ func TestPollerForceRefresh(t *testing.T) {
 }
 
 func TestCapturePreview(t *testing.T) {
-	installFakeOrb(t)
+	installFakeContainer(t)
 
 	got, err := capturePreview("agent-beta", 30)
 	if err != nil {

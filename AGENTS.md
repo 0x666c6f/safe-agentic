@@ -4,13 +4,13 @@ This file provides guidance to coding agents working in this repository.
 
 ## What This Is
 
-An isolated environment for running AI coding agents (Claude Code, Codex) inside an OrbStack VM with per-agent Docker containers. Default stance: safe by default. Dangerous capabilities like SSH forwarding or auth reuse stay opt-in.
+An isolated environment for running AI coding agents (Claude Code, Codex) inside an Apple container machine with per-agent Docker containers. Default stance: safe by default. Dangerous capabilities like SSH forwarding or auth reuse stay opt-in.
 
 ## Architecture
 
 ```text
 macOS Host (safe-ag CLI)
-  -> OrbStack VM "safe-agentic" (Ubuntu 24.04, hardened)
+  -> Apple container machine "safe-agentic" (Alpine 3.22, hardened)
     -> Docker containers (ephemeral, per-agent)
        - read-only rootfs + tmpfs scratch
        - cap-drop ALL + no-new-privileges
@@ -21,7 +21,7 @@ macOS Host (safe-ag CLI)
 
 Isolation boundaries:
 
-1. macOS host <-> OrbStack VM
+1. macOS host <-> Apple container machine
 2. VM <-> container
 3. container <-> container
 
@@ -47,7 +47,7 @@ See `docs/architecture.md`.
 - `config/`: shell and prompt config copied into the container
 - `docs/`: architecture, quickstart, usage, security docs
 - `examples/`, `templates/`, `tui/`: example assets, templates, terminal UI
-- `vm/`: OrbStack VM bootstrap and hardening
+- `vm/`: Apple container machine bootstrap and hardening
 - `.claude/skills/`, `.codex/skills/`: repo-local skill bundles; keep pairs aligned
 
 ## Common Commands
@@ -138,11 +138,12 @@ If fixing a bug, add the smallest regression check that fits.
 
 Implementation patterns:
 
-- use `orb run -m "$VM_NAME"` for VM operations
+- use `container machine run -n "$VM_NAME" -u root -- ...` for VM operations
 - keep read-only rootfs pattern intact: baked configs copied into tmpfs at runtime
 - validate repo clone paths via `repo_clone_path()`
 - build context from tracked files only
 - `SAFE_AGENTIC_VM_NAME` overrides the target VM; use it for isolated test VMs
+- `safe-ag setup` configures Apple vmnet egress via host IP forwarding and PF anchor `com.apple/safe-agentic`; macOS admin approval may be required.
 
 ## Security Model
 
@@ -192,7 +193,7 @@ Repo-local skills currently cover:
 
 ## Known Limitations
 
-- OrbStack VM hardening remains best-effort; per-VM file sharing disable still missing. Re-harden on VM restart with `safe-ag vm start`.
+- Apple container machine hardening assumes `--home-mount none`; re-harden on VM restart with `safe-ag vm start`.
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 

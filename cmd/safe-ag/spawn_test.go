@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 func TestResolveContainerName(t *testing.T) {
@@ -94,7 +94,7 @@ func TestSpawnDryRunContainsSecurityFlags(t *testing.T) {
 }
 
 func TestStartSpawnContainerStartsDinDBeforeAgent(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("docker exec safe-agentic-docker-agent-claude-test docker info", "ok")
 	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
 	resolved := spawnResolved{
@@ -255,7 +255,7 @@ func runSpawnGit(t *testing.T, dir string, args ...string) {
 func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
 	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
 
-	if err := appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+	if err := appendAuthVolumes(context.Background(), vmexec.NewFake(), cmd, SpawnOpts{
 		AgentType: "claude",
 	}, spawnResolved{
 		ContainerName: "agent-claude-test",
@@ -275,7 +275,7 @@ func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
 func TestAppendAuthVolumes_ShellEphemeralMountsClaudeAndCodex(t *testing.T) {
 	cmd := docker.NewRunCmd("agent-shell-test", "safe-agentic:latest")
 
-	if err := appendAuthVolumes(context.Background(), orb.NewFake(), cmd, SpawnOpts{
+	if err := appendAuthVolumes(context.Background(), vmexec.NewFake(), cmd, SpawnOpts{
 		AgentType: "shell",
 	}, spawnResolved{
 		ContainerName: "agent-shell-test",
@@ -295,7 +295,7 @@ func TestAppendAuthVolumes_ShellEphemeralMountsClaudeAndCodex(t *testing.T) {
 }
 
 func TestAppendAuthVolumes_FleetCopyFailsClosed(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("docker run --rm", "copy failed")
 	cmd := docker.NewRunCmd("agent-claude-test", "safe-agentic:latest")
 

@@ -22,37 +22,39 @@ func installFakeBinary(t *testing.T, name, body string) {
 func TestPreflight(t *testing.T) {
 	empty := t.TempDir()
 	t.Setenv("PATH", empty)
-	if err := preflight(); err == nil || !strings.Contains(err.Error(), "'orb' not found") {
-		t.Fatalf("preflight missing orb err = %v", err)
+	if err := preflight(); err == nil || !strings.Contains(err.Error(), "'container' not found") {
+		t.Fatalf("preflight missing container err = %v", err)
 	}
 
-	installFakeBinary(t, "orb", `if [ "$1" = "list" ]; then exit 1; fi`)
+	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
+if [ "$1 $2" = "machine list" ]; then exit 1; fi`)
 	if err := preflight(); err == nil || !strings.Contains(err.Error(), "failed to list VMs") {
 		t.Fatalf("preflight list err = %v", err)
 	}
 
-	installFakeBinary(t, "orb", `if [ "$1" = "list" ]; then echo "other-vm"; exit 0; fi`)
+	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
+if [ "$1 $2" = "machine list" ]; then echo '[{"id":"other-vm"}]'; exit 0; fi`)
 	if err := preflight(); err == nil || !strings.Contains(err.Error(), "VM 'safe-agentic' not found") {
 		t.Fatalf("preflight missing vm err = %v", err)
 	}
 
-	installFakeBinary(t, "orb", `if [ "$1" = "list" ]; then echo "safe-agentic"; exit 0; fi`)
+	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
+if [ "$1 $2" = "machine list" ]; then echo '[{"id":"safe-agentic"}]'; exit 0; fi`)
 	if err := preflight(); err != nil {
 		t.Fatalf("preflight success err = %v", err)
 	}
 }
 
-func TestPreflight_OrbStackStopped(t *testing.T) {
-	installFakeBinary(t, "orb", `if [ "$1" = "list" ]; then echo "safe-agentic"; exit 0; fi`)
-	installFakeBinary(t, "orbctl", `if [ "$1" = "status" ]; then echo "Stopped"; exit 1; fi`)
-	if err := preflight(); err == nil || !strings.Contains(err.Error(), "OrbStack is stopped") {
+func TestPreflight_ContainerSystemStopped(t *testing.T) {
+	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 1; fi`)
+	if err := preflight(); err == nil || !strings.Contains(err.Error(), "Apple container system is stopped") {
 		t.Fatalf("preflight stopped err = %v", err)
 	}
 }
 
 func TestPreflight_CustomVMName(t *testing.T) {
-	installFakeBinary(t, "orb", `if [ "$1" = "list" ]; then echo "custom-vm"; exit 0; fi`)
-	installFakeBinary(t, "orbctl", `if [ "$1" = "status" ]; then echo "Running"; exit 0; fi`)
+	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
+if [ "$1 $2" = "machine list" ]; then echo '[{"id":"custom-vm"}]'; exit 0; fi`)
 	t.Setenv("SAFE_AGENTIC_VM_NAME", "custom-vm")
 	if err := preflight(); err != nil {
 		t.Fatalf("preflight custom vm err = %v", err)

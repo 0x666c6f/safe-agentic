@@ -3,8 +3,8 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"regexp"
 	"strings"
 	"time"
@@ -20,9 +20,9 @@ var vmSocketPathPattern = regexp.MustCompile(`^/[\w./-]+$`)
 
 // AppendSSHMount sets up SSH agent forwarding from the VM into the container.
 // With userns-remap, the container's uid maps to an unprivileged VM uid that
-// can't read the OrbStack SSH socket (owned user:orbstack 660). We relay via
-// socat to a world-accessible socket (mode 666) so the remapped uid works.
-func AppendSSHMount(ctx context.Context, exec orb.Executor, cmd *DockerRunCmd) error {
+// may not be able to read the Apple container machine host SSH socket. We relay
+// via socat to a socket the remapped uid can access.
+func AppendSSHMount(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd) error {
 	// Find the SSH agent socket in the VM
 	out, err := exec.Run(ctx, "bash", "-c", "echo $SSH_AUTH_SOCK")
 	if err != nil {

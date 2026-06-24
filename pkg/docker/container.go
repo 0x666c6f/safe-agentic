@@ -3,13 +3,13 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 )
 
 const ContainerPrefix = "agent"
 
-func ContainerExists(ctx context.Context, exec orb.Executor, name string) (bool, error) {
+func ContainerExists(ctx context.Context, exec vmexec.Executor, name string) (bool, error) {
 	_, err := exec.Run(ctx, "docker", "inspect", name)
 	if err != nil {
 		return false, nil
@@ -17,7 +17,7 @@ func ContainerExists(ctx context.Context, exec orb.Executor, name string) (bool,
 	return true, nil
 }
 
-func ResolveLatest(ctx context.Context, exec orb.Executor) (string, error) {
+func ResolveLatest(ctx context.Context, exec vmexec.Executor) (string, error) {
 	out, err := exec.Run(ctx, "docker", "ps", "-a",
 		"--filter", "name=^"+ContainerPrefix+"-",
 		"--format", "{{.Names}}",
@@ -32,7 +32,7 @@ func ResolveLatest(ctx context.Context, exec orb.Executor) (string, error) {
 	return name, nil
 }
 
-func ResolveTarget(ctx context.Context, exec orb.Executor, nameOrPartial string) (string, error) {
+func ResolveTarget(ctx context.Context, exec vmexec.Executor, nameOrPartial string) (string, error) {
 	if nameOrPartial == "--latest" || nameOrPartial == "" {
 		return ResolveLatest(ctx, exec)
 	}
@@ -58,7 +58,7 @@ func ResolveTarget(ctx context.Context, exec orb.Executor, nameOrPartial string)
 	return "", fmt.Errorf("container %q not found", nameOrPartial)
 }
 
-func InspectLabel(ctx context.Context, exec orb.Executor, name, label string) (string, error) {
+func InspectLabel(ctx context.Context, exec vmexec.Executor, name, label string) (string, error) {
 	out, err := exec.Run(ctx, "docker", "inspect",
 		"--format", fmt.Sprintf("{{index .Config.Labels %q}}", label), name)
 	if err != nil {
@@ -67,7 +67,7 @@ func InspectLabel(ctx context.Context, exec orb.Executor, name, label string) (s
 	return strings.TrimSpace(string(out)), nil
 }
 
-func IsRunning(ctx context.Context, exec orb.Executor, name string) (bool, error) {
+func IsRunning(ctx context.Context, exec vmexec.Executor, name string) (bool, error) {
 	out, err := exec.Run(ctx, "docker", "inspect",
 		"--format", "{{.State.Running}}", name)
 	if err != nil {

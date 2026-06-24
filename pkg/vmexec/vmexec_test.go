@@ -1,4 +1,4 @@
-package orb
+package vmexec
 
 import (
 	"context"
@@ -122,11 +122,11 @@ func TestFakeExecutor_Reset(t *testing.T) {
 	}
 }
 
-func TestOrbExecutor_BuildArgs(t *testing.T) {
-	e := &OrbExecutor{VMName: "safe-agentic"}
+func TestMachineExecutor_BuildArgs(t *testing.T) {
+	e := &MachineExecutor{VMName: "safe-agentic"}
 	args := e.buildArgs("docker", "ps")
 
-	expected := []string{"run", "-m", "safe-agentic", "docker", "ps"}
+	expected := []string{"machine", "run", "-n", "safe-agentic", "-u", "root", "--", "/usr/local/bin/safe-ag-exec", "docker", "cHM="}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
 	}
@@ -137,11 +137,11 @@ func TestOrbExecutor_BuildArgs(t *testing.T) {
 	}
 }
 
-func TestOrbExecutor_BuildArgs_EmptyPayload(t *testing.T) {
-	e := &OrbExecutor{VMName: "my-vm"}
+func TestMachineExecutor_BuildArgs_EmptyPayload(t *testing.T) {
+	e := &MachineExecutor{VMName: "my-vm"}
 	args := e.buildArgs()
 
-	expected := []string{"run", "-m", "my-vm"}
+	expected := []string{"machine", "run", "-n", "my-vm", "-u", "root"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
 	}
@@ -212,30 +212,30 @@ func TestFakeExecutor_CommandsMatching_RunInteractiveIncluded(t *testing.T) {
 	}
 }
 
-func TestOrbExecutor_Run_ErrorWhenVMNotFound(t *testing.T) {
-	// Use a VM name that does not exist — orb will exit non-zero, triggering the error path.
-	e := &OrbExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+func TestMachineExecutor_Run_ErrorWhenVMNotFound(t *testing.T) {
+	// Use a VM name that does not exist; container will exit non-zero.
+	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
 	ctx := context.Background()
 	_, err := e.Run(ctx, "echo", "hello")
 	if err == nil {
-		t.Error("expected error when orb VM does not exist, got nil")
+		t.Error("expected error when VM does not exist, got nil")
 	}
 }
 
-func TestOrbExecutor_RunInteractive_ErrorWhenVMNotFound(t *testing.T) {
-	// Use a VM name that does not exist — orb will exit non-zero.
+func TestMachineExecutor_RunInteractive_ErrorWhenVMNotFound(t *testing.T) {
+	// Use a VM name that does not exist; container will exit non-zero.
 	// RunInteractive connects stdio, so this only tests the error return path.
-	e := &OrbExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
 	err := e.RunInteractive("echo", "hello")
 	if err == nil {
-		t.Error("expected error when orb VM does not exist, got nil")
+		t.Error("expected error when VM does not exist, got nil")
 	}
 }
 
-func TestOrbExecutor_Run_SuccessWithRealVM(t *testing.T) {
-	// This test requires the "safe-agentic" OrbStack VM to be running.
+func TestMachineExecutor_Run_SuccessWithRealVM(t *testing.T) {
+	// This test requires the "safe-agentic" Apple container machine to be running.
 	// Skip if the VM is not available.
-	e := &OrbExecutor{VMName: "safe-agentic"}
+	e := &MachineExecutor{VMName: "safe-agentic"}
 	ctx := context.Background()
 	out, err := e.Run(ctx, "echo", "safe-agentic-test-ok")
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 // ─── containerState helper ─────────────────────────────────────────────────
@@ -42,7 +42,7 @@ func TestContainerState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			exec := orb.NewFake()
+			exec := vmexec.NewFake()
 			exec.SetResponse("docker inspect --format {{.State.Status}}", tt.response)
 
 			state, err := containerState(context.Background(), exec, "agent-claude-test")
@@ -60,7 +60,7 @@ func TestContainerState(t *testing.T) {
 }
 
 func TestContainerStateError(t *testing.T) {
-	exec := orb.NewFake()
+	exec := vmexec.NewFake()
 	exec.SetError("docker inspect", "no such container")
 
 	_, err := containerState(context.Background(), exec, "nonexistent")
@@ -106,8 +106,8 @@ func b64(s string) string {
 
 // buildFakeExec sets up a FakeExecutor that responds to label and env var
 // inspections for the given container.
-func buildFakeExec(containerName string, labelMap map[string]string, envLines []string) *orb.FakeExecutor {
-	exec := orb.NewFake()
+func buildFakeExec(containerName string, labelMap map[string]string, envLines []string) *vmexec.FakeExecutor {
+	exec := vmexec.NewFake()
 
 	// Labels: docker inspect --format {{index .Config.Labels "key"}} <name>
 	for key, val := range labelMap {
@@ -297,7 +297,7 @@ func TestReconstructSpawnOpts_Callbacks(t *testing.T) {
 }
 
 func TestReconstructSpawnOpts_MissingAgentType(t *testing.T) {
-	exec := orb.NewFake()
+	exec := vmexec.NewFake()
 	// No responses set — all return empty
 	_, err := reconstructSpawnOpts(context.Background(), exec, "agent-unknown")
 	if err == nil {

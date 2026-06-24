@@ -10,12 +10,12 @@ hide:
 
 # Sandbox coding agents without handing them your host
 
-Launch Claude Code and Codex inside a hardened OrbStack VM, with one isolated container per agent and risky capabilities kept opt-in.
+Launch Claude Code and Codex inside a hardened Apple container machine, with one isolated container per agent and risky capabilities kept opt-in.
 
 <div class="landing-terminal" markdown="1">
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
 brew install safe-agentic
 safe-ag setup
@@ -29,7 +29,7 @@ safe-ag setup
 
 <div class="landing-meta">
   <span>macOS host</span>
-  <span>hardened OrbStack VM</span>
+  <span>hardened Apple container machine</span>
   <span>one container per agent</span>
 </div>
 

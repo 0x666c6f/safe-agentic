@@ -5,8 +5,8 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 func ManagedNetworkName(containerName string) string {
@@ -18,7 +18,7 @@ func ManagedBridgeName(containerName string) string {
 	return fmt.Sprintf("sa%x", sum[:6])
 }
 
-func CreateManagedNetwork(ctx context.Context, exec orb.Executor, containerName string) (string, error) {
+func CreateManagedNetwork(ctx context.Context, exec vmexec.Executor, containerName string) (string, error) {
 	netName := ManagedNetworkName(containerName)
 	_, err := exec.Run(ctx, "docker", "network", "create",
 		"--driver", "bridge",
@@ -31,7 +31,7 @@ func CreateManagedNetwork(ctx context.Context, exec orb.Executor, containerName 
 	return netName, nil
 }
 
-func RemoveManagedNetwork(ctx context.Context, exec orb.Executor, netName string) error {
+func RemoveManagedNetwork(ctx context.Context, exec vmexec.Executor, netName string) error {
 	_, err := exec.Run(ctx, "docker", "network", "rm", netName)
 	if err != nil {
 		return fmt.Errorf("remove network %s: %w", netName, err)
@@ -39,7 +39,7 @@ func RemoveManagedNetwork(ctx context.Context, exec orb.Executor, netName string
 	return nil
 }
 
-func PrepareNetwork(ctx context.Context, exec orb.Executor, containerName, customNetwork string, dryRun bool) (string, string, error) {
+func PrepareNetwork(ctx context.Context, exec vmexec.Executor, containerName, customNetwork string, dryRun bool) (string, string, error) {
 	if customNetwork == "" {
 		if dryRun {
 			return ManagedNetworkName(containerName), "managed", nil

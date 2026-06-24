@@ -68,7 +68,7 @@ Top-level commands:
 | `todo` | manage merge-gate todos |
 | `tui` | launch the terminal UI |
 | `update` | rebuild the image |
-| `vm` | manage the OrbStack VM |
+| `vm` | manage the Apple container machine |
 | `workspace` | stage, unstage, or revert files in an agent workspace |
 | `worktree` | manage host worktrees created by `--worktree` |
 

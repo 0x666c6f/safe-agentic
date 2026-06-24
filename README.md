@@ -9,7 +9,7 @@
 [![Go Report](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fsafe-agentic%2Fbadges%2F.github%2Fbadges%2Fgoreport.json)](https://github.com/0x666c6f/safe-agentic/actions/workflows/coverage.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fsafe-agentic%2Fbadges%2F.github%2Fbadges%2Fcoverage.json)](https://github.com/0x666c6f/safe-agentic/actions/workflows/coverage.yml)
 
-`safe-agentic` runs Claude Code and Codex inside Docker containers inside a hardened OrbStack VM.
+`safe-agentic` runs Claude Code and Codex inside Docker containers inside a hardened Apple container machine.
 
 Primary CLI: `safe-ag`.
 Agent-facing shortcuts also ship: `safe-ag-claude`, `safe-ag-codex`.
@@ -22,7 +22,7 @@ The goal is simple:
 ## What you get
 
 - per-agent containers with read-only rootfs, `cap-drop ALL`, `no-new-privileges`, and resource limits
-- a hardened OrbStack VM that acts as a host boundary between macOS and agent containers
+- a hardened Apple container machine that acts as a host boundary between macOS and agent containers
 - dedicated managed Docker networks by default
 - tmux-backed sessions that you can reattach to later
 - CLI + TUI for spawning, steering, monitoring, reviewing, and shipping work
@@ -34,7 +34,7 @@ The goal is simple:
 
 ```text
 macOS host
-  -> OrbStack VM (safe-agentic)
+  -> Apple container machine (safe-agentic)
     -> Docker daemon
       -> one container per agent
 ```
@@ -50,10 +50,10 @@ Default stance:
 
 ## Install
 
-Homebrew:
+Install Apple container from the signed pkg on GitHub Releases, then install safe-agentic with Homebrew:
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
 brew install safe-agentic
 ```
@@ -61,7 +61,7 @@ brew install safe-agentic
 From source:
 
 ```bash
-brew install orbstack
+open https://github.com/apple/container/releases
 git clone git@github.com:0x666c6f/safe-agentic.git
 cd safe-agentic
 make build-all
@@ -75,7 +75,8 @@ safe-ag setup
 safe-ag diagnose
 ```
 
-`safe-ag setup` creates the VM, reapplies hardening, and builds the local image.
+`safe-ag setup` starts Apple container, creates the machine, reapplies hardening, and builds the local image.
+It may ask for macOS administrator approval to enable IP forwarding and load a `com.apple/safe-agentic` PF NAT anchor for Apple vmnet and nested Docker egress.
 
 ## First agent
 
@@ -149,8 +150,8 @@ safe-ag pipeline pipeline.yaml --dry-run
 
 Three boundaries matter:
 
-1. macOS host -> OrbStack VM
-2. OrbStack VM -> container
+1. macOS host -> Apple container machine
+2. Apple container machine -> container
 3. container -> container
 
 Important opt-in flags:
@@ -197,6 +198,6 @@ seed_auth = false
 
 - containers persist after the agent exits; `safe-ag attach` will restart stopped containers when needed
 - `safe-ag cleanup` keeps auth volumes by default; use `safe-ag cleanup --auth` for full reset
-- `SAFE_AGENTIC_VM_NAME` lets you point the CLI at a different OrbStack VM
+- `SAFE_AGENTIC_VM_NAME` lets you point the CLI at a different Apple container machine
 - `SAFE_AGENTIC_CONFIG_HOME` / `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic files without changing `HOME`
 - `safe-ag-tui` is a separate binary; `safe-ag tui` is the normal entrypoint

@@ -6,7 +6,7 @@ At a high level:
 
 ```text
 macOS host
-  -> OrbStack VM
+  -> Apple container machine
     -> Docker daemon
       -> one container per agent
 ```
@@ -22,7 +22,7 @@ macOS host
 | `cmd/safe-ag` | command implementations |
 | `pkg/docker` | Docker runtime, network, volume, SSH helpers |
 | `pkg/fleet` | fleet and pipeline manifest parsing |
-| `pkg/orb` | OrbStack execution wrapper |
+| `pkg/vmexec` | Apple container machine execution wrapper |
 
 ## Design goals
 

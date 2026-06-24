@@ -2,14 +2,14 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"strings"
 	"testing"
 )
 
 func TestAppendSSHMount_WithRelay(t *testing.T) {
-	fake := orb.NewFake()
-	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/opt/orbstack-guest/run/host-ssh-agent.sock")
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetResponse("test -S", "") // relay socket exists
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
@@ -27,8 +27,8 @@ func TestAppendSSHMount_WithRelay(t *testing.T) {
 }
 
 func TestAppendSSHMount_FallbackDirect(t *testing.T) {
-	fake := orb.NewFake()
-	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/opt/orbstack-guest/run/host-ssh-agent.sock")
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetError("test -S", "not found") // relay socket doesn't exist
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
@@ -40,13 +40,13 @@ func TestAppendSSHMount_FallbackDirect(t *testing.T) {
 		t.Errorf("missing SSH_AUTH_SOCK env in: %s", cmdStr)
 	}
 	// Fallback: direct mount with :ro
-	if !strings.Contains(cmdStr, "/opt/orbstack-guest/run/host-ssh-agent.sock:"+sshSocketPath+":ro") {
+	if !strings.Contains(cmdStr, "/var/host-services/ssh-auth.sock:"+sshSocketPath+":ro") {
 		t.Errorf("should fallback to direct mount, got: %s", cmdStr)
 	}
 }
 
 func TestAppendSSHMount_EmptySocket(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "")
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
@@ -59,7 +59,7 @@ func TestAppendSSHMount_EmptySocket(t *testing.T) {
 }
 
 func TestAppendSSHMount_ExecError(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetError("bash -c echo $SSH_AUTH_SOCK", "permission denied")
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
@@ -72,7 +72,7 @@ func TestAppendSSHMount_ExecError(t *testing.T) {
 }
 
 func TestAppendSSHMount_UnsafeSocketValue(t *testing.T) {
-	fake := orb.NewFake()
+	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/tmp/unsafe'sock")
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)

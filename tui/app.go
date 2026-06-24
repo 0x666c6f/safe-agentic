@@ -432,7 +432,7 @@ func capturePreview(name string, lines int) (string, error) {
 	if !containerUsesTmux(name) {
 		return "", fmt.Errorf("No tmux session")
 	}
-	out, err := execOrb("docker", "exec", name, "tmux", "capture-pane",
+	out, err := execVM("docker", "exec", name, "tmux", "capture-pane",
 		"-t", tmuxSessionName, "-p", "-S", fmt.Sprintf("-%d", lines))
 	if err != nil {
 		return "", fmt.Errorf("Capture failed")
@@ -441,7 +441,7 @@ func capturePreview(name string, lines int) (string, error) {
 }
 
 func captureLogsPreview(name string, lines int) (string, error) {
-	out, err := execOrb("docker", "logs", "--tail", fmt.Sprintf("%d", lines), name)
+	out, err := execVM("docker", "logs", "--tail", fmt.Sprintf("%d", lines), name)
 	if err != nil {
 		return "", fmt.Errorf("Preview unavailable")
 	}

@@ -1,4 +1,4 @@
-name: Live OrbStack
+name: Live Apple Container
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  live-orbstack:
-    name: Live OrbStack Smoke
+  live-apple-container:
+    name: Live Apple Container Smoke
     runs-on:
       - self-hosted
       - macOS
@@ -33,7 +33,8 @@ jobs:
 
       - name: Verify runner prerequisites
         run: |
-          command -v orb
+          command -v container
+          container system status
 
       - name: Set up VM and image
         run: ./bin/safe-ag setup

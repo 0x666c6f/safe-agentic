@@ -1,83 +1,77 @@
-#!/usr/bin/env bash
-# Idempotent VM bootstrap: hardens OrbStack VM, installs Docker CE, configures daemon.
-# Designed to run inside the OrbStack "safe-agentic" Ubuntu VM.
-set -euo pipefail
+#!/bin/sh
+# Idempotent VM bootstrap: hardens Apple container machine, installs Docker, configures daemon.
+set -eu
 
 TOTAL_STEPS=5
 step() {
-  local number="$1"
+  step_number="$1"
   shift
-  echo "==> [$number/$TOTAL_STEPS] $*"
+  echo "==> [$step_number/$TOTAL_STEPS] $*"
+}
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "Need root privileges for: $*" >&2
+    exit 1
+  fi
+}
+
+install_exec_helper() {
+  as_root mkdir -p /usr/local/bin
+  as_root tee /usr/local/bin/safe-ag-exec >/dev/null <<'EOF'
+#!/bin/sh
+set -eu
+if [ "$#" -lt 1 ]; then
+  echo "usage: safe-ag-exec <command> [base64-arg...]" >&2
+  exit 64
+fi
+cmd="$1"
+shift
+encoded_count="$#"
+for encoded do
+  decoded="$(printf '%s' "$encoded" | base64 -d)"
+  set -- "$@" "$decoded"
+done
+while [ "$encoded_count" -gt 0 ]; do
+  shift
+  encoded_count=$((encoded_count - 1))
+done
+exec "$cmd" "$@"
+EOF
+  as_root chmod 0755 /usr/local/bin/safe-ag-exec
 }
 
 echo "==> Setting up safe-agentic VM..."
 
 # =============================================================================
-# Harden OrbStack: block macOS filesystem access and mac integration commands
-# OrbStack mounts macOS paths into VMs by default (/Users, /mnt/mac, etc.)
-# and links macOS commands (open, osascript, code). We disable all of this.
+# Harden VM host access
 # =============================================================================
 step 1 "Hardening VM: blocking macOS filesystem access..."
-
-# Unmount any macOS-shared paths
-for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
-  if mountpoint -q "$mnt" 2>/dev/null; then
-    echo "    Unmounting $mnt"
-    sudo umount -l "$mnt" 2>/dev/null || true
-  fi
-done
-
-# OrbStack may launch this script with cwd under a macOS share. Move to a VM-local
-# directory before later commands fork shells, otherwise they can warn that cwd
-# vanished after the lazy unmount.
 cd /
 
-# Prevent remounting on reboot via fstab override
-# OrbStack uses gvproxy/virtio mounts; blocking them here
-for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
-  if ! grep -q "^# safe-agentic: block $mnt" /etc/fstab 2>/dev/null; then
-    echo "# safe-agentic: block $mnt" | sudo tee -a /etc/fstab > /dev/null
-    echo "none $mnt tmpfs ro,noexec,nosuid,size=1k 0 0" | sudo tee -a /etc/fstab > /dev/null
+for mnt in /Users /mnt/mac /Volumes /private; do
+  if mountpoint -q "$mnt" 2>/dev/null; then
+    echo "    Unmounting $mnt"
+    as_root umount -l "$mnt" 2>/dev/null || true
   fi
 done
 
-# Mount tiny read-only tmpfs over macOS paths to block access persistently
-for mnt in /Users /mnt/mac /Volumes /private /opt/orbstack; do
-  sudo mkdir -p "$mnt"
-  if ! mountpoint -q "$mnt" 2>/dev/null || ! mount | grep "$mnt" | grep -q tmpfs; then
-    sudo mount -t tmpfs -o ro,noexec,nosuid,size=1k none "$mnt" 2>/dev/null || true
+# Apple container machines are created with --home-mount none. These tmpfs masks
+# keep the guard explicit if a machine is later reconfigured.
+for mnt in /Users /mnt/mac /Volumes /private; do
+  as_root mkdir -p "$mnt"
+  if ! mountpoint -q "$mnt" 2>/dev/null || ! mount | grep -F " $mnt " | grep -q tmpfs; then
+    as_root mount -t tmpfs -o ro,noexec,nosuid,size=1k none "$mnt" 2>/dev/null || true
   fi
 done
 
-# Remove OrbStack macOS integration commands
-step 2 "Removing macOS integration commands..."
-MASK_DIRS=""
-for cmd in open osascript code mac; do
-  CMDPATH=$(command -v "$cmd" 2>/dev/null || true)
-  if [ -n "$CMDPATH" ] && echo "$CMDPATH" | grep -q '^/opt/orbstack-guest/'; then
-    CMDDIR=$(dirname "$CMDPATH")
-    if ! echo " $MASK_DIRS " | grep -Fq " $CMDDIR "; then
-      MASK_DIRS="$MASK_DIRS $CMDDIR"
-    fi
-  elif [ -n "$CMDPATH" ] && [ -L "$CMDPATH" ]; then
-    echo "    Removing $CMDPATH (symlink to macOS)"
-    sudo rm -f "$CMDPATH" 2>/dev/null || true
-  elif [ -n "$CMDPATH" ] && file "$CMDPATH" 2>/dev/null | grep -qi "orbstack\|mac"; then
-    echo "    Removing $CMDPATH (OrbStack binary)"
-    sudo rm -f "$CMDPATH" 2>/dev/null || true
-  fi
-done
-
-for dir in $MASK_DIRS; do
-  echo "    Masking $dir (OrbStack integration dir)"
-  sudo mkdir -p "$dir"
-  sudo mount -t tmpfs -o ro,noexec,nosuid,size=1k none "$dir" 2>/dev/null || true
-done
-
-# Verify hardening
-step 3 "Verifying VM hardening..."
+step 2 "Verifying VM hardening..."
 HARDENING_OK=true
-for mnt in /Users /mnt/mac; do
+for mnt in /Users /mnt/mac /Volumes /private; do
   if [ -d "$mnt" ] && find "$mnt" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
     echo "    WARNING: $mnt still has accessible content"
     HARDENING_OK=false
@@ -86,55 +80,82 @@ for mnt in /Users /mnt/mac; do
   fi
 done
 for cmd in open osascript; do
-  if command -v "$cmd" &>/dev/null; then
+  if command -v "$cmd" >/dev/null 2>&1; then
     echo "    WARNING: $cmd still available"
     HARDENING_OK=false
   else
-    echo "    OK: $cmd removed"
+    echo "    OK: $cmd unavailable"
   fi
 done
 if ! $HARDENING_OK; then
-  echo "==> WARNING: Some hardening steps did not fully apply."
-  echo "    OrbStack may re-enable file sharing on VM restart."
-  echo "    Consider disabling file sharing in OrbStack settings (Settings > Linux)."
+  echo "==> WARNING: Some hardening checks did not fully pass."
+  echo "    Recreate machine with: container machine create alpine:3.22 --home-mount none"
 fi
 
 # =============================================================================
-# Install Docker CE
+# Install Docker
 # =============================================================================
-if ! command -v docker &>/dev/null; then
-  step 4 "Installing Docker CE..."
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq ca-certificates curl gnupg
+step 3 "Installing Docker dependencies..."
+# shellcheck disable=SC1091
+. /etc/os-release
 
-  sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  sudo chmod a+r /etc/apt/keyrings/docker.gpg
+case "${ID:-}" in
+  alpine)
+    as_root apk update
+    as_root apk add --no-cache \
+      bash \
+      ca-certificates \
+      curl \
+      docker \
+      docker-cli \
+      git \
+      gzip \
+      iptables \
+      ip6tables \
+      openssh-client \
+      shadow \
+      socat \
+      tar \
+      tzdata
+    ;;
+  ubuntu|debian)
+    as_root apt-get update -qq
+    as_root apt-get install -y -qq ca-certificates curl gnupg socat
+    as_root install -m 0755 -d /etc/apt/keyrings
+    if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+      curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | as_root gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      as_root chmod a+r /etc/apt/keyrings/docker.gpg
+    fi
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" \
+      | as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
+    as_root apt-get update -qq
+    as_root apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat
+    ;;
+  *)
+    echo "Unsupported VM OS: ${ID:-unknown}" >&2
+    exit 1
+    ;;
+esac
 
-  # shellcheck disable=SC1091
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat
-else
-  step 4 "Docker already installed: $(docker --version)"
-  # Ensure socat is available for SSH agent relay (userns-remap compatibility)
-  command -v socat &>/dev/null || sudo apt-get install -y -qq socat
+# Docker user namespace remap needs explicit subordinate ranges on Alpine.
+as_root touch /etc/subuid /etc/subgid
+if ! getent passwd dockremap >/dev/null 2>&1; then
+  if command -v adduser >/dev/null 2>&1; then
+    as_root adduser -S -H -D dockremap 2>/dev/null || as_root useradd -r -M dockremap
+  else
+    as_root useradd -r -M dockremap
+  fi
 fi
+grep -q '^dockremap:' /etc/subuid || echo 'dockremap:165536:65536' | as_root tee -a /etc/subuid >/dev/null
+grep -q '^dockremap:' /etc/subgid || echo 'dockremap:165536:65536' | as_root tee -a /etc/subgid >/dev/null
+install_exec_helper
 
-# Add current user to docker group
-if ! groups | grep -q docker; then
-  echo "==> Adding $(whoami) to docker group..."
-  sudo usermod -aG docker "$(whoami)"
-fi
-
-# Configure Docker daemon
-DAEMON_JSON=/etc/docker/daemon.json
-step 5 "Configuring Docker daemon and egress guardrails..."
-sudo tee "$DAEMON_JSON" > /dev/null <<'DJEOF'
+# =============================================================================
+# Configure Docker
+# =============================================================================
+step 4 "Configuring Docker daemon..."
+as_root mkdir -p /etc/docker
+as_root tee /etc/docker/daemon.json >/dev/null <<'DJEOF'
 {
   "log-driver": "json-file",
   "log-opts": {
@@ -142,24 +163,46 @@ sudo tee "$DAEMON_JSON" > /dev/null <<'DJEOF'
     "max-file": "3"
   },
   "userns-remap": "default",
+  "no-new-privileges": true,
   "default-address-pools": [
     {"base": "172.20.0.0/16", "size": 24}
   ]
 }
 DJEOF
-sudo systemctl restart docker
 
-# Enable and start Docker
-sudo systemctl enable docker
-sudo systemctl start docker
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  as_root systemctl enable docker
+  as_root systemctl restart docker
+else
+  as_root pkill dockerd >/dev/null 2>&1 || true
+  as_root pkill containerd >/dev/null 2>&1 || true
+  as_root rm -f /var/run/docker.pid /var/run/docker.sock
+  as_root mkdir -p /var/log
+  as_root sh -c 'nohup dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &'
+fi
 
-# Install egress guardrails for safe-agentic managed bridges (bridge names start with "sa")
-sudo iptables -nL DOCKER-USER >/dev/null 2>&1 || sudo iptables -N DOCKER-USER
-sudo iptables -N SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
-sudo iptables -F SAFE_AGENTIC_EGRESS
-sudo iptables -C DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 \
-  || sudo iptables -I DOCKER-USER 1 -j SAFE_AGENTIC_EGRESS
-sudo iptables -A SAFE_AGENTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+for _ in $(seq 1 30); do
+  if docker info >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! docker info >/dev/null 2>&1; then
+  echo "==> Docker failed to start. Last daemon log:"
+  as_root tail -200 /var/log/dockerd.log 2>/dev/null || true
+  exit 1
+fi
+
+# =============================================================================
+# Egress guardrails for safe-agentic managed bridges
+# =============================================================================
+step 5 "Configuring egress guardrails..."
+as_root iptables -nL DOCKER-USER >/dev/null 2>&1 || as_root iptables -N DOCKER-USER
+as_root iptables -N SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -F SAFE_AGENTIC_EGRESS
+as_root iptables -C DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 \
+  || as_root iptables -I DOCKER-USER 1 -j SAFE_AGENTIC_EGRESS
+as_root iptables -A SAFE_AGENTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 for cidr in \
   0.0.0.0/8 \
   10.0.0.0/8 \
@@ -171,16 +214,13 @@ for cidr in \
   224.0.0.0/4 \
   240.0.0.0/4 \
 ; do
-  sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -d "$cidr" -j REJECT
+  as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -d "$cidr" -j REJECT
 done
 for port in 22 80 443; do
-  sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -p tcp --dport "$port" -j RETURN
+  as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -p tcp --dport "$port" -j RETURN
 done
-sudo iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -j REJECT
-sudo iptables -A SAFE_AGENTIC_EGRESS -j RETURN
+as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -j REJECT
+as_root iptables -A SAFE_AGENTIC_EGRESS -j RETURN
 
-# Verify Docker
-echo "==> Verifying Docker..."
-docker info --format '{{.ServerVersion}}' 2>/dev/null && echo "==> Docker is ready." || echo "==> WARNING: Docker may need a re-login for group changes. Run: newgrp docker"
-
+echo "==> Docker $(docker version --format '{{.Server.Version}}') is ready."
 echo "==> VM setup complete."

@@ -17,8 +17,8 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/cost"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/orb"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
 )
@@ -74,7 +74,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func loadRenderedLogs(ctx context.Context, exec orb.Executor, target string, lineLimit int) ([]string, error) {
+func loadRenderedLogs(ctx context.Context, exec vmexec.Executor, target string, lineLimit int) ([]string, error) {
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func loadRenderedLogs(ctx context.Context, exec orb.Executor, target string, lin
 	return renderedLines, scanner.Err()
 }
 
-func readLatestSessionLog(ctx context.Context, exec orb.Executor, name, configDir string, searchDirs []string, findCmd string, tailCount int, running bool) ([]byte, error) {
+func readLatestSessionLog(ctx context.Context, exec vmexec.Executor, name, configDir string, searchDirs []string, findCmd string, tailCount int, running bool) ([]byte, error) {
 	createdAt, _ := inspectField(ctx, exec, name, "{{.Created}}")
 	promptHint, _ := docker.InspectLabel(ctx, exec, name, labels.Prompt)
 	promptHint = strings.TrimSuffix(promptHint, "...")
@@ -262,7 +262,7 @@ func shellQuote(s string) string {
 
 // ensureRunning starts a stopped container and returns a cleanup function
 // that stops it when done. If already running, cleanup is a no-op.
-func ensureRunning(ctx context.Context, exec orb.Executor, name string) (func(), error) {
+func ensureRunning(ctx context.Context, exec vmexec.Executor, name string) (func(), error) {
 	running, _ := docker.IsRunning(ctx, exec, name)
 	if running {
 		return func() {}, nil
@@ -529,7 +529,7 @@ func outputGitMode() (label, gitCmd string, ok bool) {
 	}
 }
 
-func runOutputGitMode(ctx context.Context, exec orb.Executor, name, wsCmd string, running bool, label, gitCmd string) error {
+func runOutputGitMode(ctx context.Context, exec vmexec.Executor, name, wsCmd string, running bool, label, gitCmd string) error {
 	out, err := runOutputGitCommand(ctx, exec, name, wsCmd, running, gitCmd)
 	if err != nil {
 		return fmt.Errorf("%s: %w", label, err)
@@ -538,14 +538,14 @@ func runOutputGitMode(ctx context.Context, exec orb.Executor, name, wsCmd string
 	return nil
 }
 
-func runOutputGitCommand(ctx context.Context, exec orb.Executor, name, wsCmd string, running bool, gitCmd string) ([]byte, error) {
+func runOutputGitCommand(ctx context.Context, exec vmexec.Executor, name, wsCmd string, running bool, gitCmd string) ([]byte, error) {
 	if running {
 		return exec.Run(ctx, "docker", "exec", name, "bash", "-c", wsCmd+" && "+gitCmd)
 	}
 	return runGitOnStoppedWorkspace(ctx, exec, name, gitCmd)
 }
 
-func runOutputJSONMode(ctx context.Context, exec orb.Executor, name string) error {
+func runOutputJSONMode(ctx context.Context, exec vmexec.Executor, name string) error {
 	statusOut, _ := exec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
 	result := map[string]string{
 		"name":        name,
@@ -557,7 +557,7 @@ func runOutputJSONMode(ctx context.Context, exec orb.Executor, name string) erro
 	return enc.Encode(result)
 }
 
-func outputLastMessage(ctx context.Context, exec orb.Executor, name string) string {
+func outputLastMessage(ctx context.Context, exec vmexec.Executor, name string) string {
 	if lastMessage, _ := readLastSessionMessage(ctx, exec, name); lastMessage != "" {
 		return lastMessage
 	}
@@ -574,7 +574,7 @@ func outputLastMessage(ctx context.Context, exec orb.Executor, name string) stri
 	return lastMessage
 }
 
-func runOutputDefaultMode(ctx context.Context, exec orb.Executor, name string, running bool) error {
+func runOutputDefaultMode(ctx context.Context, exec vmexec.Executor, name string, running bool) error {
 	if lastMessage, _ := readLastSessionMessage(ctx, exec, name); strings.TrimSpace(lastMessage) != "" {
 		fmt.Println(lastMessage)
 		return nil
@@ -599,7 +599,7 @@ func runOutputDefaultMode(ctx context.Context, exec orb.Executor, name string, r
 	return nil
 }
 
-func readTmuxPaneOutput(ctx context.Context, exec orb.Executor, name string, running bool) ([]byte, bool) {
+func readTmuxPaneOutput(ctx context.Context, exec vmexec.Executor, name string, running bool) ([]byte, bool) {
 	if !running {
 		return nil, false
 	}
@@ -614,7 +614,7 @@ func readTmuxPaneOutput(ctx context.Context, exec orb.Executor, name string, run
 	return paneOut, true
 }
 
-func readRenderedAgentLogs(ctx context.Context, exec orb.Executor, name string, lines int) (string, error) {
+func readRenderedAgentLogs(ctx context.Context, exec vmexec.Executor, name string, lines int) (string, error) {
 	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
 	configDir := agentConfigDir(agentType)
 	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
@@ -683,7 +683,7 @@ func stripANSI(s string) string {
 	return b.String()
 }
 
-func readLastSessionMessage(ctx context.Context, exec orb.Executor, name string) (string, error) {
+func readLastSessionMessage(ctx context.Context, exec vmexec.Executor, name string) (string, error) {
 	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
 	configDir := agentConfigDir(agentType)
 	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
@@ -759,7 +759,7 @@ func extractAssistantTextForOutput(msg map[string]interface{}) string {
 	return strings.Join(parts, "\n")
 }
 
-func runGitOnStoppedWorkspace(ctx context.Context, exec orb.Executor, name, gitCmd string) ([]byte, error) {
+func runGitOnStoppedWorkspace(ctx context.Context, exec vmexec.Executor, name, gitCmd string) ([]byte, error) {
 	tmpDir := "/tmp/safe-agentic-workspace-" + strings.ReplaceAll(name, "/", "-")
 	if _, err := exec.Run(ctx, "bash", "-c", "rm -rf "+shellQuote(tmpDir)+" && mkdir -p "+shellQuote(tmpDir)); err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
@@ -837,7 +837,7 @@ func runSummary(cmd *cobra.Command, args []string) error {
 }
 
 // inspectField runs docker inspect with a Go template and returns trimmed output.
-func inspectField(ctx context.Context, exec orb.Executor, name, tmpl string) (string, error) {
+func inspectField(ctx context.Context, exec vmexec.Executor, name, tmpl string) (string, error) {
 	out, err := exec.Run(ctx, "docker", "inspect", "--format", tmpl, name)
 	if err != nil {
 		return "", err
@@ -879,7 +879,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 	return runCostForContainer(ctx, exec, name)
 }
 
-func runCostForContainer(ctx context.Context, exec orb.Executor, name string) error {
+func runCostForContainer(ctx context.Context, exec vmexec.Executor, name string) error {
 	// Ensure container is running for docker exec
 	stop, err := ensureRunning(ctx, exec, name)
 	if err != nil {
@@ -929,7 +929,7 @@ func runCostForContainer(ctx context.Context, exec orb.Executor, name string) er
 	return nil
 }
 
-func runCostHistory(ctx context.Context, exec orb.Executor, period string) error {
+func runCostHistory(ctx context.Context, exec vmexec.Executor, period string) error {
 	duration, err := parsePeriod(period)
 	if err != nil {
 		return fmt.Errorf("parse period %q: %w", period, err)
