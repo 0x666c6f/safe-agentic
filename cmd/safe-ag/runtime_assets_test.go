@@ -49,3 +49,42 @@ func TestEntrypointPromptEnvOnlyUsedWithoutLaunchArgs(t *testing.T) {
 		t.Fatalf("entrypoint prompt env guard missing launch_args check")
 	}
 }
+
+func TestEntrypointConfiguresGitHubCredentialHelper(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read entrypoint.sh: %v", err)
+	}
+	content := string(script)
+	if !strings.Contains(content, `gh auth setup-git -h github.com`) {
+		t.Fatalf("entrypoint must configure gh git credentials before cloning private HTTPS repos")
+	}
+}
+
+func TestEntrypointExtractsCodexSupportFiles(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read entrypoint.sh: %v", err)
+	}
+	content := string(script)
+	if !strings.Contains(content, `SAFE_AGENTIC_CODEX_SUPPORT_B64`) {
+		t.Fatalf("entrypoint must extract Codex support files such as agents/*.toml")
+	}
+}
+
+func TestVMSetupRetriesDockerStart(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "vm", "setup.sh"))
+	if err != nil {
+		t.Fatalf("read vm/setup.sh: %v", err)
+	}
+	content := string(script)
+	for _, want := range []string{
+		"wait_for_docker_process_exit",
+		"start_dockerd_once",
+		"Docker did not become ready",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("vm/setup.sh missing Docker retry marker %q", want)
+		}
+	}
+}

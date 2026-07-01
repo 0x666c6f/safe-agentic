@@ -152,6 +152,34 @@ func TestMachineExecutor_BuildArgs_EmptyPayload(t *testing.T) {
 	}
 }
 
+func TestMachineExecutor_BuildInteractiveArgs_AddsTTYForTerminal(t *testing.T) {
+	orig := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	defer func() { stdinIsTerminal = orig }()
+
+	e := &MachineExecutor{VMName: "my-vm"}
+	args := e.buildInteractiveArgs("docker", "exec", "-it", "mycontainer", "tmux", "attach")
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "machine run --interactive --tty -n my-vm -u root --") {
+		t.Fatalf("interactive args missing Apple VM TTY flags: %s", joined)
+	}
+}
+
+func TestMachineExecutor_BuildInteractiveArgs_OmitsTTYWithoutTerminal(t *testing.T) {
+	orig := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+	defer func() { stdinIsTerminal = orig }()
+
+	e := &MachineExecutor{VMName: "my-vm"}
+	args := e.buildInteractiveArgs("docker", "exec", "-it", "mycontainer", "tmux", "attach")
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--interactive") || strings.Contains(joined, "--tty") {
+		t.Fatalf("interactive args should omit Apple VM TTY flags without a terminal: %s", joined)
+	}
+}
+
 func TestFakeExecutor_RunInteractive_LogsCommand(t *testing.T) {
 	f := NewFake()
 

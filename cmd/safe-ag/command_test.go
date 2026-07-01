@@ -43,6 +43,8 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	origStartVM := startVM
 	origInstallVMSupportFiles := installVMSupportFiles
 	origConfigureHostNAT := configureHostNAT
+	origHostIPForwardingEnabled := hostIPForwardingEnabled
+	origConfigureLaunchdSSHAuth := configureLaunchdSSHAuth
 	newExecutor = func() vmexec.Executor { return fake }
 	findBuildRoot = func() (string, error) { return t.TempDir(), nil }
 	syncBuildContextToVM = func(vmName, root string) error { return nil }
@@ -52,6 +54,8 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	startVM = func(vmName string) error { return nil }
 	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
 	configureHostNAT = func(stdout, stderr io.Writer) error { return nil }
+	hostIPForwardingEnabled = func() bool { return true }
+	configureLaunchdSSHAuth = func() error { return nil }
 	return fake, func() {
 		newExecutor = original
 		findBuildRoot = origFindBuildRoot
@@ -62,6 +66,8 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 		startVM = origStartVM
 		installVMSupportFiles = origInstallVMSupportFiles
 		configureHostNAT = origConfigureHostNAT
+		hostIPForwardingEnabled = origHostIPForwardingEnabled
+		configureLaunchdSSHAuth = origConfigureLaunchdSSHAuth
 	}
 }
 
@@ -1633,6 +1639,44 @@ func TestSpawnValidation_SSHRequired(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for SSH repo without --ssh flag")
+	}
+}
+
+func TestSpawnFailsFastWhenHostNATOff(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	hostIPForwardingEnabled = func() bool { return false }
+
+	err := executeSpawn(SpawnOpts{
+		AgentType: "claude",
+		Repos:     []string{"https://github.com/org/repo.git"},
+	})
+	if err == nil {
+		t.Fatal("expected host NAT error")
+	}
+	if !strings.Contains(err.Error(), "host egress NAT is off") {
+		t.Fatalf("error = %v, want host NAT error", err)
+	}
+	if cmds := fake.CommandsMatching("docker run"); len(cmds) > 0 {
+		t.Fatalf("spawn should fail before docker run, got %v", cmds)
+	}
+}
+
+func TestSpawnAllowsNetworkNoneWhenHostNATOff(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	hostIPForwardingEnabled = func() bool { return false }
+
+	err := executeSpawn(SpawnOpts{
+		AgentType:  "shell",
+		Network:    "none",
+		Background: true,
+	})
+	if err != nil {
+		t.Fatalf("executeSpawn() error = %v", err)
+	}
+	if cmds := fake.CommandsMatching("docker run -d"); len(cmds) == 0 {
+		t.Fatal("expected docker run command")
 	}
 }
 
@@ -3356,6 +3400,25 @@ func TestSetupCommand_DockerAvailable(t *testing.T) {
 	}
 }
 
+func TestSetupConfiguresLaunchdSSHAuthBeforeContainerSystem(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+	installFakeContainerBinary(t)
+
+	called := false
+	configureLaunchdSSHAuth = func() error {
+		called = true
+		return nil
+	}
+
+	if err := ensureContainerSystemRunning(io.Discard, io.Discard); err != nil {
+		t.Fatalf("ensureContainerSystemRunning() error = %v", err)
+	}
+	if !called {
+		t.Fatal("expected launchd SSH_AUTH_SOCK configuration before container system start/status")
+	}
+}
+
 func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
@@ -3373,6 +3436,34 @@ func TestSetupCommand_DockerNotAvailable(t *testing.T) {
 
 	if !strings.Contains(output, "Image updated") {
 		t.Fatalf("expected image update output, got: %s", output)
+	}
+}
+
+func TestVMStartRestoresHostNATBeforeBootstrap(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	var order []string
+	configureHostNAT = func(stdout, stderr io.Writer) error {
+		order = append(order, "nat")
+		return nil
+	}
+	runVMBootstrap = func(vmName string) ([]byte, error) {
+		order = append(order, "bootstrap")
+		return []byte("bootstrap ok\n"), nil
+	}
+
+	output := captureOutput(func() {
+		if err := runVMStart(vmStartCmd, nil); err != nil {
+			t.Fatalf("runVMStart() error = %v", err)
+		}
+	})
+
+	if got, want := strings.Join(order, ","), "nat,bootstrap"; got != want {
+		t.Fatalf("order = %s, want %s", got, want)
+	}
+	if !strings.Contains(output, "Restoring host network egress (NAT)") {
+		t.Fatalf("expected NAT output, got: %s", output)
 	}
 }
 

@@ -3,12 +3,18 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"os"
 	"time"
+
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"golang.org/x/term"
 )
 
 const defaultSessionName = "safe-agentic"
+
+var stdinIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
 
 func SessionName() string {
 	if n := os.Getenv("SAFE_AGENTIC_TMUX_SESSION_NAME"); n != "" {
@@ -42,10 +48,11 @@ func WaitForSession(ctx context.Context, exec vmexec.Executor, containerName str
 }
 
 func BuildAttachArgs(containerName string) []string {
-	return []string{
-		"docker", "exec", "-it", containerName,
-		"tmux", "attach", "-t", SessionName(),
+	args := []string{"docker", "exec"}
+	if stdinIsTerminal() {
+		args = append(args, "-it")
 	}
+	return append(args, containerName, "tmux", "attach", "-t", SessionName())
 }
 
 func BuildCapturePaneArgs(containerName string, lines int) []string {

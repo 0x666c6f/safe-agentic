@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"golang.org/x/term"
 )
 
 type Executor interface {
@@ -20,8 +22,27 @@ type MachineExecutor struct {
 	VMName string
 }
 
-func (e *MachineExecutor) buildArgs(args ...string) []string {
+var stdinIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+func (e *MachineExecutor) buildBaseArgs(interactive bool) []string {
 	base := []string{"machine", "run", "-n", e.VMName, "-u", "root"}
+	if interactive && stdinIsTerminal() {
+		base = []string{"machine", "run", "--interactive", "--tty", "-n", e.VMName, "-u", "root"}
+	}
+	return base
+}
+
+func (e *MachineExecutor) buildArgs(args ...string) []string {
+	return e.buildArgsWithBase(e.buildBaseArgs(false), args...)
+}
+
+func (e *MachineExecutor) buildInteractiveArgs(args ...string) []string {
+	return e.buildArgsWithBase(e.buildBaseArgs(true), args...)
+}
+
+func (e *MachineExecutor) buildArgsWithBase(base []string, args ...string) []string {
 	if len(args) == 0 {
 		return base
 	}
@@ -44,7 +65,7 @@ func (e *MachineExecutor) Run(ctx context.Context, args ...string) ([]byte, erro
 }
 
 func (e *MachineExecutor) RunInteractive(args ...string) error {
-	cmd := exec.Command("container", e.buildArgs(args...)...)
+	cmd := exec.Command("container", e.buildInteractiveArgs(args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -45,6 +45,27 @@ EOF
   as_root chmod 0755 /usr/local/bin/safe-ag-exec
 }
 
+wait_for_docker_process_exit() {
+  for _ in $(seq 1 10); do
+    if ! pidof dockerd >/dev/null 2>&1 && ! pidof containerd >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  as_root pkill -9 dockerd >/dev/null 2>&1 || true
+  as_root pkill -9 containerd >/dev/null 2>&1 || true
+  sleep 1
+}
+
+start_dockerd_once() {
+  as_root pkill dockerd >/dev/null 2>&1 || true
+  as_root pkill containerd >/dev/null 2>&1 || true
+  wait_for_docker_process_exit
+  as_root rm -f /var/run/docker.pid /var/run/docker.sock
+  as_root mkdir -p /var/log
+  as_root sh -c 'nohup dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &'
+}
+
 echo "==> Setting up safe-agentic VM..."
 
 # =============================================================================
@@ -174,19 +195,24 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   as_root systemctl enable docker
   as_root systemctl restart docker
 else
-  as_root pkill dockerd >/dev/null 2>&1 || true
-  as_root pkill containerd >/dev/null 2>&1 || true
-  as_root rm -f /var/run/docker.pid /var/run/docker.sock
-  as_root mkdir -p /var/log
-  as_root sh -c 'nohup dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &'
+  DOCKER_READY=false
+  for attempt in 1 2; do
+    start_dockerd_once
+    for _ in $(seq 1 45); do
+      if docker info >/dev/null 2>&1; then
+        DOCKER_READY=true
+        break
+      fi
+      sleep 1
+    done
+    if $DOCKER_READY; then
+      break
+    fi
+    echo "    Docker did not become ready (attempt $attempt/2); retrying..."
+    as_root tail -80 /var/log/dockerd.log 2>/dev/null || true
+  done
 fi
 
-for _ in $(seq 1 30); do
-  if docker info >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
 if ! docker info >/dev/null 2>&1; then
   echo "==> Docker failed to start. Last daemon log:"
   as_root tail -200 /var/log/dockerd.log 2>/dev/null || true

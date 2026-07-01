@@ -27,14 +27,16 @@ func configuredVMName() string {
 }
 
 var (
-	copyFileToVM          = copyFileToVMImpl
-	syncBuildContextToVM  = syncBuildContextToVMImpl
-	findBuildRoot         = findBuildRootImpl
-	vmExists              = vmExistsImpl
-	runVMBootstrap        = runVMBootstrapImpl
-	startVM               = startVMImpl
-	installVMSupportFiles = installVMSupportFilesImpl
-	configureHostNAT      = configureHostNATImpl
+	copyFileToVM            = copyFileToVMImpl
+	syncBuildContextToVM    = syncBuildContextToVMImpl
+	findBuildRoot           = findBuildRootImpl
+	vmExists                = vmExistsImpl
+	runVMBootstrap          = runVMBootstrapImpl
+	startVM                 = startVMImpl
+	installVMSupportFiles   = installVMSupportFilesImpl
+	configureHostNAT        = configureHostNATImpl
+	hostIPForwardingEnabled = hostIPForwardingEnabledImpl
+	configureLaunchdSSHAuth = configureLaunchdSSHAuthImpl
 )
 
 func vmExistsImpl(vmName string) bool {
@@ -294,6 +296,9 @@ func buildContextFiles(root string) ([]string, error) {
 }
 
 func ensureContainerSystemRunning(stdout, stderr io.Writer) error {
+	if err := configureLaunchdSSHAuth(); err != nil {
+		return err
+	}
 	status := exec.Command("container", "system", "status")
 	if err := status.Run(); err == nil {
 		return nil
@@ -304,6 +309,24 @@ func ensureContainerSystemRunning(stdout, stderr io.Writer) error {
 	start.Stderr = stderr
 	if err := start.Run(); err != nil {
 		return fmt.Errorf("container system start: %w", err)
+	}
+	return nil
+}
+
+func configureLaunchdSSHAuthImpl() error {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" || !filepath.IsAbs(sock) || strings.ContainsAny(sock, "\x00\n\r") {
+		return nil
+	}
+	info, err := os.Lstat(sock)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return nil
+	}
+	if _, err := exec.LookPath("launchctl"); err != nil {
+		return nil
+	}
+	if err := exec.Command("launchctl", "setenv", "SSH_AUTH_SOCK", sock).Run(); err != nil {
+		return fmt.Errorf("set launchd SSH_AUTH_SOCK: %w", err)
 	}
 	return nil
 }
@@ -613,6 +636,13 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("start VM: %w", err)
 	}
 	fmt.Println("✓ VM started")
+	// A reboot resets net.inet.ip.forwarding and flushes the pf NAT anchor, so
+	// restore egress before bootstrap tries package/network operations.
+	fmt.Println("Restoring host network egress (NAT)…")
+	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		return fmt.Errorf("restore host NAT: %w", err)
+	}
+	fmt.Println("✓ Host NAT applied")
 	fmt.Println("Re-applying VM hardening…")
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
@@ -626,15 +656,6 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Println("✓ VM support files installed")
-	// A reboot resets net.inet.ip.forwarding and flushes the pf NAT anchor, so
-	// the VM loses internet egress until NAT is re-applied. Restoring it here
-	// means restarting the VM is enough to recover; otherwise every clone times
-	// out and agents die on startup.
-	fmt.Println("Restoring host network egress (NAT)…")
-	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
-		return fmt.Errorf("restore host NAT: %w", err)
-	}
-	fmt.Println("✓ Host NAT applied")
 	return nil
 }
 
@@ -788,7 +809,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 
 // hostIPForwardingEnabled reports whether the macOS host is forwarding IP,
 // a prerequisite for the pf NAT that gives the VM internet egress.
-func hostIPForwardingEnabled() bool {
+func hostIPForwardingEnabledImpl() bool {
 	out, err := exec.Command("/usr/sbin/sysctl", "-n", "net.inet.ip.forwarding").Output()
 	if err != nil {
 		return false

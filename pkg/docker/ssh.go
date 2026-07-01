@@ -35,11 +35,20 @@ func AppendSSHMount(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd
 	if !vmSocketPathPattern.MatchString(vmSocket) {
 		return fmt.Errorf("SSH_AUTH_SOCK has unsafe value %q", vmSocket)
 	}
+	if err := checkSSHAgent(ctx, exec, vmSocket); err != nil {
+		return fmt.Errorf("VM SSH agent has no identities; ensure 1Password SSH agent is enabled, run `launchctl setenv SSH_AUTH_SOCK \"$SSH_AUTH_SOCK\"`, restart Apple container services, then run `safe-ag vm start`: %w", err)
+	}
 
 	// Set up a locked relay for userns-remap compatibility.
 	// The socket stays in a private 0700 directory to avoid exposing a global
 	// world-traversable relay path inside the VM.
 	_, relayExists := exec.Run(ctx, "test", "-S", sshRelaySocket)
+	if relayExists == nil {
+		if err := checkSSHAgent(ctx, exec, sshRelaySocket); err != nil {
+			_, _ = exec.Run(ctx, "bash", "-lc", fmt.Sprintf("rm -f %s %s", shellQuote(sshRelaySocket), shellQuote(sshRelayPIDFile)))
+			relayExists = fmt.Errorf("stale SSH relay: %w", err)
+		}
+	}
 	if relayExists != nil {
 		lockedScript := fmt.Sprintf(
 			"if [ -S %s ]; then exit 0; fi; rm -f %s %s; "+
@@ -85,6 +94,12 @@ func AppendSSHMount(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd
 
 	cmd.AddEnv("SSH_AUTH_SOCK", sshSocketPath)
 	return nil
+}
+
+func checkSSHAgent(ctx context.Context, exec vmexec.Executor, socket string) error {
+	checkCmd := fmt.Sprintf("SSH_AUTH_SOCK=%s ssh-add -l >/dev/null", shellQuote(socket))
+	_, err := exec.Run(ctx, "bash", "-lc", checkCmd)
+	return err
 }
 
 func AppendSSHMountDryRun(cmd *DockerRunCmd) {

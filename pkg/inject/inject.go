@@ -243,13 +243,106 @@ func ReadCodexConfig(codexHome string) (map[string]string, error) {
 	envs := make(map[string]string)
 	configPath := filepath.Join(codexHome, "config.toml")
 	data, err := os.ReadFile(configPath)
-	if os.IsNotExist(err) {
-		return envs, nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read codex config: %w", err)
 	}
-	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
+	_, agentsErr := os.Stat(filepath.Join(codexHome, "agents"))
+	hasAgentsDir := agentsErr == nil
+	sanitized := sanitizeCodexConfig(string(data), codexHome, hasAgentsDir)
+	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString([]byte(sanitized))
+	return envs, nil
+}
+
+const containerCodexHome = "/home/agent/.codex"
+
+func sanitizeCodexConfig(content, codexHome string, includeAgents bool) string {
+	if codexHome != "" {
+		content = strings.ReplaceAll(content, codexHome, containerCodexHome)
+	}
+
+	blockedTables := []string{"mcp_servers", "plugins", "marketplaces", "desktop", "projects"}
+	if !includeAgents {
+		blockedTables = append(blockedTables, "agents")
+	}
+
+	var out []string
+	skip := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if table, ok := tomlTableName(trimmed); ok {
+			skip = tableIsBlocked(table, blockedTables)
+		}
+		if skip {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "notify =") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "check_for_update_on_startup =") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "codex_hooks =") {
+			out = append(out, strings.Replace(line, "codex_hooks", "hooks", 1))
+			continue
+		}
+		out = append(out, line)
+	}
+	result := strings.TrimRight(strings.Join(out, "\n"), "\n")
+	if result != "" {
+		result = "check_for_update_on_startup = false\n" + result
+	} else {
+		result = "check_for_update_on_startup = false\n"
+	}
+	if !strings.Contains(result, `[projects."/workspace"]`) {
+		if result != "" {
+			result += "\n\n"
+		}
+		result += "[projects.\"/workspace\"]\ntrust_level = \"trusted\"\n"
+	} else {
+		result += "\n"
+	}
+	return result
+}
+
+func tomlTableName(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
+		return "", false
+	}
+	return strings.Trim(line, "[]"), true
+}
+
+func tableIsBlocked(table string, blocked []string) bool {
+	for _, prefix := range blocked {
+		if table == prefix || strings.HasPrefix(table, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func ReadCodexSupportFiles(codexHome string) (map[string]string, error) {
+	envs := make(map[string]string)
+	agentsPath := filepath.Join(codexHome, "agents")
+	if info, err := os.Lstat(agentsPath); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return envs, nil
+	}
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	if err := tarDir(tw, codexHome, "agents"); err != nil {
+		tw.Close()
+		gw.Close()
+		return nil, fmt.Errorf("tar codex agents: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		gw.Close()
+		return nil, fmt.Errorf("tar codex agents close: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("gzip codex agents close: %w", err)
+	}
+	envs["SAFE_AGENTIC_CODEX_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
 	return envs, nil
 }
 

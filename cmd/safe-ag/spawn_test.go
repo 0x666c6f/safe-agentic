@@ -135,6 +135,20 @@ func TestPrepareSpawnResourceLimits_OmitsDefaultMemoryAndCPUsOnThreadedCgroup(t 
 	}
 }
 
+func TestPrepareSpawnResourceLimits_OmitsDefaultMemoryAndCPUsOnRootThreadedCgroup(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "domain threaded\n")
+	resolved := spawnResolved{Memory: "8g", CPUs: "4"}
+
+	err := prepareSpawnResourceLimits(context.Background(), fake, SpawnOpts{}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnResourceLimits() error = %v", err)
+	}
+	if resolved.Memory != "" || resolved.CPUs != "" {
+		t.Fatalf("expected memory/cpus omitted, got memory=%q cpus=%q", resolved.Memory, resolved.CPUs)
+	}
+}
+
 func TestPrepareSpawnResourceLimits_RejectsExplicitLimitsOnThreadedCgroup(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "threaded\n")

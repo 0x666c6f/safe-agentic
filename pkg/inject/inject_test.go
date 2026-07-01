@@ -177,8 +177,124 @@ func TestReadCodexConfigWithConfigTOML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode env var: %v", err)
 	}
-	if string(decoded) != content {
-		t.Fatalf("decoded config = %q, want %q", string(decoded), content)
+	decodedConfig := string(decoded)
+	if !strings.Contains(decodedConfig, content) {
+		t.Fatalf("decoded config = %q, want it to contain %q", decodedConfig, content)
+	}
+	if !strings.Contains(decodedConfig, "check_for_update_on_startup = false") {
+		t.Fatalf("decoded config missing managed update check setting: %q", decodedConfig)
+	}
+	if !strings.Contains(decodedConfig, `[projects."/workspace"]`) {
+		t.Fatalf("decoded config missing workspace trust: %q", decodedConfig)
+	}
+}
+
+func TestReadCodexConfigSanitizesHostOnlyBlocks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+content := `model = "gpt-5"
+notify = ["/Applications/Codex.app/notify"]
+check_for_update_on_startup = true
+
+[agents.reviewer]
+config_file = "` + dir + `/agents/reviewer.toml"
+
+[mcp_servers.node_repl]
+command = "/Applications/Codex.app/node_repl"
+
+[mcp_servers.node_repl.env]
+CODEX_HOME = "` + dir + `"
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[features]
+codex_hooks = false
+
+[projects."` + dir + `"]
+trust_level = "trusted"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	envs, err := ReadCodexConfig(dir)
+	if err != nil {
+		t.Fatalf("ReadCodexConfig error: %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(envs["SAFE_AGENTIC_CODEX_CONFIG_B64"])
+	if err != nil {
+		t.Fatalf("decode env var: %v", err)
+	}
+	got := string(decoded)
+	for _, forbidden := range []string{"notify =", "mcp_servers", "plugins.", "/Applications/Codex.app", dir} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("sanitized config still contains %q:\n%s", forbidden, got)
+		}
+	}
+	for _, want := range []string{`config_file = "/home/agent/.codex/agents/reviewer.toml"`, `[projects."/workspace"]`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sanitized config missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "check_for_update_on_startup = false") {
+		t.Fatalf("sanitized config missing managed update check setting:\n%s", got)
+	}
+	if strings.Contains(got, "check_for_update_on_startup = true") {
+		t.Fatalf("sanitized config kept host update check setting:\n%s", got)
+	}
+	if strings.Contains(got, "codex_hooks =") {
+		t.Fatalf("sanitized config kept deprecated Codex feature key:\n%s", got)
+	}
+	if !strings.Contains(got, "hooks = false") {
+		t.Fatalf("sanitized config missing translated Codex hooks feature:\n%s", got)
+	}
+}
+
+func TestReadCodexSupportFilesIncludesAgents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents", "reviewer.toml"), []byte("model = \"gpt-5\"\n"), 0o600); err != nil {
+		t.Fatalf("write agent config: %v", err)
+	}
+
+	envs, err := ReadCodexSupportFiles(dir)
+	if err != nil {
+		t.Fatalf("ReadCodexSupportFiles error: %v", err)
+	}
+	archiveB64 := envs["SAFE_AGENTIC_CODEX_SUPPORT_B64"]
+	if archiveB64 == "" {
+		t.Fatal("expected SAFE_AGENTIC_CODEX_SUPPORT_B64")
+	}
+	archiveBytes, err := base64.StdEncoding.DecodeString(archiveB64)
+	if err != nil {
+		t.Fatalf("decode archive: %v", err)
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	seen := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar next: %v", err)
+		}
+		if hdr.Name == "agents/reviewer.toml" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatal("agents/reviewer.toml missing from archive")
 	}
 }
 
@@ -187,8 +303,20 @@ func TestReadCodexConfigMissingDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCodexConfig missing dir returned error: %v", err)
 	}
-	if len(envs) != 0 {
-		t.Fatalf("expected empty map, got %v", envs)
+	val := envs["SAFE_AGENTIC_CODEX_CONFIG_B64"]
+	if val == "" {
+		t.Fatalf("expected managed default Codex config, got %v", envs)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(val)
+	if err != nil {
+		t.Fatalf("decode env var: %v", err)
+	}
+	decodedConfig := string(decoded)
+	if !strings.Contains(decodedConfig, "check_for_update_on_startup = false") {
+		t.Fatalf("default config missing managed update check setting: %q", decodedConfig)
+	}
+	if !strings.Contains(decodedConfig, `[projects."/workspace"]`) {
+		t.Fatalf("default config missing workspace trust: %q", decodedConfig)
 	}
 }
 

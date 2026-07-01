@@ -66,6 +66,10 @@ func TestHasSession_UsesCorrectArgs(t *testing.T) {
 }
 
 func TestBuildAttachArgs_ReturnsCorrectArgs(t *testing.T) {
+	oldStdinIsTerminal := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	defer func() { stdinIsTerminal = oldStdinIsTerminal }()
+
 	args := BuildAttachArgs("mycontainer")
 	expected := []string{
 		"docker", "exec", "-it", "mycontainer",
@@ -143,6 +147,10 @@ func TestWaitForSession_ReturnsErrorOnContextCancel(t *testing.T) {
 }
 
 func TestAttach_CallsRunInteractiveWithCorrectArgs(t *testing.T) {
+	oldStdinIsTerminal := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	defer func() { stdinIsTerminal = oldStdinIsTerminal }()
+
 	f := vmexec.NewFake()
 
 	err := Attach(f, "mycontainer")
@@ -156,6 +164,29 @@ func TestAttach_CallsRunInteractiveWithCorrectArgs(t *testing.T) {
 	cmd := f.Log[0]
 	joined := strings.Join(cmd, " ")
 	expected := fmt.Sprintf("docker exec -it mycontainer tmux attach -t %s", defaultSessionName)
+	if joined != expected {
+		t.Errorf("unexpected command: %q, want %q", joined, expected)
+	}
+}
+
+func TestAttach_OmitsTTYFlagsWithoutTerminal(t *testing.T) {
+	oldStdinIsTerminal := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+	defer func() { stdinIsTerminal = oldStdinIsTerminal }()
+
+	f := vmexec.NewFake()
+
+	err := Attach(f, "mycontainer")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(f.Log) != 1 {
+		t.Fatalf("expected 1 command logged, got %d", len(f.Log))
+	}
+	cmd := f.Log[0]
+	joined := strings.Join(cmd, " ")
+	expected := fmt.Sprintf("docker exec mycontainer tmux attach -t %s", defaultSessionName)
 	if joined != expected {
 		t.Errorf("unexpected command: %q, want %q", joined, expected)
 	}

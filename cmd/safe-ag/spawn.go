@@ -209,6 +209,9 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := enforceSpawnPolicy(opts, cfg); err != nil {
 		return err
 	}
+	if err := requireSpawnHostEgress(opts, cfg); err != nil {
+		return err
+	}
 
 	resolved, err := prepareSpawnResolved(opts, cfg)
 	if err != nil {
@@ -380,6 +383,23 @@ func spawnPolicyRequest(opts SpawnOpts, cfg config.Config) policy.SpawnRequest {
 	}
 }
 
+func requireSpawnHostEgress(opts SpawnOpts, cfg config.Config) error {
+	if opts.DryRun {
+		return nil
+	}
+	network := opts.Network
+	if network == "" {
+		network = cfg.Defaults.Network
+	}
+	if network == "none" {
+		return nil
+	}
+	if hostIPForwardingEnabled() {
+		return nil
+	}
+	return fmt.Errorf("host egress NAT is off; VM has no internet egress. Run `safe-ag vm start` and approve the macOS administrator prompt, then retry")
+}
+
 func validateResolvedSpawn(resolved spawnResolved) error {
 	if err := validate.MemoryLimit(resolved.Memory); err != nil {
 		return err
@@ -517,7 +537,7 @@ func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts 
 }
 
 func dockerCgroupIsThreaded(ctx context.Context, exec vmexec.Executor) bool {
-	out, err := exec.Run(ctx, "bash", "-lc", "cat /sys/fs/cgroup/docker/cgroup.type 2>/dev/null || true")
+	out, err := exec.Run(ctx, "bash", "-lc", "cat /sys/fs/cgroup/docker/cgroup.type /sys/fs/cgroup/cgroup.type 2>/dev/null || true")
 	if err != nil {
 		return false
 	}
@@ -650,6 +670,8 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	}
 	if opts.AgentType == "codex" || opts.AgentType == "shell" {
 		envs, err := inject.ReadCodexConfig(codexHome)
+		appendEnvMap(cmd, envs, err)
+		envs, err = inject.ReadCodexSupportFiles(codexHome)
 		appendEnvMap(cmd, envs, err)
 		if opts.SeedAuth {
 			envs, err = inject.ReadCodexAuth(codexHome)

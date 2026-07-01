@@ -34,7 +34,6 @@ ensure_codex_config() {
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
   if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
-    [ -f "$codex_config" ] && return 0
     echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
@@ -59,6 +58,15 @@ ensure_codex_auth() {
   [ -f "$auth_path" ] && return 0
   echo "$SAFE_AGENTIC_CODEX_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
   chmod 600 "$auth_path" 2>/dev/null || true
+}
+
+ensure_codex_support_files() {
+  local codex_dir="${CODEX_HOME:-$HOME/.codex}"
+
+  [ -n "${SAFE_AGENTIC_CODEX_SUPPORT_B64:-}" ] || return 0
+  mkdir -p "$codex_dir" 2>/dev/null || return 0
+  [ -w "$codex_dir" ] || return 0
+  echo "$SAFE_AGENTIC_CODEX_SUPPORT_B64" | base64 -d | tar -xzf - -C "$codex_dir" 2>/dev/null || return 0
 }
 
 ensure_claude_config() {
@@ -257,10 +265,13 @@ git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
+if command -v gh >/dev/null 2>&1 && [ -s /home/agent/.config/gh/hosts.yml ]; then
+  gh auth setup-git -h github.com >/dev/null 2>&1 || true
+fi
 case "${AGENT_TYPE:-}" in
   claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
-  codex)  ensure_codex_auth; ensure_codex_config ;;
-  *)      ensure_codex_auth; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  codex)  ensure_codex_auth; ensure_codex_support_files; ensure_codex_config ;;
+  *)      ensure_codex_auth; ensure_codex_support_files; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
 esac
 
 # Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/
