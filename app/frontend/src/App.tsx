@@ -3,6 +3,11 @@ import { Events } from "@wailsio/runtime";
 import { useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { Workspace } from "./components/Workspace";
+import { SpawnForm } from "./components/SpawnForm";
+import { FleetView } from "./components/FleetView";
+import { Timeline } from "./components/Timeline";
+import { CostView } from "./components/CostView";
+import { Palette } from "./components/Palette";
 import { VMBanner } from "./components/VMBanner";
 import { Toasts } from "./components/Toasts";
 import { AgentService } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
@@ -39,9 +44,13 @@ export default function App() {
           {view === "agents" && (selected
             ? <Workspace key={selected} name={selected} />
             : <div className="p-4 text-neutral-500">Select an agent</div>)}
-          {view !== "agents" && <div className="p-4 text-neutral-500">{view} — coming in later tasks</div>}
+          {view === "spawn" && <SpawnForm />}
+          {view === "fleet" && <FleetView />}
+          {view === "timeline" && <Timeline />}
+          {view === "cost" && <CostView />}
         </main>
       </div>
+      <Palette />
       <Toasts />
     </div>
   );
