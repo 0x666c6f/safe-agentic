@@ -8,7 +8,8 @@ import { useStore } from "../store";
 import "@xterm/xterm/css/xterm.css";
 
 const b64ToBytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-const unwrap = (e: any) => (Array.isArray(e?.data) ? e.data[0] : e?.data);
+// See App.tsx: pinned alpha delivers event.data raw, no array wrapping.
+const unwrap = (e: any) => e?.data;
 
 export function TerminalPane({ container }: { container: string }) {
   const ref = useRef<HTMLDivElement>(null);

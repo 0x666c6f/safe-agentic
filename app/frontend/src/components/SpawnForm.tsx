@@ -13,7 +13,10 @@ export function SpawnForm() {
 
   useEffect(() => {
     AgentService.TemplateList()
-      .then((out: string) => setTemplates(out.split("\n").map((l) => l.trim().split(/\s+/)[0]).filter(Boolean)))
+      .then((out: string) => setTemplates(
+        out.split("\n")
+          .map((l) => l.trim().split(/\s+/)[0])
+          .filter((t) => t && !/^(NAME|TEMPLATE)$/i.test(t) && !/^[-─═=]+$/.test(t))))
       .catch(() => setTemplates([]));
   }, []);
 

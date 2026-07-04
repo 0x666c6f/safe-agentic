@@ -274,3 +274,26 @@ func TestMachineExecutor_Run_SuccessWithRealVM(t *testing.T) {
 		t.Errorf("unexpected output: %q", got)
 	}
 }
+
+func TestBuildInteractiveArgs(t *testing.T) {
+	got := BuildInteractiveArgs("safe-agentic", "docker", "exec", "-it", "agent-x", "tmux", "attach", "-t", "safe-agentic")
+	want := []string{
+		"machine", "run", "--interactive", "--tty", "-n", "safe-agentic", "-u", "root",
+		"--", "/usr/local/bin/safe-ag-exec", "docker",
+		"ZXhlYw==",         // exec
+		"LWl0",             // -it
+		"YWdlbnQteA==",     // agent-x
+		"dG11eA==",         // tmux
+		"YXR0YWNo",         // attach
+		"LXQ=",             // -t
+		"c2FmZS1hZ2VudGlj", // safe-agentic
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len: got %d want %d\n%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}

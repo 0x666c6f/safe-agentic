@@ -15,6 +15,9 @@ type CLIError struct {
 }
 
 func (e *CLIError) Error() string {
+	if len(e.Argv) < 2 {
+		return fmt.Sprintf("safe-ag %v failed: %v\n%s", e.Argv, e.Err, e.Stderr)
+	}
 	return fmt.Sprintf("safe-ag %v failed: %v\n%s", e.Argv[1:], e.Err, e.Stderr)
 }
 func (e *CLIError) Unwrap() error { return e.Err }

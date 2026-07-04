@@ -13,7 +13,10 @@ import { Toasts } from "./components/Toasts";
 import { AgentService } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import type { Agent } from "./types";
 
-const unwrap = (e: any) => (Array.isArray(e?.data) ? e.data[0] : e?.data);
+// Wails v3.0.0-alpha2.112 EventManager.Emit sets Data = data[0] with NO array
+// wrapping; the JS runtime passes event.data through raw. Do not "unwrap"
+// arrays — []Agent payloads ARE arrays.
+const unwrap = (e: any) => e?.data;
 
 export default function App() {
   const { setAgents, applyEvent, setVM, select, view, selected } = useStore();
@@ -30,7 +33,11 @@ export default function App() {
         const d = unwrap(e);
         setVM(!!d?.ok, d?.error ?? "");
       }),
-      Events.On("focus.agent", (e: any) => select(unwrap(e) ?? null)),
+      Events.On("focus.agent", (e: any) => {
+        const name = unwrap(e) ?? null;
+        select(name);
+        if (name) useStore.getState().setView("agents");
+      }),
     ];
     return () => offs.forEach((off) => off());
   }, []);

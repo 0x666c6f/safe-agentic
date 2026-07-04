@@ -2,7 +2,6 @@ package state
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
@@ -76,8 +75,16 @@ func (s *Service) PipelineFiles() ([]string, error) {
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() && (strings.HasSuffix(e.Name(), ".yaml") || strings.HasSuffix(e.Name(), ".yml")) {
-			out = append(out, filepath.Base(e.Name()))
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
+			// Bare names: safe-ag's catalog resolves "<name>" as
+			// <PipelinesDir>/<name>.{yaml,yml}; passing "foo.yaml" would
+			// probe for foo.yaml.yaml and fail.
+			name = strings.TrimSuffix(strings.TrimSuffix(name, ".yaml"), ".yml")
+			out = append(out, name)
 		}
 	}
 	return out, nil

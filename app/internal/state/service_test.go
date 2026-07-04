@@ -43,3 +43,20 @@ func TestPipelineFilesMissingDir(t *testing.T) {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 }
+
+func TestPipelineFilesStripsExtensions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "review.yaml"), "steps: []\n")
+	writeFile(t, filepath.Join(dir, "fix.yml"), "steps: []\n")
+	writeFile(t, filepath.Join(dir, "notes.txt"), "ignore me\n")
+	s := &Service{PipelinesDir: dir}
+	files, err := s.PipelineFiles()
+	if err != nil || len(files) != 2 {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	for _, f := range files {
+		if f != "review" && f != "fix" {
+			t.Fatalf("extension not stripped: %q", f)
+		}
+	}
+}

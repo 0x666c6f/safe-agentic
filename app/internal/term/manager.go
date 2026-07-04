@@ -14,6 +14,7 @@ import (
 
 	"github.com/0x666c6f/safe-agentic/app/internal/emit"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 type CommandFactory func(container string) *exec.Cmd
@@ -28,9 +29,12 @@ func vmNameFromEnv() string {
 
 func DefaultFactory(vmName string) CommandFactory {
 	return func(container string) *exec.Cmd {
-		cmd := exec.Command("container",
-			"machine", "run", "--interactive", "--tty", "-n", vmName, "-u", "root",
+		// Route through the safe-ag-exec relay (base64-wrapped args) — the
+		// only proven convention for arg-safe execution via `container
+		// machine run`; raw args get mangled by flag parsing.
+		argv := vmexec.BuildInteractiveArgs(vmName,
 			"docker", "exec", "-it", container, "tmux", "attach", "-t", tmux.SessionName())
+		cmd := exec.Command("container", argv...)
 		env := make([]string, 0, len(os.Environ())+1)
 		for _, kv := range os.Environ() {
 			if !strings.HasPrefix(kv, "TERM=") {

@@ -148,22 +148,35 @@ func main() {
 		menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 		tray.SetMenu(menu)
 	}
-	poller.OnSnapshot = rebuild
+	// Rebuild runs InvokeSync-backed tray calls; detach from the poller
+	// goroutine so OnShutdown's blocking poller.Stop can never deadlock
+	// against a main-thread dispatch.
+	poller.OnSnapshot = func(a []poll.Agent) { go rebuild(a) }
 	app.Event.On("event.new", func(e *application.CustomEvent) {
-		// Mark needs-you from watcher events; next poller snapshot redraws the
-		// tray. Go-side listeners receive the ORIGINAL value emitted by the
-		// watcher: map[string]any{"event": events.Event, "status": string}.
-		if m, ok := e.Data.(map[string]any); ok {
-			if st, _ := m["status"].(string); st == "needs-auth" || st == "stuck" || st == "blocked" {
-				if ev, ok := m["event"].(events.Event); ok {
-					if c := ev.Payload["container"]; c != "" {
-						needsMu.Lock()
-						needsYou[c] = true
-						needsMu.Unlock()
-					}
-				}
-			}
+		// Track needs-you from watcher events (mirrors frontend store: set on
+		// needs statuses, clear on anything else); next poller snapshot
+		// redraws the tray. Go-side listeners receive the ORIGINAL value:
+		// map[string]any{"event": events.Event, "status": string}.
+		m, ok := e.Data.(map[string]any)
+		if !ok {
+			return
 		}
+		ev, ok := m["event"].(events.Event)
+		if !ok {
+			return
+		}
+		c := ev.Payload["container"]
+		if c == "" {
+			return
+		}
+		st, _ := m["status"].(string)
+		needsMu.Lock()
+		if st == "needs-auth" || st == "stuck" || st == "blocked" {
+			needsYou[c] = true
+		} else {
+			delete(needsYou, c)
+		}
+		needsMu.Unlock()
 	})
 
 	poller.Start()
