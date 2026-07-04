@@ -1,0 +1,65 @@
+# Pipeline: best-of-N implement -> judge -> PR the winner ("crown")
+#
+# Two engines (Claude and Codex) independently implement the SAME task in
+# isolated sandboxes. A judge agent then reviews each candidate's working-tree
+# diff and final message, picks the single best implementation against the
+# stated criteria, and (optionally) opens a PR from the winning container.
+#
+# The judge writes a strict-JSON verdict:
+#   {"winner":"<container>","reason":"...","summary":"<PR-style summary>"}
+# which is printed at the end of the run and saved under
+#   ~/.safe-ag/state/judge/<pipeline>-<stage>-<timestamp>.json
+#
+# Usage:
+#   safe-ag pipeline examples/pipeline-judge-fanout.yaml \
+#     --repo git@github.com:org/repo.git \
+#     --var task="Add exponential backoff retry to the HTTP client, with tests"
+#
+# Preview the plan without running anything:
+#   safe-ag pipeline examples/pipeline-judge-fanout.yaml --dry-run
+
+name: judge-fanout
+inputs:
+  - name: repo
+    description: Repository each candidate works on.
+    default: git@github.com:0x666c6f/safe-agentic.git
+    infer: repo
+  - name: task
+    description: The task every candidate should implement.
+    default: Implement the requested change with focused edits and tests.
+
+defaults:
+  repo: ${repo}
+  ssh: true
+  reuse_auth: true
+  auto_trust: true
+  # auto_pr opens the winner's PR from a short-lived helper container that mounts
+  # the winner's volumes (--volumes-from) without restarting its agent. gh/HTTPS
+  # credentials come from the reuse_gh_auth volume; SSH-agent auth cannot cross
+  # into the helper, so reuse_gh_auth is required for auto_pr to push.
+  reuse_gh_auth: true
+
+steps:
+  # One step, fanned out across engines: each model is a separate candidate
+  # container running the same task on the current branch.
+  - name: implement
+    models: [claude, codex]
+    prompt: >-
+      ${task}
+
+
+      You are candidate "${model}". Work on the current branch in /workspace.
+      Make correct, minimal, well-tested changes and commit them. Do not open a
+      PR yourself — a judge will compare all candidates afterwards.
+
+  # Best-of-N judge: depends on the fanned-out `implement` step (rewritten to
+  # implement-claude + implement-codex). It collects each candidate's diff and
+  # final message, selects a winner, and opens a PR from the winning container.
+  - name: pick-winner
+    judge:
+      criteria: >-
+        correctness and test coverage first, then a minimal and focused diff,
+        then clarity and maintainability
+      auto_pr: true
+      base: main
+    depends_on: implement

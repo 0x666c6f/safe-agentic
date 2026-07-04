@@ -243,6 +243,7 @@ func openDetachedPipelineLog(stateHome, manifestPath string) (string, *os.File, 
 func runPipelineManifest(ctx context.Context, exec vmexec.Executor, m *fleet.PipelineManifest, parseOpts fleet.ParseOptions, dryRun bool, timestamp string, rootLabel string, parentPath []string) error {
 	name, rootLabel, currentPath := pipelineContext(m, timestamp, rootLabel, parentPath)
 	completed := make(map[string]bool)
+	stageContainers := make(map[string][]string)
 	remaining := append([]fleet.PipelineStage{}, m.Stages...)
 
 	for len(remaining) > 0 {
@@ -250,7 +251,7 @@ func runPipelineManifest(ctx context.Context, exec vmexec.Executor, m *fleet.Pip
 		if err != nil {
 			return err
 		}
-		containerNames, err := runReadyStages(ctx, exec, ready, parseOpts, dryRun, timestamp, rootLabel, currentPath)
+		containerNames, err := runReadyStages(ctx, exec, ready, parseOpts, dryRun, timestamp, rootLabel, currentPath, stageContainers)
 		if err != nil {
 			return err
 		}
@@ -415,20 +416,28 @@ func stageNames(stages []fleet.PipelineStage) []string {
 	return names
 }
 
-func runReadyStages(ctx context.Context, exec vmexec.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runReadyStages(ctx context.Context, exec vmexec.Executor, ready []fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string, stageContainers map[string][]string) ([]string, error) {
 	var containerNames []string
 	for _, stage := range ready {
-		names, err := runPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
+		names, err := runPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath, stageContainers)
 		if err != nil {
 			return nil, err
+		}
+		if len(names) > 0 {
+			stageContainers[stage.Name] = append(stageContainers[stage.Name], names...)
 		}
 		containerNames = append(containerNames, names...)
 	}
 	return containerNames, nil
 }
 
-func runPipelineStage(ctx context.Context, exec vmexec.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string) ([]string, error) {
+func runPipelineStage(ctx context.Context, exec vmexec.Executor, stage fleet.PipelineStage, parseOpts fleet.ParseOptions, dryRun bool, timestamp, rootLabel string, currentPath []string, stageContainers map[string][]string) ([]string, error) {
 	fmt.Printf("Running stage: %s\n", stage.Name)
+	if stage.Judge != nil {
+		// The judge manages its own agent lifecycle (spawn + wait), so it
+		// contributes no container names to the outer wait barrier.
+		return nil, runJudgeStage(ctx, exec, stage, stageContainers, rootLabel, timestamp)
+	}
 	if stage.Pipeline != "" {
 		return nil, runSubPipelineStage(ctx, exec, stage, parseOpts, dryRun, timestamp, rootLabel, currentPath)
 	}
@@ -947,6 +956,21 @@ func printPipelineTree(name string, stages []fleet.PipelineStage) {
 }
 
 func printStageAgents(stage fleet.PipelineStage, prefix string) {
+	if stage.Judge != nil {
+		criteria := stage.Judge.Criteria
+		if criteria == "" {
+			criteria = "(default quality criteria)"
+		}
+		fmt.Printf("%s└── 🏆 judge — %s\n", prefix, criteria)
+		if stage.Judge.AutoPR {
+			base := stage.Judge.Base
+			if base == "" {
+				base = "main"
+			}
+			fmt.Printf("%s    ↳ auto PR from winner → base %s\n", prefix, base)
+		}
+		return
+	}
 	for j, spec := range stage.Agents {
 		agentLast := j == len(stage.Agents)-1
 		agentBranch := prefix + "├── "

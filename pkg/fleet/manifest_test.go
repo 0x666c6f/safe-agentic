@@ -596,3 +596,345 @@ steps:
 		t.Fatalf("Repo = %q, want manifest repo", got)
 	}
 }
+
+// ─── Judge stages ─────────────────────────────────────────────────────────────
+
+func TestParsePipeline_JudgeFlatStep(t *testing.T) {
+	// Flat-steps form: a single `implement` step fans out across models and the
+	// judge step depends on that parent (rewritten to the expanded candidates).
+	p := writeTemp(t, `
+name: best-of-two
+defaults:
+  repo: https://github.com/org/repo.git
+steps:
+  - name: implement
+    models: [claude, codex]
+    prompt: Implement it with ${model}
+  - name: pick-winner
+    judge:
+      criteria: correctness first, then minimal diff
+      auto_pr: true
+      base: main
+    depends_on: implement
+`)
+	m, err := ParsePipeline(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// implement-claude, implement-codex, pick-winner
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages, got %d", len(m.Stages))
+	}
+	judge := m.Stages[2]
+	if judge.Name != "pick-winner" {
+		t.Fatalf("stage[2].Name = %q, want pick-winner", judge.Name)
+	}
+	if judge.Judge == nil {
+		t.Fatal("stage[2].Judge is nil, want populated JudgeSpec")
+	}
+	if len(judge.Agents) != 0 {
+		t.Fatalf("judge stage must have no agents, got %d", len(judge.Agents))
+	}
+	if !judge.Judge.AutoPR || judge.Judge.Base != "main" {
+		t.Fatalf("judge spec = %#v", judge.Judge)
+	}
+	if judge.Judge.Criteria != "correctness first, then minimal diff" {
+		t.Fatalf("criteria = %q", judge.Judge.Criteria)
+	}
+	deps := map[string]bool{}
+	for _, d := range judge.DependsOn {
+		deps[d] = true
+	}
+	if !deps["implement-claude"] || !deps["implement-codex"] {
+		t.Fatalf("judge deps = %v, want expanded implement-claude/implement-codex", judge.DependsOn)
+	}
+}
+
+func TestParsePipeline_JudgeModelFanoutCandidateCount(t *testing.T) {
+	p := writeTemp(t, `
+name: fanout-judge
+defaults:
+  repo: https://github.com/org/repo.git
+stages:
+  - name: implement
+    models: [claude, codex]
+    agents:
+      - name: impl
+        prompt: Implement with ${model}
+  - name: pick
+    judge:
+      criteria: pick the best
+    depends_on:
+      - implement
+`)
+	m, err := ParsePipeline(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// implement-claude, implement-codex, pick
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages, got %d", len(m.Stages))
+	}
+	judge := m.Stages[2]
+	if judge.Judge == nil {
+		t.Fatal("expected judge stage")
+	}
+	deps := map[string]bool{}
+	for _, d := range judge.DependsOn {
+		deps[d] = true
+	}
+	if !deps["implement-claude"] || !deps["implement-codex"] {
+		t.Fatalf("judge deps not expanded across models: %v", judge.DependsOn)
+	}
+}
+
+func TestParsePipeline_JudgeCriteriaInterpolation(t *testing.T) {
+	p := writeTemp(t, `
+name: interp-judge
+vars:
+  focus: security
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/repo.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/repo.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: prioritize ${focus}
+    depends_on:
+      - implement
+`)
+	m, err := ParsePipeline(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := m.Stages[1].Judge.Criteria; got != "prioritize security" {
+		t.Fatalf("criteria = %q, want interpolated", got)
+	}
+}
+
+func TestParsePipeline_JudgeValidationRejections(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "judge with prompt",
+			yaml: `
+steps:
+  - name: a
+    type: claude
+    repo: https://github.com/org/r.git
+    prompt: A
+  - name: b
+    type: codex
+    repo: https://github.com/org/r.git
+    prompt: B
+  - name: pick
+    prompt: should not be here
+    judge:
+      criteria: x
+    depends_on: a
+`,
+			want: "must not define agent fields",
+		},
+		{
+			name: "judge with only one candidate run",
+			yaml: `
+stages:
+  - name: implement
+    agents:
+      - name: only
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: X
+  - name: pick
+    judge:
+      criteria: x
+    depends_on:
+      - implement
+`,
+			want: "at least 2 candidate runs",
+		},
+		{
+			name: "judge without depends_on",
+			yaml: `
+steps:
+  - name: a
+    type: claude
+    repo: https://github.com/org/r.git
+    prompt: A
+  - name: pick
+    judge:
+      criteria: x
+`,
+			want: "must declare depends_on",
+		},
+		{
+			name: "judge depends on unknown stage",
+			yaml: `
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/r.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: x
+    depends_on:
+      - nonexistent
+`,
+			want: `unknown stage "nonexistent"`,
+		},
+		{
+			name: "judge stage with agents",
+			yaml: `
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/r.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: x
+    depends_on:
+      - implement
+    agents:
+      - name: bogus
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: nope
+`,
+			want: "must not define agents",
+		},
+		{
+			name: "judge with invalid base branch",
+			yaml: `
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/r.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: x
+      base: "bad;branch"
+    depends_on:
+      - implement
+`,
+			want: "invalid base branch",
+		},
+		{
+			name: "judge cannot judge another judge",
+			yaml: `
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/r.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: x
+    depends_on:
+      - implement
+  - name: pick2
+    judge:
+      criteria: y
+    depends_on:
+      - pick
+`,
+			want: "cannot judge another judge stage",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := writeTemp(t, tt.yaml)
+			_, err := ParsePipeline(p)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ParsePipeline() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePipeline_JudgeTwoAgentSingleStageIsValid(t *testing.T) {
+	p := writeTemp(t, `
+name: single-stage-fanout
+stages:
+  - name: implement
+    agents:
+      - name: a
+        type: claude
+        repo: https://github.com/org/r.git
+        prompt: A
+      - name: b
+        type: codex
+        repo: https://github.com/org/r.git
+        prompt: B
+  - name: pick
+    judge:
+      criteria: best
+    depends_on:
+      - implement
+`)
+	if _, err := ParsePipeline(p); err != nil {
+		t.Fatalf("expected valid pipeline, got error: %v", err)
+	}
+}
+
+func TestParsePipeline_JudgeFanoutExample(t *testing.T) {
+	m, err := ParsePipeline(filepath.Join("..", "..", "examples", "pipeline-judge-fanout.yaml"))
+	if err != nil {
+		t.Fatalf("unexpected error parsing shipped example: %v", err)
+	}
+	if m.Name != "judge-fanout" {
+		t.Fatalf("Name = %q, want judge-fanout", m.Name)
+	}
+	// implement-claude, implement-codex, pick-winner
+	if len(m.Stages) != 3 {
+		t.Fatalf("want 3 stages, got %d", len(m.Stages))
+	}
+	judge := m.Stages[2]
+	if judge.Judge == nil || !judge.Judge.AutoPR {
+		t.Fatalf("pick-winner should be an auto_pr judge stage: %#v", judge)
+	}
+	for _, s := range m.Stages[:2] {
+		if len(s.Agents) != 1 {
+			t.Fatalf("candidate stage %q should have exactly 1 agent, got %d", s.Name, len(s.Agents))
+		}
+		if s.Agents[0].Repo == "" {
+			t.Fatalf("candidate stage %q agent has no repo after input default", s.Name)
+		}
+	}
+}

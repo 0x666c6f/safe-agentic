@@ -326,3 +326,108 @@ func TestResolveBuiltinReviewPreset(t *testing.T) {
 		t.Fatalf("preset source = %q", asset.Source)
 	}
 }
+
+// ─── judge stage ───────────────────────────────────────────────────────────────
+
+func TestRunPipeline_DryRunJudgeFanoutExample(t *testing.T) {
+	pipelineDryRun = true
+	defer func() { pipelineDryRun = false }()
+
+	path := filepath.Join("..", "..", "examples", "pipeline-judge-fanout.yaml")
+	output := captureOutput(func() {
+		if err := runPipeline(pipelineCmd, []string{path}); err != nil {
+			t.Fatalf("runPipeline() error = %v", err)
+		}
+	})
+	for _, want := range []string{"judge-fanout", "implement-claude", "implement-codex", "pick-winner", "🏆 judge", "auto PR"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dry-run tree missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunPipelineManifest_JudgeStageEndToEnd(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	// Every spawned candidate + judge container reports a clean exit.
+	fake.SetResponse("docker inspect --format {{.State.Status}}", "exited")
+	fake.SetResponse("docker inspect --format {{.State.ExitCode}}", "0")
+
+	// Stub the judge seams: capture the real candidate names discovered from the
+	// preceding stage, and vote the first one the winner.
+	var capturedNames []string
+	var spawnCount int
+	origSpawn := judgeSpawn
+	origRead := judgeReadOutput
+	origCollect := judgeCollectCandidates
+	defer func() {
+		judgeSpawn = origSpawn
+		judgeReadOutput = origRead
+		judgeCollectCandidates = origCollect
+	}()
+	judgeCollectCandidates = func(_ context.Context, _ vmexec.Executor, names []string, _ string) ([]JudgeCandidate, error) {
+		capturedNames = names
+		cands := make([]JudgeCandidate, len(names))
+		for i, n := range names {
+			cands[i] = JudgeCandidate{Name: n}
+		}
+		return cands, nil
+	}
+	judgeSpawn = func(opts SpawnOpts) error {
+		spawnCount++
+		if opts.AgentType != "claude" || !opts.Background {
+			t.Errorf("unexpected judge spawn opts: %#v", opts)
+		}
+		return nil
+	}
+	judgeReadOutput = func(_ context.Context, _ vmexec.Executor, _ string) string {
+		return `{"winner":"` + capturedNames[0] + `","reason":"r","summary":"s"}`
+	}
+
+	m := &fleet.PipelineManifest{
+		Name: "p",
+		Stages: []fleet.PipelineStage{
+			{
+				Name: "implement",
+				Agents: []fleet.AgentSpec{
+					{Name: "a", Type: "claude", Repo: "https://github.com/org/r.git", Prompt: "A"},
+					{Name: "b", Type: "codex", Repo: "https://github.com/org/r.git", Prompt: "B"},
+				},
+			},
+			{
+				Name:      "pick",
+				DependsOn: []string{"implement"},
+				Judge:     &fleet.JudgeSpec{Criteria: "best"},
+			},
+		},
+	}
+
+	output := captureOutput(func() {
+		if err := runPipelineManifest(context.Background(), fake, m, fleet.ParseOptions{}, false, "20260101-000000", "", nil); err != nil {
+			t.Fatalf("runPipelineManifest() error = %v", err)
+		}
+	})
+
+	if spawnCount != 1 {
+		t.Fatalf("judge spawn count = %d, want 1", spawnCount)
+	}
+	if len(capturedNames) != 2 {
+		t.Fatalf("judge saw %d candidate containers, want 2 (from implement stage): %v", len(capturedNames), capturedNames)
+	}
+	if !strings.Contains(output, "selected winner: "+capturedNames[0]) {
+		t.Fatalf("expected winner announcement, got:\n%s", output)
+	}
+	if !strings.Contains(output, `Pipeline "p" complete.`) {
+		t.Fatalf("pipeline did not complete cleanly:\n%s", output)
+	}
+	// The two candidates spawn real containers; the judge stage does not spawn a
+	// normal agent (it goes through the stubbed judge seam).
+	if got := len(fake.CommandsMatching("docker run")); got != 2 {
+		t.Fatalf("docker run count = %d, want 2 (candidates only)", got)
+	}
+	verdictPath := filepath.Join(os.Getenv("HOME"), ".safe-ag", "state", "judge", "p-pick-20260101-000000.json")
+	if _, err := os.Stat(verdictPath); err != nil {
+		t.Fatalf("verdict not persisted: %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/profiles"
@@ -50,11 +51,13 @@ type AgentSpec struct {
 	OnComplete        string   `yaml:"on_complete"`
 	OnFail            string   `yaml:"on_fail"`
 	// Pipeline-specific fields
-	DependsOn string `yaml:"depends_on"`
-	OnFailure string `yaml:"on_failure"`
-	Retry     int    `yaml:"retry"`
-	When      string `yaml:"when"`
-	Outputs   string `yaml:"outputs"`
+	DependsOn string     `yaml:"depends_on"`
+	Models    []string   `yaml:"models"` // flat-step fan-out across models/engines
+	OnFailure string     `yaml:"on_failure"`
+	Retry     int        `yaml:"retry"`
+	When      string     `yaml:"when"`
+	Outputs   string     `yaml:"outputs"`
+	Judge     *JudgeSpec `yaml:"judge"`
 
 	hasSSH               bool `yaml:"-"`
 	hasReuseAuth         bool `yaml:"-"`
@@ -76,43 +79,66 @@ type InputSpec struct {
 	Infer       string `yaml:"infer"`
 }
 
+// JudgeSpec configures a best-of-N "crown" judge stage. A judge stage does not
+// spawn a normal agent from a repo; instead, after its dependency stages
+// complete, it collects the working-tree diff and final message of each
+// candidate container, runs a one-shot judge agent to select a winner, and
+// records a strict-JSON verdict. It carries no prompt/template/repo of its own.
+type JudgeSpec struct {
+	// Criteria is optional free-text guidance for the judge (e.g.
+	// "correctness first, then minimal diff"). When empty a sensible default
+	// is used at execution time.
+	Criteria string `yaml:"criteria"`
+	// AutoPR, when true, opens a GitHub PR from the winning candidate container
+	// using the judge's summary as the PR body.
+	AutoPR bool `yaml:"auto_pr"`
+	// Base is the PR base branch used when AutoPR is set (defaults to "main").
+	Base string `yaml:"base"`
+	// MaxDiff caps the number of bytes of each candidate diff embedded in the
+	// judge prompt (defaults to a sane value at execution time). Truncation is
+	// noted inline in the prompt.
+	MaxDiff int `yaml:"max_diff"`
+}
+
 type rawAgentSpec struct {
-	Name              string   `yaml:"name"`
-	Profile           string   `yaml:"profile"`
-	Type              string   `yaml:"type"`
-	Repo              string   `yaml:"repo"`
-	Repos             []string `yaml:"repos"`
-	Prompt            string   `yaml:"prompt"`
-	Template          string   `yaml:"template"`
-	TemplateVars      []string `yaml:"template_vars"`
-	Instructions      string   `yaml:"instructions"`
-	InstructionsFile  string   `yaml:"instructions_file"`
-	SSH               *bool    `yaml:"ssh"`
-	ReuseAuth         *bool    `yaml:"reuse_auth"`
-	EphemeralAuth     *bool    `yaml:"ephemeral_auth"`
-	ReuseGHAuth       *bool    `yaml:"reuse_gh_auth"`
-	SeedAuth          *bool    `yaml:"seed_auth"`
-	AutoTrust         *bool    `yaml:"auto_trust"`
-	Background        *bool    `yaml:"background"`
-	Docker            *bool    `yaml:"docker"`
-	DockerSocket      *bool    `yaml:"docker_socket"`
-	AllowSetupScripts *bool    `yaml:"allow_setup_scripts"`
-	Network           string   `yaml:"network"`
-	Memory            string   `yaml:"memory"`
-	CPUs              string   `yaml:"cpus"`
-	PIDsLimit         int      `yaml:"pids_limit"`
-	Identity          string   `yaml:"identity"`
-	AWS               string   `yaml:"aws"`
-	MaxCost           string   `yaml:"max_cost"`
-	Notify            string   `yaml:"notify"`
-	OnExit            string   `yaml:"on_exit"`
-	OnComplete        string   `yaml:"on_complete"`
-	OnFail            string   `yaml:"on_fail"`
-	DependsOn         string   `yaml:"depends_on"`
-	OnFailure         string   `yaml:"on_failure"`
-	Retry             int      `yaml:"retry"`
-	When              string   `yaml:"when"`
-	Outputs           string   `yaml:"outputs"`
+	Name              string     `yaml:"name"`
+	Profile           string     `yaml:"profile"`
+	Type              string     `yaml:"type"`
+	Repo              string     `yaml:"repo"`
+	Repos             []string   `yaml:"repos"`
+	Prompt            string     `yaml:"prompt"`
+	Template          string     `yaml:"template"`
+	TemplateVars      []string   `yaml:"template_vars"`
+	Instructions      string     `yaml:"instructions"`
+	InstructionsFile  string     `yaml:"instructions_file"`
+	SSH               *bool      `yaml:"ssh"`
+	ReuseAuth         *bool      `yaml:"reuse_auth"`
+	EphemeralAuth     *bool      `yaml:"ephemeral_auth"`
+	ReuseGHAuth       *bool      `yaml:"reuse_gh_auth"`
+	SeedAuth          *bool      `yaml:"seed_auth"`
+	AutoTrust         *bool      `yaml:"auto_trust"`
+	Background        *bool      `yaml:"background"`
+	Docker            *bool      `yaml:"docker"`
+	DockerSocket      *bool      `yaml:"docker_socket"`
+	AllowSetupScripts *bool      `yaml:"allow_setup_scripts"`
+	Network           string     `yaml:"network"`
+	Memory            string     `yaml:"memory"`
+	CPUs              string     `yaml:"cpus"`
+	PIDsLimit         int        `yaml:"pids_limit"`
+	Identity          string     `yaml:"identity"`
+	AWS               string     `yaml:"aws"`
+	MaxCost           string     `yaml:"max_cost"`
+	Notify            string     `yaml:"notify"`
+	OnExit            string     `yaml:"on_exit"`
+	OnComplete        string     `yaml:"on_complete"`
+	OnFail            string     `yaml:"on_fail"`
+	DependsOn         string     `yaml:"depends_on"`
+	Models            []string   `yaml:"models"`
+	OnFailure         string     `yaml:"on_failure"`
+	Retry             int        `yaml:"retry"`
+	When              string     `yaml:"when"`
+	Outputs           string     `yaml:"outputs"`
+	Judge             *JudgeSpec `yaml:"judge"`
 }
 
 func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
@@ -144,10 +170,12 @@ func (a *AgentSpec) UnmarshalYAML(value *yaml.Node) error {
 		OnComplete:       raw.OnComplete,
 		OnFail:           raw.OnFail,
 		DependsOn:        raw.DependsOn,
+		Models:           raw.Models,
 		OnFailure:        raw.OnFailure,
 		Retry:            raw.Retry,
 		When:             raw.When,
 		Outputs:          raw.Outputs,
+		Judge:            raw.Judge,
 	}
 	if raw.SSH != nil {
 		a.SSH = *raw.SSH
@@ -216,6 +244,7 @@ type PipelineStage struct {
 	Agents    []AgentSpec `yaml:"agents"`
 	Models    []string    `yaml:"models"`   // expand agents across multiple models
 	Pipeline  string      `yaml:"pipeline"` // path to sub-pipeline YAML (mutually exclusive with agents)
+	Judge     *JudgeSpec  `yaml:"judge"`    // best-of-N judge stage (mutually exclusive with agents/pipeline)
 	Parent    string      `yaml:"-"`        // set during model expansion (original stage name)
 }
 
@@ -309,6 +338,9 @@ func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse pipeline manifest %q: %w", path, err)
 	}
+	if err := validateJudgeSteps(m.Steps); err != nil {
+		return nil, err
+	}
 	normalizePipelineSteps(&m)
 	m.Stages = expandPipelineModels(m.Stages)
 	rewriteStageDependencies(m.Stages)
@@ -333,6 +365,9 @@ func ParsePipelineWithOptions(path string, opts ParseOptions) (*PipelineManifest
 	applyPipelineDefaults(&m)
 	interpolatePipelineFields(&m, vars, filepath.Dir(path))
 	applyPipelineDefaultRepos(&m, opts.DefaultRepos)
+	if err := validateJudgeStages(m.Stages); err != nil {
+		return nil, err
+	}
 	if err := ensurePipelineResolved(&m); err != nil {
 		return nil, err
 	}
@@ -395,13 +430,19 @@ func normalizePipelineSteps(m *PipelineManifest) {
 }
 
 func stageFromStep(step AgentSpec) PipelineStage {
-	stage := PipelineStage{
-		Name:   step.Name,
-		Agents: []AgentSpec{step},
-	}
+	stage := PipelineStage{Name: step.Name}
 	if step.DependsOn != "" {
 		stage.DependsOn = []string{step.DependsOn}
 	}
+	// A judge step carries no spawnable agent; the judge stage synthesizes and
+	// runs its own one-shot agent at execution time.
+	if step.Judge != nil {
+		stage.Judge = step.Judge
+		return stage
+	}
+	// A flat step may fan out across models/engines just like a stage.
+	stage.Models = step.Models
+	stage.Agents = []AgentSpec{step}
 	return stage
 }
 
@@ -414,7 +455,9 @@ func expandPipelineModels(stages []PipelineStage) []PipelineStage {
 }
 
 func expandStageModels(stage PipelineStage) []PipelineStage {
-	if len(stage.Models) == 0 {
+	// Judge stages are never model-expanded; leaving them intact preserves the
+	// Judge spec (and any misconfigured Models) so validation can report it.
+	if len(stage.Models) == 0 || stage.Judge != nil {
 		return []PipelineStage{stage}
 	}
 	var expanded []PipelineStage
@@ -513,6 +556,10 @@ func interpolatePipelineFields(m *PipelineManifest, vars map[string]string, base
 				stage.Pipeline = filepath.Join(baseDir, stage.Pipeline)
 			}
 			m.Stages[i].Pipeline = stage.Pipeline
+		}
+		if stage.Judge != nil {
+			m.Stages[i].Judge.Criteria = interpolateVars(stage.Judge.Criteria, vars)
+			m.Stages[i].Judge.Base = interpolateVars(stage.Judge.Base, vars)
 		}
 		for j := range stage.Agents {
 			m.Stages[i].Agents[j] = interpolateAgentSpec(m.Stages[i].Agents[j], vars)
@@ -715,6 +762,93 @@ func applyPipelineDefaultRepos(m *PipelineManifest, defaultRepos []string) {
 			m.Stages[i].Agents[j] = applyDefaultRepos(m.Stages[i].Agents[j], defaultRepos)
 		}
 	}
+}
+
+var judgeBaseBranch = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+
+// validateJudgeSteps rejects flat-form steps that pair a judge block with
+// agent-producing fields. A judge step must not carry prompt/template/repo/type.
+func validateJudgeSteps(steps []AgentSpec) error {
+	for _, step := range steps {
+		if step.Judge == nil {
+			continue
+		}
+		label := "judge step"
+		if step.Name != "" {
+			label = fmt.Sprintf("judge step %q", step.Name)
+		}
+		if step.Prompt != "" || step.Template != "" || step.Repo != "" || len(step.Repos) > 0 ||
+			step.Type != "" || step.Instructions != "" || step.InstructionsFile != "" || step.Profile != "" || len(step.Models) > 0 {
+			return fmt.Errorf("%s must not define agent fields (prompt/template/repo/type/instructions/profile/models)", label)
+		}
+		if err := validateJudgeSpec(label, step.Judge); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateJudgeStages verifies structural and dependency constraints on judge
+// stages after model expansion and dependency rewriting: a judge stage must not
+// spawn agents/sub-pipelines/models of its own, must declare depends_on, and its
+// dependencies must collectively produce at least two candidate runs.
+func validateJudgeStages(stages []PipelineStage) error {
+	index := make(map[string]PipelineStage, len(stages))
+	for _, s := range stages {
+		index[s.Name] = s
+	}
+	for _, stage := range stages {
+		if stage.Judge == nil {
+			continue
+		}
+		label := fmt.Sprintf("judge stage %q", stage.Name)
+		if len(stage.Agents) > 0 {
+			return fmt.Errorf("%s must not define agents", label)
+		}
+		if stage.Pipeline != "" {
+			return fmt.Errorf("%s must not reference a sub-pipeline", label)
+		}
+		if len(stage.Models) > 0 {
+			return fmt.Errorf("%s must not use models fan-out", label)
+		}
+		if len(stage.DependsOn) == 0 {
+			return fmt.Errorf("%s must declare depends_on with candidate stages", label)
+		}
+		if err := validateJudgeSpec(label, stage.Judge); err != nil {
+			return err
+		}
+		if err := ensureResolvedField(label+" criteria", stage.Judge.Criteria); err != nil {
+			return err
+		}
+		candidates := 0
+		for _, dep := range stage.DependsOn {
+			d, ok := index[dep]
+			if !ok {
+				return fmt.Errorf("%s depends on unknown stage %q", label, dep)
+			}
+			if d.Judge != nil {
+				return fmt.Errorf("%s cannot judge another judge stage %q", label, dep)
+			}
+			if d.Pipeline != "" {
+				return fmt.Errorf("%s cannot judge sub-pipeline stage %q; depend on concrete agent stages instead", label, dep)
+			}
+			candidates += len(d.Agents)
+		}
+		if candidates < 2 {
+			return fmt.Errorf("%s must depend on stages producing at least 2 candidate runs (found %d)", label, candidates)
+		}
+	}
+	return nil
+}
+
+func validateJudgeSpec(label string, spec *JudgeSpec) error {
+	if spec.MaxDiff < 0 {
+		return fmt.Errorf("%s max_diff must not be negative", label)
+	}
+	if spec.Base != "" && !judgeBaseBranch.MatchString(spec.Base) {
+		return fmt.Errorf("%s has invalid base branch %q", label, spec.Base)
+	}
+	return nil
 }
 
 func ensurePipelineResolved(m *PipelineManifest) error {
