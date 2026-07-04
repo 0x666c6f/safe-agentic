@@ -66,13 +66,15 @@ func (s *AgentService) Output(name string) (cli.OutputInfo, error) {
 
 func (s *AgentService) Diff(name string) (string, error) { return s.run("diff", name) }
 
+// Stage/Revert operate on the whole workspace: the CLI requires explicit
+// paths ("." = everything).
 func (s *AgentService) WorkspaceStage(name string) error {
-	_, err := s.run("workspace", "stage", name, "--yes")
+	_, err := s.run("workspace", "stage", name, ".")
 	return err
 }
 
 func (s *AgentService) WorkspaceRevert(name string) error {
-	_, err := s.run("workspace", "revert", name, "--yes")
+	_, err := s.run("workspace", "revert", name, ".", "--yes")
 	return err
 }
 
@@ -108,12 +110,15 @@ func (s *AgentService) PipelineRun(file string) (string, error) {
 }
 
 type SpawnRequest struct {
-	Agent, Repo, Prompt, Template, Network, Memory, CPUs string
-	SSH, ReuseAuth, Worktree, DryRun                     bool
+	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
+	SSH, ReuseAuth, Worktree, DryRun                           bool
 }
 
 func spawnArgs(req SpawnRequest) []string {
 	args := []string{"spawn", req.Agent}
+	if req.Name != "" {
+		args = append(args, "--name", req.Name)
+	}
 	if req.Repo != "" {
 		args = append(args, "--repo", req.Repo)
 	}

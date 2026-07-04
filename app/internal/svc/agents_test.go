@@ -50,6 +50,14 @@ func TestSpawnArgsNoRepo(t *testing.T) {
 	}
 }
 
+func TestSpawnArgsWithName(t *testing.T) {
+	req := SpawnRequest{Agent: "shell", Name: "my-task"}
+	got := strings.Join(spawnArgs(req), " ")
+	if got != "spawn shell --name my-task --background" {
+		t.Fatalf("argv: %q", got)
+	}
+}
+
 func TestSpawnArgs(t *testing.T) {
 	req := SpawnRequest{Agent: "claude", Repo: "git@github.com:o/r.git",
 		Prompt: "do it", SSH: true, ReuseAuth: true, Worktree: false,

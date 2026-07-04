@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { useStore } from "../store";
 import { errText } from "../types";
+import { recordRepoUse, topRepos, forgetRepo } from "../repoHistory";
 
 export function SpawnForm() {
   const { toast, setView } = useStore();
   const [req, setReq] = useState({
-    Agent: "claude", Repo: "", Prompt: "", Template: "", Network: "",
+    Agent: "claude", Name: "", Repo: "", Prompt: "", Template: "", Network: "",
     Memory: "", CPUs: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
   });
   const [templates, setTemplates] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
+  const [savedRepos, setSavedRepos] = useState<string[]>(() => topRepos(6));
 
   useEffect(() => {
     AgentService.TemplateList()
@@ -26,7 +28,11 @@ export function SpawnForm() {
     try {
       const out = await AgentService.Spawn({ ...req, DryRun: dryRun } as any);
       if (dryRun) setPreview(out);
-      else { toast(`spawned:\n${out.trim().split("\n").slice(-3).join("\n")}`); setView("agents"); }
+      else {
+        if (req.Repo) { recordRepoUse(req.Repo); setSavedRepos(topRepos(6)); }
+        toast(`spawned:\n${out.trim().split("\n").slice(-3).join("\n")}`);
+        setView("agents");
+      }
     } catch (e) { toast(errText(dryRun ? "dry-run" : "spawn", e)); }
   };
 
@@ -47,8 +53,24 @@ export function SpawnForm() {
               : "btn"}>{t}</button>
         ))}
       </div>
+      <input className="input" placeholder="name (optional — auto-generated if empty)" value={req.Name}
+        onChange={(e) => set("Name", e.target.value)} />
       <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
         onChange={(e) => set("Repo", e.target.value)} />
+      {savedRepos.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {savedRepos.map((r) => (
+            <span key={r} className="flex items-center gap-1 rounded bg-neutral-800 px-2 py-0.5 text-xs">
+              <button className={req.Repo === r ? "text-blue-300" : "hover:text-blue-300"}
+                title={r} onClick={() => set("Repo", r)}>
+                {r.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "")}
+              </button>
+              <button className="text-neutral-500 hover:text-red-400" title="forget"
+                onClick={() => { forgetRepo(r); setSavedRepos(topRepos(6)); }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
       <textarea className="input min-h-24" placeholder="prompt (optional)" value={req.Prompt}
         onChange={(e) => set("Prompt", e.target.value)} />
       <select className="input" value={req.Template} onChange={(e) => set("Template", e.target.value)}>
