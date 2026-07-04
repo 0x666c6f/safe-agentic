@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -61,6 +62,16 @@ func runInbox(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Fold in live agent states: an agent blocked on a prompt right now is a
+	// needs-attention item even if no event was ever emitted for it.
+	if blocked := liveBlockedEntries(context.Background(), newExecutor()); len(blocked) > 0 {
+		entries = append(entries, blocked...)
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].Timestamp < entries[j].Timestamp
+		})
+	}
+
 	var items []timelineEntry
 	for _, entry := range entries {
 		if inboxAll || needsAttention(entry) {

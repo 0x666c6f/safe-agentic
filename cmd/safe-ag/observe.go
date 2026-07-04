@@ -815,9 +815,12 @@ func runSummary(cmd *cobra.Command, args []string) error {
 	resources, _ := docker.InspectLabel(ctx, exec, name, labels.Resources)
 	terminal, _ := docker.InspectLabel(ctx, exec, name, labels.Terminal)
 
+	state := resolveState(ctx, exec, name, agentType, terminal, stateStatus == "running")
+
 	fmt.Printf("Container:  %s\n", name)
 	fmt.Println("─────────────────────────────────────────")
 	fmt.Printf("Status:     %s\n", stateStatus)
+	fmt.Printf("State:      %s\n", formatStateReason(state))
 	fmt.Printf("Started:    %s\n", startedAt)
 	if stateStatus != "running" {
 		fmt.Printf("Finished:   %s\n", finishedAt)

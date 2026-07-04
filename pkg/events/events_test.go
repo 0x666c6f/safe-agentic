@@ -193,6 +193,24 @@ func TestClassifyFields(t *testing.T) {
 			want:      StatusFailedTests,
 		},
 		{
+			name:      "blocked-explicit",
+			eventType: "agent.state",
+			payload:   map[string]string{"status": StatusBlocked},
+			want:      StatusBlocked,
+		},
+		{
+			name:      "blocked-heuristic",
+			eventType: "agent.state",
+			payload:   map[string]string{"reason": "permission prompt", "detail": "waiting for input"},
+			want:      StatusBlocked,
+		},
+		{
+			name:      "auth-still-wins-over-blocked",
+			eventType: "agent.failed",
+			payload:   map[string]string{"error": "permission denied (publickey)"},
+			want:      StatusNeedsAuth,
+		},
+		{
 			name:      "stuck",
 			eventType: "pipeline.failed",
 			payload:   map[string]string{"error": "unmet dependencies"},

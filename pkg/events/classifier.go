@@ -10,6 +10,7 @@ const (
 	StatusFailed         = "failed"
 	StatusFailedTests    = "failed-tests"
 	StatusNeedsAuth      = "needs-auth"
+	StatusBlocked        = "blocked"
 	StatusStuck          = "stuck"
 	StatusReadyForReview = "ready-for-review"
 	StatusReadyForPR     = "ready-for-pr"
@@ -20,6 +21,7 @@ var knownStatuses = map[string]bool{
 	StatusFailed:         true,
 	StatusFailedTests:    true,
 	StatusNeedsAuth:      true,
+	StatusBlocked:        true,
 	StatusStuck:          true,
 	StatusReadyForReview: true,
 	StatusReadyForPR:     true,
@@ -46,6 +48,10 @@ func ClassifyFields(eventType string, payload map[string]string) string {
 		return StatusReadyForPR
 	case containsAny(text, "ready-for-review", "review ready", "needs review"):
 		return StatusReadyForReview
+	case containsAny(text, "blocked", "waiting for input", "waiting for approval",
+		"awaiting approval", "approval required", "needs approval", "permission prompt",
+		"trust prompt", "waiting for login", "waiting for user"):
+		return StatusBlocked
 	case containsAny(text, "stuck", "timeout", "timed out", "deadlock", "unmet dependencies"):
 		return StatusStuck
 	case containsAny(text, "failed", "fail", "error", "exit 1", "non-zero"):
