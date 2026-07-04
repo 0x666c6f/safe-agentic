@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { TerminalPane } from "./TerminalPane";
+import { OutputTab } from "./OutputTab";
+import { InfoTab } from "./InfoTab";
+import { DiffTab } from "./DiffTab";
 
 type Tab = "terminal" | "diff" | "output" | "info";
 const TABS: Tab[] = ["terminal", "diff", "output", "info"];
@@ -31,7 +34,9 @@ export function Workspace({ name }: { name: string }) {
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           {tab === "terminal" && <TerminalPane container={name} />}
-          {tab !== "terminal" && <div className="p-4 text-neutral-500">not implemented yet</div>}
+          {tab === "output" && <OutputTab name={name} />}
+          {tab === "info" && <InfoTab name={name} />}
+          {tab === "diff" && <DiffTab name={name} />}
         </div>
         {split && (
           <div className="min-w-0 flex-1 border-l border-neutral-800">
