@@ -18,6 +18,12 @@ import (
 
 // ShowOverlay displays text in a scrollable overlay pane.
 func ShowOverlay(app *App, name string, title string, content string) {
+	ShowOverlayCapture(app, name, title, content)
+}
+
+// ShowOverlayCapture is like ShowOverlay but returns the TextView so the caller
+// can attach extra key handlers (e.g. the diff overlay's side-by-side toggle).
+func ShowOverlayCapture(app *App, name string, title string, content string) *tview.TextView {
 	tv := tview.NewTextView().
 		SetText(content).
 		SetScrollable(true).
@@ -30,6 +36,7 @@ func ShowOverlay(app *App, name string, title string, content string) {
 
 	app.pages.AddAndSwitchToPage(name, tv, true)
 	app.tapp.SetFocus(tv)
+	return tv
 }
 
 // ShowOverlayLive is like ShowOverlay but returns the TextView for live updates.

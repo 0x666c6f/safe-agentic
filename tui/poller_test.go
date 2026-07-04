@@ -37,8 +37,8 @@ done
 case "$cmd" in
   *"docker ps -a"*)
     cat <<'EOF'
-agent-beta	codex	org/private-api	yes	session	app	sandbox	bridge			Up 2 minutes
-agent-alpha	claude	org/docs	no							Exited (0) 1 minute ago
+agent-beta	codex	org/private-api	yes	session	app	sandbox	bridge			tmux	Up 2 minutes
+agent-alpha	claude	org/docs	no								Exited (0) 1 minute ago
 EOF
     ;;
   *"docker stats --no-stream"*)
@@ -75,8 +75,8 @@ esac
 }
 
 func TestParsePSOutputAndHelpers(t *testing.T) {
-	psData := []byte("agent-beta\tcodex\torg/private-api\tyes\tsession\tapp\tsandbox\tbridge\t\t\tUp 1 second\n" +
-		"agent-alpha\tclaude\torg/docs\tno\t\t\t\t\t\t\tExited (0) 1 second ago\n" +
+	psData := []byte("agent-beta\tcodex\torg/private-api\tyes\tsession\tapp\tsandbox\tbridge\t\t\ttmux\tUp 1 second\n" +
+		"agent-alpha\tclaude\torg/docs\tno\t\t\t\t\t\t\t\tExited (0) 1 second ago\n" +
 		"short\trow\n")
 	agents := parsePSOutput(psData)
 	if len(agents) != 2 {
@@ -93,6 +93,9 @@ func TestParsePSOutputAndHelpers(t *testing.T) {
 	}
 	if agents[0].Repo != "org/private-api" || agents[0].NetworkMode != "bridge" {
 		t.Fatalf("parsed agent = %#v", agents[0])
+	}
+	if agents[0].Terminal != "tmux" {
+		t.Fatalf("parsed terminal = %q, want tmux", agents[0].Terminal)
 	}
 
 	labels := parseLabels("a=1, b = 2, malformed")
@@ -132,6 +135,14 @@ func TestFetchAgentsProbeActivitiesAndContainerTmux(t *testing.T) {
 	if agents[1].Activity != "Stopped" {
 		t.Fatalf("stopped activity = %q, want Stopped", agents[1].Activity)
 	}
+	// State: the running agent's pane has no markers → unknown; the stopped
+	// agent exited cleanly (code 0) → done.
+	if agents[0].State != "unknown" {
+		t.Fatalf("running state = %q, want unknown", agents[0].State)
+	}
+	if agents[1].State != "done" {
+		t.Fatalf("stopped state = %q, want done", agents[1].State)
+	}
 	if got := probeProcessActivity("agent-beta", "codex"); got != "Working" {
 		t.Fatalf("probeProcessActivity(codex) = %q", got)
 	}
@@ -140,6 +151,41 @@ func TestFetchAgentsProbeActivitiesAndContainerTmux(t *testing.T) {
 	}
 	if !containerUsesTmux("agent-beta") {
 		t.Fatal("containerUsesTmux() = false, want true")
+	}
+}
+
+// A running container whose tmux pane can't be captured (headless/background
+// mode, a bash-direct shell, or a session still starting) must probe as
+// working, not unknown.
+func TestProbeAgentStateNoPaneIsWorking(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "container")
+	script := `#!/bin/sh
+cmd=""
+decode=0
+for arg in "$@"; do
+  if [ "$decode" = "1" ]; then cmd="$arg"; decode=2; continue; fi
+  if [ "$decode" = "2" ]; then decoded=$(printf '%s' "$arg" | base64 -d); cmd="$cmd $decoded"; continue; fi
+  if [ "$arg" = "/usr/local/bin/safe-ag-exec" ]; then decode=1; fi
+done
+[ -n "$cmd" ] || cmd="$*"
+case "$cmd" in
+  *"tmux capture-pane"*) exit 1 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake container: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	a := &Agent{Name: "agent-x", Type: "claude", Running: true, Terminal: "tmux"}
+	probeAgentState(a)
+	if a.State != "working" {
+		t.Fatalf("state = %q, want working", a.State)
+	}
+	if !strings.Contains(a.StateReason, "no tmux pane") {
+		t.Fatalf("reason = %q, want 'no tmux pane'", a.StateReason)
 	}
 }
 
@@ -217,6 +263,23 @@ func TestPollerForceRefresh(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ForceRefresh callback timed out")
+	}
+}
+
+func TestSetStoppedState(t *testing.T) {
+	done := &Agent{Finished: true, Status: "Finished"}
+	setStoppedState(done)
+	if done.State != "done" {
+		t.Fatalf("clean-exit state = %q, want done", done.State)
+	}
+
+	crashed := &Agent{Finished: false, Status: "Exited (137) 3s ago"}
+	setStoppedState(crashed)
+	if crashed.State != "exited" {
+		t.Fatalf("non-zero-exit state = %q, want exited", crashed.State)
+	}
+	if crashed.StateReason != "Exited (137) 3s ago" {
+		t.Fatalf("exited reason = %q", crashed.StateReason)
 	}
 }
 

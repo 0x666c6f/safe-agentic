@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -48,8 +49,10 @@ func NewAgentTable() *AgentTable {
 		Background(colorSelected))
 
 	return &AgentTable{
-		table:    t,
-		sortCol:  0,
+		table: t,
+		// Default to the priority ("which agent needs me") sort: STATE ranked
+		// most-urgent-first. Pressing a number key switches to a column sort.
+		sortCol:  stateColumnIndex,
 		sortAsc:  true,
 		deleting: make(map[string]Agent),
 	}
@@ -105,6 +108,7 @@ func (at *AgentTable) MarkDeleting(agent Agent) {
 	agent.Deleting = true
 	agent.Running = false
 	agent.Status = "Deleting"
+	agent.State = "-"
 	agent.Activity = "Deleting"
 	agent.Progress = spinnerFrames[0]
 	agent.CPU = "-"
@@ -432,10 +436,31 @@ func colorAgentCell(cell *tview.TableCell, agent Agent, colIdx int) {
 	switch colIdx {
 	case 1:
 		colorTypeCell(cell, agent.Type)
-	case 8:
+	case stateColumnIndex: // STATE
+		colorStateCell(cell, agent.State)
+	case 9: // STATUS
 		cell.SetTextColor(statusColor(agent))
-	case 9:
+	case 10: // ACTIVITY
 		cell.SetTextColor(activityColor(agent))
+	}
+}
+
+// colorStateCell paints the STATE column: blocked stands out (bold red) because
+// it needs a human; the rest are informational.
+func colorStateCell(cell *tview.TableCell, state string) {
+	switch state {
+	case string(agentstate.StateBlocked):
+		cell.SetTextColor(colorStateBlocked).SetAttributes(tcell.AttrBold)
+	case string(agentstate.StateWorking):
+		cell.SetTextColor(colorStateWorking)
+	case string(agentstate.StateDone):
+		cell.SetTextColor(colorStateDone)
+	case string(agentstate.StateIdle):
+		cell.SetTextColor(colorStateIdle)
+	case string(agentstate.StateExited):
+		cell.SetTextColor(colorStateExited)
+	default:
+		cell.SetTextColor(tcell.ColorDefault)
 	}
 }
 

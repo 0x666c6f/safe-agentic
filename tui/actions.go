@@ -767,9 +767,53 @@ func (ac *Actions) Diff() {
 				ac.app.footer.ShowStatus("No changes", false)
 				return
 			}
-			ShowOverlay(ac.app, "diff", fmt.Sprintf("Diff: %s", name), content)
+			// tview overlays render plain text only: delta's truecolor
+			// side-by-side output does not display cleanly in a bordered pane,
+			// so the inline overlay stays plain diff and 's' opens the delta
+			// side-by-side view in a real terminal where its ANSI renders.
+			tv := ShowOverlayCapture(ac.app, "diff", fmt.Sprintf("Diff: %s  (s: side-by-side)", name), content)
+			tv.ScrollToBeginning()
+			diffName := name
+			tv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+				if event.Key() == tcell.KeyRune && event.Rune() == 's' {
+					ac.showSideBySideDiff(diffName)
+					return nil
+				}
+				return event
+			})
 		})
 	}()
+}
+
+// showSideBySideDiff suspends the TUI and renders `safe-ag diff --side-by-side`
+// (delta, run inside the container) in the restored terminal, piped through a
+// pager so its ANSI colours display correctly — something the tview overlay
+// cannot do.
+func (ac *Actions) showSideBySideDiff(name string) {
+	ac.app.SuspendAndRun(func() {
+		out, err := newCLICmd("diff", "--side-by-side", name).CombinedOutput()
+		if len(out) == 0 && err != nil {
+			out = []byte(fmt.Sprintf("side-by-side diff failed: %v\n", err))
+		}
+		renderPagedDiff(out)
+	})
+}
+
+// renderPagedDiff shows ANSI diff output through `less -R` when available, else
+// prints it and waits for Enter so the user can read it before the TUI resumes.
+func renderPagedDiff(out []byte) {
+	if pager, err := exec.LookPath("less"); err == nil {
+		cmd := exec.Command(pager, "-R")
+		cmd.Stdin = bytes.NewReader(out)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if runErr := cmd.Run(); runErr == nil {
+			return
+		}
+	}
+	_, _ = os.Stdout.Write(out)
+	fmt.Print("\nPress Enter to return to the TUI...")
+	_, _ = fmt.Scanln()
 }
 
 // Todo shows the todo list for the selected agent in an overlay.

@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
 )
+
+// statePaneLines is how much of the live tmux pane the poller inspects to infer
+// agent state (mirrors cmd/safe-ag/status.go).
+const statePaneLines = 40
 
 // dockerPSEntry maps the JSON output of `docker ps --format '{{json .}}'`.
 type dockerPSEntry struct {
@@ -139,7 +146,8 @@ func (p *Poller) poll() {
 	}
 }
 
-// probeActivities checks each running container's agent process CPU usage in parallel.
+// probeActivities checks each running container's agent process CPU usage in parallel
+// and infers its semantic state (blocked/working/done/idle) from the tmux pane.
 // Reads /proc/<pid>/stat twice with a short gap to detect CPU tick delta.
 // This is per-container and works even when containers share auth volumes.
 func probeActivities(agents []Agent) {
@@ -147,15 +155,55 @@ func probeActivities(agents []Agent) {
 	for i := range agents {
 		if !agents[i].Running {
 			agents[i].Activity = "Stopped"
+			setStoppedState(&agents[i])
 			continue
 		}
 		wg.Add(1)
 		go func(a *Agent) {
 			defer wg.Done()
 			a.Activity = probeProcessActivity(a.Name, a.Type)
+			probeAgentState(a)
 		}(&agents[i])
 	}
 	wg.Wait()
+}
+
+// setStoppedState classifies a stopped container: a clean "Exited (0)" is done,
+// anything else is a non-zero exit. Mirrors status.go's terminalState without an
+// extra inspect (the exit status is already in the poller's ps output).
+func setStoppedState(a *Agent) {
+	if a.Finished { // parsed from "Exited (0)"
+		a.State = string(agentstate.StateDone)
+		a.StateReason = "exited cleanly"
+		return
+	}
+	a.State = string(agentstate.StateExited)
+	a.StateReason = a.Status
+}
+
+// probeAgentState captures the running container's tmux pane and classifies it.
+// Non-tmux terminal modes have no pane to read, so they are reported as working
+// (mirrors status.go's resolveState).
+func probeAgentState(a *Agent) {
+	if a.Terminal != "" && a.Terminal != "tmux" {
+		a.State = string(agentstate.StateWorking)
+		a.StateReason = "running (" + a.Terminal + " mode, no tmux pane)"
+		return
+	}
+	out, err := execVM("docker", "exec", a.Name, "tmux", "capture-pane",
+		"-t", tmuxSessionName, "-p", "-S", fmt.Sprintf("-%d", statePaneLines))
+	if err != nil {
+		// No readable pane on a running container — headless/background mode, a
+		// shell running bash directly, or a session still starting. It is up,
+		// so report working rather than unknown. (The Terminal label is
+		// unreliable: spawn stamps every container "tmux".)
+		a.State = string(agentstate.StateWorking)
+		a.StateReason = "running (no tmux pane)"
+		return
+	}
+	res := agentstate.Detect(a.Type, strings.Split(string(out), "\n"))
+	a.State = res.State.String()
+	a.StateReason = res.Reason
 }
 
 // probeProcessActivity checks if the agent process (codex or claude) consumed
@@ -219,6 +267,7 @@ func fetchAgents() ([]Agent, error) {
 		`{{.Label "safe-agentic.network-mode"}}`,
 		`{{.Label "safe-agentic.fleet"}}`,
 		`{{.Label "safe-agentic.hierarchy"}}`,
+		`{{.Label "safe-agentic.terminal"}}`,
 		"{{.Status}}",
 	}, "\t")
 	psData, psErr := execVM("docker", "ps", "-a",
@@ -253,10 +302,10 @@ func parsePSOutput(data []byte) []Agent {
 			continue
 		}
 		parts := strings.Split(string(line), "\t")
-		if len(parts) < 11 {
+		if len(parts) < 12 {
 			continue
 		}
-		status, running, finished := normalizeContainerStatus(parts[10])
+		status, running, finished := normalizeContainerStatus(parts[11])
 		agents = append(agents, Agent{
 			Name:        parts[0],
 			Type:        parts[1],
@@ -268,6 +317,7 @@ func parsePSOutput(data []byte) []Agent {
 			NetworkMode: parts[7],
 			Fleet:       parts[8],
 			Hierarchy:   parts[9],
+			Terminal:    parts[10],
 			Status:      status,
 			Running:     running,
 			Finished:    finished,

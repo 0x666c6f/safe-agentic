@@ -18,6 +18,7 @@ func testAgents() []Agent {
 			NetworkMode: "private",
 			Status:      "running",
 			Running:     true,
+			State:       "blocked",
 			Activity:    "Working",
 			CPU:         "20%",
 			Memory:      "512MiB",
@@ -35,6 +36,7 @@ func testAgents() []Agent {
 			NetworkMode: "bridge",
 			Status:      "stopped",
 			Running:     false,
+			State:       "done",
 			Activity:    "Stopped",
 			CPU:         "0%",
 			Memory:      "0MiB",
@@ -52,6 +54,7 @@ func testAgents() []Agent {
 			NetworkMode: "bridge",
 			Status:      "running",
 			Running:     true,
+			State:       "working",
 			Activity:    "Idle",
 			CPU:         "5%",
 			Memory:      "256MiB",
@@ -69,13 +72,35 @@ func TestSortAgentsByColumn(t *testing.T) {
 		t.Fatalf("ascending sort = %#v", got)
 	}
 
-	SortAgents(agents, 9, false)
+	// ACTIVITY is column 10 (STATE was inserted at 8, shifting STATUS→9,
+	// ACTIVITY→10). Descending puts Working before Idle before Stopped.
+	SortAgents(agents, 10, false)
 	if got := []string{agents[0].Activity, agents[1].Activity, agents[2].Activity}; !reflect.DeepEqual(got, []string{"Working", "Stopped", "Idle"}) {
 		t.Fatalf("descending activity sort = %#v", got)
 	}
 
+	// STATE (column 8) sorts by urgency rank, not alphabetically:
+	// blocked (beta) > done (alpha) > working (gamma).
+	SortAgents(agents, stateColumnIndex, true)
+	if got := []string{agents[0].Name, agents[1].Name, agents[2].Name}; !reflect.DeepEqual(got, []string{"agent-beta", "agent-alpha", "agent-gamma"}) {
+		t.Fatalf("state-rank sort = %#v", got)
+	}
+
 	if got := fieldByColumn(agents[0], 99); got != "" {
 		t.Fatalf("fieldByColumn invalid col = %q, want empty", got)
+	}
+}
+
+func TestStateRankOrder(t *testing.T) {
+	order := []string{"blocked", "done", "exited", "working", "idle", "unknown"}
+	for i := 0; i < len(order)-1; i++ {
+		if stateRank(order[i]) <= stateRank(order[i+1]) {
+			t.Fatalf("stateRank(%q)=%d should outrank stateRank(%q)=%d",
+				order[i], stateRank(order[i]), order[i+1], stateRank(order[i+1]))
+		}
+	}
+	if stateRank("") != 0 || stateRank("bogus") != 0 {
+		t.Fatalf("unknown states should rank 0")
 	}
 }
 
@@ -94,8 +119,9 @@ func TestFilterAgentsCaseInsensitiveAcrossFields(t *testing.T) {
 }
 
 func TestVisibleColumnsAndTotalUsed(t *testing.T) {
-	if got := VisibleColumns(50); !reflect.DeepEqual(got, []int{0, 1, 9}) {
-		t.Fatalf("VisibleColumns(50) = %#v, want %#v", got, []int{0, 1, 9})
+	// Highest-priority columns that fit width 50: NAME, TYPE, STATE, ACTIVITY.
+	if got := VisibleColumns(50); !reflect.DeepEqual(got, []int{0, 1, 8, 10}) {
+		t.Fatalf("VisibleColumns(50) = %#v, want %#v", got, []int{0, 1, 8, 10})
 	}
 
 	all := VisibleColumns(1000)

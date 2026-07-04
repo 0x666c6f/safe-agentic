@@ -21,10 +21,13 @@ func TestAgentTableDeletingOverlayPersistsAcrossPolls(t *testing.T) {
 	if len(table.agents) != 1 {
 		t.Fatalf("agents len = %d, want 1", len(table.agents))
 	}
-	if got := fieldByColumn(table.agents[0], 8); got != "Deleting" {
+	if got := fieldByColumn(table.agents[0], 8); got != "-" {
+		t.Fatalf("state field = %q, want %q", got, "-")
+	}
+	if got := fieldByColumn(table.agents[0], 9); got != "Deleting" {
 		t.Fatalf("status field = %q, want %q", got, "Deleting")
 	}
-	if got := fieldByColumn(table.agents[0], 9); got != spinnerFrames[0] {
+	if got := fieldByColumn(table.agents[0], 10); got != spinnerFrames[0] {
 		t.Fatalf("activity field = %q, want %q", got, spinnerFrames[0])
 	}
 
@@ -37,7 +40,7 @@ func TestAgentTableDeletingOverlayPersistsAcrossPolls(t *testing.T) {
 	}
 
 	table.SetDeletingFrame(spinnerFrames[1])
-	if got := fieldByColumn(table.agents[0], 9); got != spinnerFrames[1] {
+	if got := fieldByColumn(table.agents[0], 10); got != spinnerFrames[1] {
 		t.Fatalf("activity field after tick = %q, want %q", got, spinnerFrames[1])
 	}
 
@@ -59,10 +62,10 @@ func TestFieldByColumnPrefersDeletingState(t *testing.T) {
 		Progress: "⠙",
 	}
 
-	if got := fieldByColumn(agent, 8); got != "Deleting" {
+	if got := fieldByColumn(agent, 9); got != "Deleting" {
 		t.Fatalf("status field = %q, want %q", got, "Deleting")
 	}
-	if got := fieldByColumn(agent, 9); got != "⠙" {
+	if got := fieldByColumn(agent, 10); got != "⠙" {
 		t.Fatalf("activity field = %q, want %q", got, "⠙")
 	}
 }

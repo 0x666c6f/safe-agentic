@@ -20,6 +20,7 @@ type App struct {
 	preview       *PreviewPane
 	poller        *Poller
 	actions       *Actions
+	notifier      *stateNotifier
 	loaded        chan struct{} // closed after first successful poll
 	stopAnim      chan struct{}
 	execAfter     []string // if set, syscall.Exec this command after tview exits
@@ -42,8 +43,12 @@ func NewApp() *App {
 	}
 
 	a.preview = NewPreviewPane()
+	a.notifier = newStateNotifier()
 
 	a.poller = NewPoller(func(agents []Agent, stale bool) {
+		// Runs on the poller goroutine (not the tview loop): compare states and
+		// fire desktop notifications for blocked/done/exited transitions.
+		a.notifier.observe(agents)
 		a.pendingMu.Lock()
 		a.pendingAgents = make([]Agent, len(agents))
 		copy(a.pendingAgents, agents)

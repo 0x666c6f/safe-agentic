@@ -3,6 +3,8 @@ package main
 import (
 	"sort"
 	"strings"
+
+	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
 )
 
 // Agent represents a single safe-agentic container with its metadata and live stats.
@@ -17,9 +19,12 @@ type Agent struct {
 	NetworkMode string
 	Fleet       string // fleet/pipeline volume name (empty if standalone)
 	Hierarchy   string // slash-separated nested fleet/pipeline hierarchy
+	Terminal    string // safe-agentic.terminal label ("tmux", "background", …)
 	Status      string
 	Running     bool
 	Finished    bool
+	State       string // agentstate classification: blocked/working/done/idle/exited/unknown
+	StateReason string // short human-readable explanation for State
 	Activity    string // "Working", "Idle", "Stopped"
 	CPU         string
 	Memory      string
@@ -45,6 +50,7 @@ var columns = []Column{
 	{Title: "GH-AUTH", Width: 9, Priority: 25},
 	{Title: "DOCKER", Width: 8, Priority: 20},
 	{Title: "NETWORK", Width: 10, Priority: 28},
+	{Title: "STATE", Width: 8, Priority: 96},
 	{Title: "STATUS", Width: 12, Priority: 80},
 	{Title: "ACTIVITY", Width: 8, Priority: 95},
 	{Title: "CPU", Width: 6, Priority: 70},
@@ -53,8 +59,34 @@ var columns = []Column{
 	{Title: "PIDS", Width: 5, Priority: 40},
 }
 
+// stateColumnIndex is the position of the STATE column in the columns slice.
+// The column is sorted by urgency rank (see stateRank) rather than alphabetically.
+const stateColumnIndex = 8
+
+// stateRank orders agent states by how much they need the operator's attention,
+// highest first: blocked (waiting on a human) > done > exited > working > idle.
+// This drives the default "which agent needs me" sort.
+func stateRank(state string) int {
+	switch state {
+	case string(agentstate.StateBlocked):
+		return 5
+	case string(agentstate.StateDone):
+		return 4
+	case string(agentstate.StateExited):
+		return 3
+	case string(agentstate.StateWorking):
+		return 2
+	case string(agentstate.StateIdle):
+		return 1
+	default: // unknown / not yet detected
+		return 0
+	}
+}
+
 // SortAgents sorts agents by column index.
 // Fleet/pipeline agents are grouped together (fleet first, then standalone).
+// The STATE column sorts by urgency rank instead of alphabetically; ties keep
+// the incoming order (stable), so agents stay grouped by state without churn.
 func SortAgents(agents []Agent, col int, ascending bool) {
 	sort.SliceStable(agents, func(i, j int) bool {
 		// Primary: group by hierarchy/fleet (grouped agents first)
@@ -68,7 +100,17 @@ func SortAgents(agents []Agent, col int, ascending bool) {
 			}
 			return hi < hj // different groups sorted alphabetically
 		}
-		// Secondary: sort by selected column within group
+		// Secondary: sort by selected column within group.
+		if col == stateColumnIndex {
+			ri, rj := stateRank(agents[i].State), stateRank(agents[j].State)
+			if ri == rj {
+				return false // stable within a state group
+			}
+			if ascending {
+				return ri > rj // ascending == most urgent first
+			}
+			return ri < rj
+		}
 		a, b := fieldByColumn(agents[i], col), fieldByColumn(agents[j], col)
 		if ascending {
 			return a < b
@@ -100,6 +142,7 @@ var columnFieldGetters = []func(Agent) string{
 	func(a Agent) string { return a.GHAuth },
 	func(a Agent) string { return a.Docker },
 	func(a Agent) string { return a.NetworkMode },
+	func(a Agent) string { return a.State },
 	func(a Agent) string { return a.Status },
 	func(a Agent) string { return a.Activity },
 	func(a Agent) string { return a.CPU },
@@ -123,9 +166,9 @@ func deletingFieldValue(a Agent, col int) string {
 		return ""
 	}
 	switch col {
-	case 8:
+	case 9: // STATUS
 		return "Deleting"
-	case 9:
+	case 10: // ACTIVITY
 		if a.Progress != "" {
 			return a.Progress
 		}
@@ -151,7 +194,7 @@ func FilterAgents(agents []Agent, filter string) []Agent {
 }
 
 func matchesFilter(a Agent, filter string) bool {
-	fields := []string{a.Name, a.Type, a.Repo, a.SSH, a.Auth, a.GHAuth, a.Docker, a.NetworkMode, a.Fleet, a.Hierarchy, a.Status, a.CPU, a.Memory, a.NetIO, a.PIDs}
+	fields := []string{a.Name, a.Type, a.Repo, a.SSH, a.Auth, a.GHAuth, a.Docker, a.NetworkMode, a.Fleet, a.Hierarchy, a.State, a.Status, a.CPU, a.Memory, a.NetIO, a.PIDs}
 	for _, f := range fields {
 		if strings.Contains(strings.ToLower(f), filter) {
 			return true

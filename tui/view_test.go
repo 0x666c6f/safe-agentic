@@ -80,13 +80,23 @@ func TestAgentTableSelectionAndSorting(t *testing.T) {
 	if at.TotalCount() != 3 {
 		t.Fatalf("TotalCount() = %d, want 3", at.TotalCount())
 	}
-	if got := at.table.GetCell(0, 0).Text; got != "NAME▲" {
-		t.Fatalf("default header = %q, want %q", got, "NAME▲")
+	// The default sort is the STATE priority sort (column 8), so the arrow sits
+	// on STATE and NAME is unmarked. (headerTitle is checked directly because
+	// STATE may be dropped from the header at the test's table width.)
+	if got := at.table.GetCell(0, 0).Text; got != "NAME" {
+		t.Fatalf("default NAME header = %q, want %q", got, "NAME")
+	}
+	if got := at.headerTitle(stateColumnIndex); got != "STATE▲" {
+		t.Fatalf("default STATE header = %q, want %q", got, "STATE▲")
 	}
 	if sel := at.SelectedAgent(); sel == nil {
 		t.Fatalf("default selection = %#v", sel)
 	}
-	at.SetSort(0)
+	at.SetSort(0) // switch to a NAME column sort (ascending)
+	if got := at.table.GetCell(0, 0).Text; got != "NAME▲" {
+		t.Fatalf("asc header = %q, want %q", got, "NAME▲")
+	}
+	at.SetSort(0) // toggle NAME to descending
 	if got := at.table.GetCell(0, 0).Text; got != "NAME▼" {
 		t.Fatalf("desc header = %q, want %q", got, "NAME▼")
 	}
@@ -97,7 +107,9 @@ func TestAgentTableSelectionAndSorting(t *testing.T) {
 
 func TestAgentTableFilteringAndEmptyState(t *testing.T) {
 	at := newLoadedAgentTable()
-	at.table.Select(2, 0)
+	// Default STATE priority sort orders rows blocked>done>working, i.e.
+	// beta, alpha, gamma — so row 1 is agent-beta (blocked).
+	at.table.Select(1, 0)
 	if sel := at.SelectedAgent(); sel == nil || sel.Name != "agent-beta" {
 		t.Fatalf("manual selection = %#v", sel)
 	}
