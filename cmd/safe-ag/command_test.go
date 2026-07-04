@@ -45,17 +45,19 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	origConfigureHostNAT := configureHostNAT
 	origHostIPForwardingEnabled := hostIPForwardingEnabled
 	origConfigureLaunchdSSHAuth := configureLaunchdSSHAuth
+	origReconcileHomeMount := reconcileHomeMount
 	newExecutor = func() vmexec.Executor { return fake }
 	findBuildRoot = func() (string, error) { return t.TempDir(), nil }
 	syncBuildContextToVM = func(vmName, root string) error { return nil }
 	copyFileToVM = func(vmName, srcPath, destPath string) error { return nil }
 	vmExists = func(vmName string) bool { return true }
-	runVMBootstrap = func(vmName string) ([]byte, error) { return []byte("bootstrap ok\n"), nil }
+	runVMBootstrap = func(vmName, worktreesDir, homeDir string) ([]byte, error) { return []byte("bootstrap ok\n"), nil }
 	startVM = func(vmName string) error { return nil }
 	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
 	configureHostNAT = func(stdout, stderr io.Writer) error { return nil }
 	hostIPForwardingEnabled = func() bool { return true }
 	configureLaunchdSSHAuth = func() error { return nil }
+	reconcileHomeMount = func(vmName, desired string, stdout, stderr io.Writer) (bool, error) { return false, nil }
 	return fake, func() {
 		newExecutor = original
 		findBuildRoot = origFindBuildRoot
@@ -68,6 +70,7 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 		configureHostNAT = origConfigureHostNAT
 		hostIPForwardingEnabled = origHostIPForwardingEnabled
 		configureLaunchdSSHAuth = origConfigureLaunchdSSHAuth
+		reconcileHomeMount = origReconcileHomeMount
 	}
 }
 
@@ -80,6 +83,20 @@ func captureOutput(fn func()) string {
 	fn()
 	w.Close()
 	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+// captureStderr redirects os.Stderr to a buffer for the duration of fn,
+// then returns what was written.
+func captureStderr(fn func()) string {
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	return buf.String()
@@ -129,12 +146,14 @@ func TestListCommandJSON(t *testing.T) {
 	defer cleanup()
 
 	fake.SetResponse("docker ps -a --filter name=^agent-", `{"Names":"agent-claude-test","Status":"Up 5 minutes"}`+"\n")
+	setStateResponses(fake, true, "claude", "tmux")
+	fake.SetResponse("docker exec agent-claude-test tmux capture-pane", workingPane+"\n")
 
 	// Enable JSON mode
 	listJSON = true
 	defer func() { listJSON = false }()
 
-	captureOutput(func() {
+	out := captureOutput(func() {
 		if err := runList(listCmd, nil); err != nil {
 			t.Fatalf("runList() error = %v", err)
 		}
@@ -148,6 +167,44 @@ func TestListCommandJSON(t *testing.T) {
 	joined := strings.Join(cmds[0], " ")
 	if !strings.Contains(joined, "{{json .}}") {
 		t.Errorf("expected json format flag, got: %s", joined)
+	}
+	// The state field is added; the original fields are preserved (backward compatible).
+	if !strings.Contains(out, `"state":"working"`) {
+		t.Errorf("expected added state field, got: %s", out)
+	}
+	if !strings.Contains(out, `"Names":"agent-claude-test"`) {
+		t.Errorf("expected original Names field preserved, got: %s", out)
+	}
+}
+
+func TestListCommandShowsState(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	fake.SetResponse("docker ps -a --filter name=^agent-",
+		"agent-claude-x\tclaude\torg/repo\t\tUp 5 minutes\n")
+	setStateResponses(fake, true, "claude", "tmux")
+	fake.SetResponse("docker exec agent-claude-x tmux capture-pane", blockedPane+"\n")
+
+	out := captureOutput(func() {
+		if err := runList(listCmd, nil); err != nil {
+			t.Fatalf("runList() error = %v", err)
+		}
+	})
+	if !strings.Contains(out, "blocked") || !strings.Contains(out, "agent-claude-x") {
+		t.Fatalf("expected blocked state in list output, got: %q", out)
+	}
+}
+
+func TestInjectStateField(t *testing.T) {
+	if got := injectStateField(`{"Names":"a","Status":"Up"}`, "blocked"); got != `{"Names":"a","Status":"Up","state":"blocked"}` {
+		t.Errorf("injectStateField object = %q", got)
+	}
+	if got := injectStateField(`{}`, "done"); got != `{"state":"done"}` {
+		t.Errorf("injectStateField empty object = %q", got)
+	}
+	if got := injectStateField("not json", "x"); got != "not json" {
+		t.Errorf("injectStateField passthrough = %q", got)
 	}
 }
 
@@ -1214,6 +1271,100 @@ func TestDiffCommand_Stat(t *testing.T) {
 	joined := strings.Join(cmds[0], " ")
 	if !strings.Contains(joined, "--stat") {
 		t.Errorf("expected '--stat' in command, got: %s", joined)
+	}
+}
+
+func TestDiffCommand_SideBySide(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	t.Setenv("COLUMNS", "") // keep terminalWidth() deterministic
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetResponse("docker exec "+containerName+" bash -c", "delta output here\n")
+	// The delta availability check ("docker exec <name> sh -c command -v delta")
+	// is left unconfigured, so FakeExecutor's default empty-output/nil-error
+	// response simulates delta being present in the image.
+
+	diffSideBySide = true
+	defer func() { diffSideBySide = false }()
+
+	captureOutput(func() {
+		if err := runDiff(diffCmd, []string{containerName}); err != nil {
+			t.Fatalf("runDiff() error = %v", err)
+		}
+	})
+
+	cmds := fake.CommandsMatching("docker exec " + containerName)
+	var found bool
+	for _, c := range cmds {
+		joined := strings.Join(c, " ")
+		if strings.Contains(joined, "delta --side-by-side") && strings.Contains(joined, "COLUMNS=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a delta --side-by-side invocation with COLUMNS set, got: %v", cmds)
+	}
+}
+
+func TestDiffCommand_SideBySide_MutuallyExclusiveWithStat(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	diffStat = true
+	diffSideBySide = true
+	defer func() {
+		diffStat = false
+		diffSideBySide = false
+	}()
+
+	err := runDiff(diffCmd, []string{"agent-claude-test"})
+	if err == nil {
+		t.Fatal("expected error when --stat and --side-by-side are combined")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' in error, got: %v", err)
+	}
+}
+
+func TestDiffCommand_SideBySide_FallsBackWhenDeltaMissing(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "true\n")
+	fake.SetError("docker exec "+containerName+" sh -c", "delta: command not found")
+	fake.SetResponse("docker exec "+containerName+" bash -c", "plain diff output\n")
+
+	diffSideBySide = true
+	defer func() { diffSideBySide = false }()
+
+	var stdout string
+	stderr := captureStderr(func() {
+		stdout = captureOutput(func() {
+			if err := runDiff(diffCmd, []string{containerName}); err != nil {
+				t.Fatalf("runDiff() error = %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stderr, "falling back to plain diff") {
+		t.Errorf("expected fallback warning on stderr, got: %q", stderr)
+	}
+	if !strings.Contains(stdout, "plain diff output") {
+		t.Errorf("expected plain diff output on stdout, got: %q", stdout)
+	}
+
+	cmds := fake.CommandsMatching("docker exec " + containerName + " bash -c")
+	if len(cmds) == 0 {
+		t.Fatal("expected a plain diff docker exec command")
+	}
+	joined := strings.Join(cmds[0], " ")
+	if strings.Contains(joined, "delta") {
+		t.Errorf("expected no delta invocation in fallback command, got: %s", joined)
 	}
 }
 
@@ -2564,6 +2715,105 @@ func TestReviewCommand(t *testing.T) {
 	}
 }
 
+func TestReviewCommand_RequestsRiskTagsAndRendersSummary(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	containerName := "agent-claude-test"
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
+	fake.SetResponse("docker exec "+containerName,
+		"[HIGH] pkg/foo.go:12: sql injection risk\nVERDICT: fix before merge\n")
+
+	reviewBase = "main"
+	defer func() { reviewBase = "main" }()
+
+	output := captureOutput(func() {
+		if err := runReview(reviewCmd, []string{containerName}); err != nil {
+			t.Fatalf("runReview() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "[HIGH] pkg/foo.go:12: sql injection risk") {
+		t.Errorf("expected raw review text preserved in output, got: %q", output)
+	}
+	if !strings.Contains(output, "Risk Summary") || !strings.Contains(output, "HIGH (1)") {
+		t.Errorf("expected grouped risk summary in output, got: %q", output)
+	}
+	if !strings.Contains(output, "Verdict: fix before merge") {
+		t.Errorf("expected verdict line in output, got: %q", output)
+	}
+
+	cmds := fake.CommandsMatching("codex review")
+	if len(cmds) == 0 {
+		t.Fatal("expected codex review command")
+	}
+	joined := strings.Join(cmds[0], " ")
+	if !strings.Contains(joined, "HIGH") || !strings.Contains(joined, "VERDICT") {
+		t.Errorf("expected review prompt to require risk tags and a verdict, got: %s", joined)
+	}
+}
+
+// ─── risk findings parsing ────────────────────────────────────────────────────
+
+func TestParseRiskFindings(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantHigh     int
+		wantMedium   int
+		wantLow      int
+		wantUntagged int
+		wantVerdict  string
+	}{
+		{
+			name: "tagged",
+			input: "[HIGH] pkg/foo.go:10: unchecked error\n" +
+				"[MEDIUM] pkg/bar.go:20: missing validation\n" +
+				"[LOW] pkg/baz.go:30: naming nit\n" +
+				"VERDICT: needs fixes before merge\n",
+			wantHigh: 1, wantMedium: 1, wantLow: 1, wantUntagged: 0,
+			wantVerdict: "needs fixes before merge",
+		},
+		{
+			name: "untagged",
+			input: "Looks fine overall.\n" +
+				"Consider renaming this variable.\n",
+			wantHigh: 0, wantMedium: 0, wantLow: 0, wantUntagged: 2,
+			wantVerdict: "",
+		},
+		{
+			name: "mixed",
+			input: "[HIGH] pkg/foo.go:1: sql injection risk\n" +
+				"General note without a risk tag\n" +
+				"[LOW] pkg/foo.go:5: style nit\n" +
+				"VERDICT: one high-risk issue found\n",
+			wantHigh: 1, wantMedium: 0, wantLow: 1, wantUntagged: 1,
+			wantVerdict: "one high-risk issue found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf := parseRiskFindings(tt.input)
+			if len(rf.High) != tt.wantHigh {
+				t.Errorf("High = %d, want %d (%v)", len(rf.High), tt.wantHigh, rf.High)
+			}
+			if len(rf.Medium) != tt.wantMedium {
+				t.Errorf("Medium = %d, want %d (%v)", len(rf.Medium), tt.wantMedium, rf.Medium)
+			}
+			if len(rf.Low) != tt.wantLow {
+				t.Errorf("Low = %d, want %d (%v)", len(rf.Low), tt.wantLow, rf.Low)
+			}
+			if len(rf.Untagged) != tt.wantUntagged {
+				t.Errorf("Untagged = %d, want %d (%v)", len(rf.Untagged), tt.wantUntagged, rf.Untagged)
+			}
+			if rf.Verdict != tt.wantVerdict {
+				t.Errorf("Verdict = %q, want %q", rf.Verdict, tt.wantVerdict)
+			}
+		})
+	}
+}
+
 // ─── extractTokenUsage ───────────────────────────────────────────────────────
 
 func TestExtractTokenUsage_OpenAIStyle(t *testing.T) {
@@ -3448,7 +3698,7 @@ func TestVMStartRestoresHostNATBeforeBootstrap(t *testing.T) {
 		order = append(order, "nat")
 		return nil
 	}
-	runVMBootstrap = func(vmName string) ([]byte, error) {
+	runVMBootstrap = func(vmName, worktreesDir, homeDir string) ([]byte, error) {
 		order = append(order, "bootstrap")
 		return []byte("bootstrap ok\n"), nil
 	}

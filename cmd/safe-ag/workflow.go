@@ -5,13 +5,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // workspaceFindCmd returns the shell snippet that cd's into the first git repo
@@ -43,7 +46,10 @@ func workspaceExecCommand(containerName string, args ...string) []string {
 
 // ─── diff ──────────────────────────────────────────────────────────────────
 
-var diffStat bool
+var (
+	diffStat       bool
+	diffSideBySide bool
+)
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [name|--latest]",
@@ -54,12 +60,18 @@ var diffCmd = &cobra.Command{
 
 func init() {
 	diffCmd.Flags().BoolVar(&diffStat, "stat", false, "Show diffstat instead of full diff")
+	diffCmd.Flags().BoolVarP(&diffSideBySide, "side-by-side", "s", false,
+		"Render the diff side-by-side with delta (falls back to plain diff if delta is unavailable)")
 	rootCmd.AddCommand(diffCmd)
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
+
+	if diffStat && diffSideBySide {
+		return fmt.Errorf("--stat and --side-by-side are mutually exclusive")
+	}
 
 	target := ""
 	if len(args) > 0 {
@@ -76,6 +88,15 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	running, _ := docker.IsRunning(ctx, exec, name)
+
+	if diffSideBySide {
+		if running && deltaAvailable(ctx, exec, name) {
+			gitArg = fmt.Sprintf("git diff | COLUMNS=%d delta --side-by-side", terminalWidth())
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: delta not available in agent image, falling back to plain diff")
+		}
+	}
+
 	var out []byte
 	if running {
 		out, err = exec.Run(ctx, workspaceExec(name, gitArg)...)
@@ -87,6 +108,29 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Print(string(out))
 	return nil
+}
+
+// deltaAvailable reports whether the delta pager binary is present in the
+// running agent container's image. Older images built before delta was
+// baked in won't have it, so callers must fall back to a plain diff.
+func deltaAvailable(ctx context.Context, exec vmexec.Executor, name string) bool {
+	_, err := exec.Run(ctx, "docker", "exec", name, "sh", "-c", "command -v delta")
+	return err == nil
+}
+
+// terminalWidth returns the host terminal's column width so delta's
+// side-by-side rendering can be sized to fit. Falls back to $COLUMNS and
+// finally a sane default when no terminal is attached (e.g. piped output).
+func terminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	if v := os.Getenv("COLUMNS"); v != "" {
+		if w, err := strconv.Atoi(v); err == nil && w > 0 {
+			return w
+		}
+	}
+	return 160
 }
 
 // ─── checkpoint ────────────────────────────────────────────────────────────
@@ -538,6 +582,13 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 }
 
+// reviewRiskInstructions is appended to the codex review invocation so every
+// finding carries a risk tag and file:line, and the review ends with a
+// one-line verdict — both of which we parse for the terminal risk summary.
+const reviewRiskInstructions = `For every finding, prefix the line with a risk tag [HIGH], [MEDIUM], or [LOW] ` +
+	`followed by the file:line location, e.g. "[HIGH] pkg/foo.go:42: description". ` +
+	`End the review with a single line starting with "VERDICT:" that summarizes the overall risk in one sentence.`
+
 func runReview(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
@@ -557,9 +608,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try codex review first
-	out, err := exec.Run(ctx, workspaceExecCommand(name, "codex", "review", "--base", reviewBase)...)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, "codex", "review", "--base", reviewBase, reviewRiskInstructions)...)
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
-		fmt.Print(string(out))
+		text := string(out)
+		fmt.Print(text)
+		fmt.Print(renderRiskSummary(parseRiskFindings(text)))
 		return nil
 	}
 
@@ -570,4 +623,89 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Print(string(out))
 	return nil
+}
+
+// ─── review risk parsing ─────────────────────────────────────────────────────
+
+// riskFindings groups review findings by risk level, preserving anything that
+// didn't carry a recognizable tag under Untagged rather than dropping it.
+type riskFindings struct {
+	High     []string
+	Medium   []string
+	Low      []string
+	Untagged []string
+	Verdict  string
+}
+
+var (
+	riskTagPattern = regexp.MustCompile(`(?i)\[\s*(high|medium|low)\s*\]`)
+	verdictPattern = regexp.MustCompile(`(?i)^verdict\s*:\s*(.+)$`)
+)
+
+// parseRiskFindings scans review output line by line, bucketing each
+// non-empty line by its [HIGH]/[MEDIUM]/[LOW] tag. Lines without a tag are
+// kept under Untagged. A trailing "VERDICT: ..." line is extracted
+// separately and excluded from the buckets.
+func parseRiskFindings(text string) riskFindings {
+	var rf riskFindings
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if m := verdictPattern.FindStringSubmatch(line); m != nil {
+			rf.Verdict = strings.TrimSpace(m[1])
+			continue
+		}
+		if m := riskTagPattern.FindStringSubmatch(line); m != nil {
+			switch strings.ToLower(m[1]) {
+			case "high":
+				rf.High = append(rf.High, line)
+			case "medium":
+				rf.Medium = append(rf.Medium, line)
+			case "low":
+				rf.Low = append(rf.Low, line)
+			}
+			continue
+		}
+		rf.Untagged = append(rf.Untagged, line)
+	}
+	return rf
+}
+
+// renderRiskSummary renders a HIGH → LOW grouped summary plus the verdict, to
+// be printed after the raw review text so the original output stays intact.
+func renderRiskSummary(rf riskFindings) string {
+	groups := []struct {
+		label string
+		items []string
+	}{
+		{"HIGH", rf.High},
+		{"MEDIUM", rf.Medium},
+		{"LOW", rf.Low},
+		{"UNTAGGED", rf.Untagged},
+	}
+
+	var b strings.Builder
+	b.WriteString("\n─────────────────────────────────────────\n")
+	b.WriteString("Risk Summary\n")
+	b.WriteString("─────────────────────────────────────────\n")
+	any := false
+	for _, g := range groups {
+		if len(g.items) == 0 {
+			continue
+		}
+		any = true
+		fmt.Fprintf(&b, "\n%s (%d)\n", g.label, len(g.items))
+		for _, item := range g.items {
+			fmt.Fprintf(&b, "  %s\n", item)
+		}
+	}
+	if !any {
+		b.WriteString("\n(no findings parsed)\n")
+	}
+	if rf.Verdict != "" {
+		fmt.Fprintf(&b, "\nVerdict: %s\n", rf.Verdict)
+	}
+	return b.String()
 }
