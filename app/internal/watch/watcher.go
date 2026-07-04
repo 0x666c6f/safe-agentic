@@ -1,9 +1,11 @@
 package watch
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,15 +21,17 @@ type Watcher struct {
 	interval time.Duration
 	Notify   func(events.SystemNotification) error
 
-	mu     sync.Mutex
-	offset int64
-	stop   chan struct{}
-	once   sync.Once
+	mu      sync.Mutex
+	offset  int64
+	stop    chan struct{}
+	once    sync.Once
+	done    chan struct{}
+	started bool
 }
 
 func NewWatcher(path string, em emit.Emitter, interval time.Duration) *Watcher {
 	return &Watcher{path: path, em: em, interval: interval, Notify: events.NotifySystem,
-		stop: make(chan struct{})}
+		stop: make(chan struct{}), done: make(chan struct{})}
 }
 
 func (w *Watcher) Start() error {
@@ -42,10 +46,14 @@ func (w *Watcher) Start() error {
 	fsw, err := fsnotify.NewWatcher()
 	if err == nil {
 		// Watch the file's directory: JSONL appends fire Write events on most volumes.
-		_ = fsw.Add(dirOf(w.path))
+		_ = fsw.Add(filepath.Dir(w.path))
 		evCh, errCh = fsw.Events, fsw.Errors
 	}
+	w.mu.Lock()
+	w.started = true
+	w.mu.Unlock()
 	go func() {
+		defer close(w.done)
 		t := time.NewTicker(w.interval)
 		defer t.Stop()
 		if fsw != nil {
@@ -68,18 +76,18 @@ func (w *Watcher) Start() error {
 	return nil
 }
 
-func dirOf(p string) string {
-	if i := len(p) - 1; i > 0 {
-		for ; i >= 0; i-- {
-			if p[i] == '/' {
-				return p[:i]
-			}
-		}
+// Stop signals the watch loop to exit and blocks until it has actually
+// returned (no-op if Start was never called, since the goroutine — and thus
+// done — never existed).
+func (w *Watcher) Stop() {
+	w.once.Do(func() { close(w.stop) })
+	w.mu.Lock()
+	started := w.started
+	w.mu.Unlock()
+	if started {
+		<-w.done
 	}
-	return "."
 }
-
-func (w *Watcher) Stop() { w.once.Do(func() { close(w.stop) }) }
 
 func (w *Watcher) drain() {
 	w.mu.Lock()
@@ -90,21 +98,37 @@ func (w *Watcher) drain() {
 	}
 	defer f.Close()
 	fi, err := f.Stat()
-	if err != nil || fi.Size() <= w.offset {
-		if err == nil && fi.Size() < w.offset {
-			w.offset = 0 // truncated/rotated: re-read from start
-		} else {
-			return
-		}
+	if err != nil {
+		return
+	}
+	if fi.Size() < w.offset {
+		w.offset = 0 // truncated/rotated: re-read from start
+	}
+	if fi.Size() <= w.offset {
+		return
 	}
 	if _, err := f.Seek(w.offset, 0); err != nil {
 		return
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		w.offset += int64(len(line)) + 1
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return
+	}
+	// Only consume COMPLETE lines (terminated by '\n'). Any trailing partial
+	// line is left unconsumed — w.offset stays put — so a later drain() that
+	// sees the completing newline re-reads it from the same starting point
+	// instead of double counting or overshooting by the missing newline byte.
+	start := 0
+	for {
+		idx := bytes.IndexByte(data[start:], '\n')
+		if idx < 0 {
+			break
+		}
+		line := data[start : start+idx]
+		consumed := idx + 1
+		w.offset += int64(consumed)
+		start += consumed
+
 		var e events.Event
 		if json.Unmarshal(line, &e) != nil {
 			continue
