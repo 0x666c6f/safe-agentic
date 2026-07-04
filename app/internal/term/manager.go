@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -17,12 +18,26 @@ import (
 
 type CommandFactory func(container string) *exec.Cmd
 
+// vmNameFromEnv mirrors the CLI's VM-name rule.
+func vmNameFromEnv() string {
+	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+		return v
+	}
+	return "safe-agentic"
+}
+
 func DefaultFactory(vmName string) CommandFactory {
 	return func(container string) *exec.Cmd {
 		cmd := exec.Command("container",
 			"machine", "run", "--interactive", "--tty", "-n", vmName, "-u", "root",
 			"docker", "exec", "-it", container, "tmux", "attach", "-t", tmux.SessionName())
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+		env := make([]string, 0, len(os.Environ())+1)
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "TERM=") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = append(env, "TERM=xterm-256color")
 		return cmd
 	}
 }
@@ -41,6 +56,9 @@ type Manager struct {
 }
 
 func NewManager(em emit.Emitter, factory CommandFactory) *Manager {
+	if factory == nil {
+		factory = DefaultFactory(vmNameFromEnv())
+	}
 	return &Manager{em: em, factory: factory, byID: map[string]*session{}}
 }
 

@@ -10,6 +10,27 @@ import (
 	"github.com/0x666c6f/safe-agentic/app/internal/emit"
 )
 
+func TestNewManagerNilFactoryFallsBack(t *testing.T) {
+	m := NewManager(&emit.Recorder{}, nil)
+	if m.factory == nil {
+		t.Fatal("nil factory must fall back to DefaultFactory")
+	}
+}
+
+func TestDefaultFactorySingleTERM(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	cmd := DefaultFactory("safe-agentic")("agent-x")
+	var terms []string
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "TERM=") {
+			terms = append(terms, kv)
+		}
+	}
+	if len(terms) != 1 || terms[0] != "TERM=xterm-256color" {
+		t.Fatalf("want exactly TERM=xterm-256color, got %v", terms)
+	}
+}
+
 func TestOpenWriteEchoClose(t *testing.T) {
 	rec := &emit.Recorder{}
 	m := NewManager(rec, func(container string) *exec.Cmd {
