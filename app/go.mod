@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/0x666c6f/safe-agentic v0.0.0-00010101000000-000000000000
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.112
 )
@@ -19,6 +20,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/wailsapp/wails/webview2 v1.0.27 // indirect
 	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/term v0.42.0 // indirect
 )
 
 replace github.com/0x666c6f/safe-agentic => ../
