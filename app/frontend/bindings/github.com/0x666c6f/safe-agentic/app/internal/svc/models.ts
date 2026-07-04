@@ -3,6 +3,7 @@
 
 export interface SpawnRequest {
     "Agent": string;
+    "Name": string;
     "Repo": string;
     "Prompt": string;
     "Template": string;
