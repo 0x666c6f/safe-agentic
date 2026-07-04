@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -99,41 +98,35 @@ func worktreeCandidatePath(containerName, requestedPath string) (string, error) 
 	return abs, nil
 }
 
-func rejectKnownMaskedWorktreePath(path string) error {
-	clean := filepath.Clean(path)
-	for _, prefix := range []string{"/Users", "/Volumes", "/private", "/mnt/mac"} {
-		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
-			return fmt.Errorf("--worktree path %s is hidden from the safe-agentic VM by hardening; use --repo for a container clone or choose a VM-visible workspace path", clean)
-		}
+func validateWorktreeMountPath(vmPath string) error {
+	if strings.ContainsAny(vmPath, ",\n\r\x00") {
+		return fmt.Errorf("worktree mount path %q contains characters Docker --mount cannot safely encode", vmPath)
 	}
 	return nil
 }
 
-func validateWorktreeMountPath(path string) error {
-	if strings.ContainsAny(path, ",\n\r\x00") {
-		return fmt.Errorf("--worktree path %q contains characters Docker --mount cannot safely encode", path)
-	}
-	return nil
-}
-
-func ensureWorktreeParentVisibleInVM(ctx context.Context, exec vmexec.Executor, path string, dryRun bool) error {
+// ensureWorktreeMountReadyInVM verifies that the worktrees root is actually
+// bind-mounted at /worktrees inside the VM AND that the bind points at the
+// current worktrees root. A machine created before this feature landed (or one
+// whose home-mount was never enabled) has no /worktrees mount, so the worktree
+// bind would fail or, worse, write into a throwaway VM path. And if
+// defaults.worktrees_dir changed after setup, the VM may still bind the OLD
+// root — spawn would create the worktree under the new host root while Docker
+// binds the stale one, giving a launch failure or the wrong checkout. Fail fast
+// with the exact remediation instead.
+func ensureWorktreeMountReadyInVM(ctx context.Context, exec vmexec.Executor, vmPath, wantRoot string, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
-	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("create worktree parent: %w", err)
+	if _, err := exec.Run(ctx, "sh", "-c", "test -d "+worktrees.VMMountPoint+" && mountpoint -q "+worktrees.VMMountPoint); err != nil {
+		return fmt.Errorf("VM %s has no %s mount, so --worktree cannot bind %s. The worktree mount is off by default; enable it with: safe-ag setup --enable-worktrees (switches the VM to home-mount=rw, which weakens VM isolation — see docs). See also: safe-ag diagnose", configuredVMName(), worktrees.VMMountPoint, vmPath)
 	}
-	marker, err := os.CreateTemp(parent, ".safe-ag-vm-visible-*")
-	if err != nil {
-		return fmt.Errorf("create worktree visibility marker: %w", err)
-	}
-	markerPath := marker.Name()
-	_ = marker.Close()
-	defer os.Remove(markerPath)
-
-	if _, err := exec.Run(ctx, "test", "-f", markerPath); err != nil {
-		return fmt.Errorf("--worktree parent %s is not visible inside VM %s; use --repo for a container clone or choose a VM-visible workspace path", parent, configuredVMName())
+	// Confirm the live bind points at the current worktrees root (recorded by
+	// vm/setup.sh in the boot-local sentinel). An empty sentinel means "unknown"
+	// (older bind or a failed write) — don't block on that alone.
+	srcOut, _ := exec.Run(ctx, "sh", "-c", "cat "+worktreesSentinelPath+" 2>/dev/null")
+	if cur := strings.TrimSpace(string(srcOut)); cur != "" && cur != wantRoot {
+		return fmt.Errorf("VM %s binds worktrees root %s but this checkout resolves to %s; the worktrees root changed after setup. Rebind with: safe-ag setup (or: safe-ag vm stop && safe-ag vm start), then retry", configuredVMName(), cur, wantRoot)
 	}
 	return nil
 }

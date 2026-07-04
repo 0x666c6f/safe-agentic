@@ -14,17 +14,19 @@ import (
 )
 
 type DefaultsSection struct {
-	CPUs         string `toml:"cpus"`
-	Memory       string `toml:"memory"`
-	PIDsLimit    int    `toml:"pids_limit"`
-	SSH          bool   `toml:"ssh"`
-	Docker       bool   `toml:"docker"`
-	DockerSocket bool   `toml:"docker_socket"`
-	ReuseAuth    bool   `toml:"reuse_auth"`
-	ReuseGHAuth  bool   `toml:"reuse_gh_auth"`
-	SeedAuth     bool   `toml:"seed_auth"`
-	Network      string `toml:"network"`
-	Identity     string `toml:"identity"`
+	CPUs           string `toml:"cpus"`
+	Memory         string `toml:"memory"`
+	PIDsLimit      int    `toml:"pids_limit"`
+	SSH            bool   `toml:"ssh"`
+	Docker         bool   `toml:"docker"`
+	DockerSocket   bool   `toml:"docker_socket"`
+	ReuseAuth      bool   `toml:"reuse_auth"`
+	ReuseGHAuth    bool   `toml:"reuse_gh_auth"`
+	SeedAuth       bool   `toml:"seed_auth"`
+	Network        string `toml:"network"`
+	Identity       string `toml:"identity"`
+	WorktreesDir   string `toml:"worktrees_dir"`
+	WorktreesMount bool   `toml:"worktrees_mount"`
 }
 
 type GitSection struct {
@@ -41,17 +43,19 @@ type Config struct {
 }
 
 type fileDefaultsSection struct {
-	CPUs         *string `toml:"cpus"`
-	Memory       *string `toml:"memory"`
-	PIDsLimit    *int    `toml:"pids_limit"`
-	SSH          *bool   `toml:"ssh"`
-	Docker       *bool   `toml:"docker"`
-	DockerSocket *bool   `toml:"docker_socket"`
-	ReuseAuth    *bool   `toml:"reuse_auth"`
-	ReuseGHAuth  *bool   `toml:"reuse_gh_auth"`
-	SeedAuth     *bool   `toml:"seed_auth"`
-	Network      *string `toml:"network"`
-	Identity     *string `toml:"identity"`
+	CPUs           *string `toml:"cpus"`
+	Memory         *string `toml:"memory"`
+	PIDsLimit      *int    `toml:"pids_limit"`
+	SSH            *bool   `toml:"ssh"`
+	Docker         *bool   `toml:"docker"`
+	DockerSocket   *bool   `toml:"docker_socket"`
+	ReuseAuth      *bool   `toml:"reuse_auth"`
+	ReuseGHAuth    *bool   `toml:"reuse_gh_auth"`
+	SeedAuth       *bool   `toml:"seed_auth"`
+	Network        *string `toml:"network"`
+	Identity       *string `toml:"identity"`
+	WorktreesDir   *string `toml:"worktrees_dir"`
+	WorktreesMount *bool   `toml:"worktrees_mount"`
 }
 
 type fileGitSection struct {
@@ -68,36 +72,40 @@ type FileConfig struct {
 }
 
 var keyAliases = map[string]string{
-	"defaults.cpus":                      "defaults.cpus",
-	"defaults.memory":                    "defaults.memory",
-	"defaults.pids_limit":                "defaults.pids_limit",
-	"defaults.ssh":                       "defaults.ssh",
-	"defaults.docker":                    "defaults.docker",
-	"defaults.docker_socket":             "defaults.docker_socket",
-	"defaults.reuse_auth":                "defaults.reuse_auth",
-	"defaults.reuse_gh_auth":             "defaults.reuse_gh_auth",
-	"defaults.seed_auth":                 "defaults.seed_auth",
-	"defaults.network":                   "defaults.network",
-	"defaults.identity":                  "defaults.identity",
-	"git.author_name":                    "git.author_name",
-	"git.author_email":                   "git.author_email",
-	"git.committer_name":                 "git.committer_name",
-	"git.committer_email":                "git.committer_email",
-	"SAFE_AGENTIC_DEFAULT_CPUS":          "defaults.cpus",
-	"SAFE_AGENTIC_DEFAULT_MEMORY":        "defaults.memory",
-	"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT":    "defaults.pids_limit",
-	"SAFE_AGENTIC_DEFAULT_SSH":           "defaults.ssh",
-	"SAFE_AGENTIC_DEFAULT_DOCKER":        "defaults.docker",
-	"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET": "defaults.docker_socket",
-	"SAFE_AGENTIC_DEFAULT_REUSE_AUTH":    "defaults.reuse_auth",
-	"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH": "defaults.reuse_gh_auth",
-	"SAFE_AGENTIC_DEFAULT_SEED_AUTH":     "defaults.seed_auth",
-	"SAFE_AGENTIC_DEFAULT_NETWORK":       "defaults.network",
-	"SAFE_AGENTIC_DEFAULT_IDENTITY":      "defaults.identity",
-	"GIT_AUTHOR_NAME":                    "git.author_name",
-	"GIT_AUTHOR_EMAIL":                   "git.author_email",
-	"GIT_COMMITTER_NAME":                 "git.committer_name",
-	"GIT_COMMITTER_EMAIL":                "git.committer_email",
+	"defaults.cpus":                        "defaults.cpus",
+	"defaults.memory":                      "defaults.memory",
+	"defaults.pids_limit":                  "defaults.pids_limit",
+	"defaults.ssh":                         "defaults.ssh",
+	"defaults.docker":                      "defaults.docker",
+	"defaults.docker_socket":               "defaults.docker_socket",
+	"defaults.reuse_auth":                  "defaults.reuse_auth",
+	"defaults.reuse_gh_auth":               "defaults.reuse_gh_auth",
+	"defaults.seed_auth":                   "defaults.seed_auth",
+	"defaults.network":                     "defaults.network",
+	"defaults.identity":                    "defaults.identity",
+	"defaults.worktrees_dir":               "defaults.worktrees_dir",
+	"defaults.worktrees_mount":             "defaults.worktrees_mount",
+	"git.author_name":                      "git.author_name",
+	"git.author_email":                     "git.author_email",
+	"git.committer_name":                   "git.committer_name",
+	"git.committer_email":                  "git.committer_email",
+	"SAFE_AGENTIC_DEFAULT_CPUS":            "defaults.cpus",
+	"SAFE_AGENTIC_DEFAULT_MEMORY":          "defaults.memory",
+	"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT":      "defaults.pids_limit",
+	"SAFE_AGENTIC_DEFAULT_SSH":             "defaults.ssh",
+	"SAFE_AGENTIC_DEFAULT_DOCKER":          "defaults.docker",
+	"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET":   "defaults.docker_socket",
+	"SAFE_AGENTIC_DEFAULT_REUSE_AUTH":      "defaults.reuse_auth",
+	"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH":   "defaults.reuse_gh_auth",
+	"SAFE_AGENTIC_DEFAULT_SEED_AUTH":       "defaults.seed_auth",
+	"SAFE_AGENTIC_DEFAULT_NETWORK":         "defaults.network",
+	"SAFE_AGENTIC_DEFAULT_IDENTITY":        "defaults.identity",
+	"SAFE_AGENTIC_DEFAULT_WORKTREES_DIR":   "defaults.worktrees_dir",
+	"SAFE_AGENTIC_DEFAULT_WORKTREES_MOUNT": "defaults.worktrees_mount",
+	"GIT_AUTHOR_NAME":                      "git.author_name",
+	"GIT_AUTHOR_EMAIL":                     "git.author_email",
+	"GIT_COMMITTER_NAME":                   "git.committer_name",
+	"GIT_COMMITTER_EMAIL":                  "git.committer_email",
 }
 
 // Defaults returns the compiled-in fallback config used when config.toml is absent.
@@ -156,6 +164,44 @@ func StateDir() string {
 		return filepath.Join(base, ".safe-ag", "state")
 	}
 	return filepath.Join(UserDir(), "state")
+}
+
+// WorktreesDir returns the host directory that safe-agentic mounts into the VM
+// for managed git worktrees. Everything under this directory is exposed to the
+// VM at the stable mount point /worktrees; nothing else on the host is. It must
+// live under the invoking user's home directory because the Apple container
+// machine can only mount the user's home. Precedence: defaults.worktrees_dir in
+// config.toml, then the default ~/.safe-ag/worktrees.
+func WorktreesDir() string {
+	if cfg, err := LoadDefaults(ConfigPath()); err == nil && cfg.Defaults.WorktreesDir != "" {
+		return cfg.Defaults.WorktreesDir
+	}
+	return filepath.Join(UserDir(), "worktrees")
+}
+
+// WorktreesMountEnabled reports whether the operator has opted into the worktree
+// mount. It is OFF by default: enabling it switches the VM to home-mount=rw,
+// which shares the host home with the machine (a weaker boundary than the
+// default home-mount=none). Callers must treat this as an explicit trust choice.
+func WorktreesMountEnabled() bool {
+	cfg, err := LoadDefaults(ConfigPath())
+	if err != nil {
+		return false
+	}
+	return cfg.Defaults.WorktreesMount
+}
+
+func validateWorktreesDir(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("worktrees_dir must not be empty")
+	}
+	if !filepath.IsAbs(value) {
+		return fmt.Errorf("worktrees_dir must be an absolute path: %s", value)
+	}
+	if strings.ContainsAny(value, ",\n\r\x00") {
+		return fmt.Errorf("worktrees_dir must not contain commas or newlines: %q", value)
+	}
+	return nil
 }
 
 func AuditPath() string {
@@ -267,6 +313,12 @@ func (raw FileConfig) Effective() Config {
 		if raw.Defaults.Identity != nil {
 			cfg.Defaults.Identity = *raw.Defaults.Identity
 		}
+		if raw.Defaults.WorktreesDir != nil {
+			cfg.Defaults.WorktreesDir = *raw.Defaults.WorktreesDir
+		}
+		if raw.Defaults.WorktreesMount != nil {
+			cfg.Defaults.WorktreesMount = *raw.Defaults.WorktreesMount
+		}
 	}
 	if raw.Git != nil {
 		if raw.Git.AuthorName != nil {
@@ -313,7 +365,9 @@ func (s *fileDefaultsSection) isZero() bool {
 			s.ReuseGHAuth == nil &&
 			s.SeedAuth == nil &&
 			s.Network == nil &&
-			s.Identity == nil)
+			s.Identity == nil &&
+			s.WorktreesDir == nil &&
+			s.WorktreesMount == nil)
 }
 
 func (s *fileGitSection) isZero() bool {
@@ -374,6 +428,10 @@ func GetValue(cfg Config, key string) (string, error) {
 		return cfg.Defaults.Network, nil
 	case "defaults.identity":
 		return cfg.Defaults.Identity, nil
+	case "defaults.worktrees_dir":
+		return cfg.Defaults.WorktreesDir, nil
+	case "defaults.worktrees_mount":
+		return strconv.FormatBool(cfg.Defaults.WorktreesMount), nil
 	case "git.author_name":
 		return cfg.Git.AuthorName, nil
 	case "git.author_email":
@@ -436,6 +494,13 @@ func SetValue(raw *FileConfig, key, value string) error {
 			return err
 		}
 		raw.ensureDefaults().Identity = stringPtr(value)
+	case "defaults.worktrees_dir":
+		if err := validateWorktreesDir(value); err != nil {
+			return err
+		}
+		raw.ensureDefaults().WorktreesDir = stringPtr(value)
+	case "defaults.worktrees_mount":
+		return setBool(&raw.ensureDefaults().WorktreesMount, canonical, value)
 	case "git.author_name":
 		raw.ensureGit().AuthorName = stringPtr(value)
 	case "git.author_email":
@@ -497,6 +562,14 @@ func ResetValue(raw *FileConfig, key string) error {
 	case "defaults.identity":
 		if raw.Defaults != nil {
 			raw.Defaults.Identity = nil
+		}
+	case "defaults.worktrees_dir":
+		if raw.Defaults != nil {
+			raw.Defaults.WorktreesDir = nil
+		}
+	case "defaults.worktrees_mount":
+		if raw.Defaults != nil {
+			raw.Defaults.WorktreesMount = nil
 		}
 	case "git.author_name":
 		if raw.Git != nil {

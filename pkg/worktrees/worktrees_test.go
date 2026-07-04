@@ -162,3 +162,52 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+func TestVMPath(t *testing.T) {
+	root := "/home/u/.safe-ag/worktrees"
+	cases := []struct {
+		name    string
+		host    string
+		want    string
+		wantErr bool
+	}{
+		{"leaf", root + "/agent-x", "/worktrees/agent-x", false},
+		{"root itself", root, "/worktrees", false},
+		{"nested", root + "/org/repo", "/worktrees/org/repo", false},
+		{"outside tmp", "/tmp/elsewhere", "", true},
+		{"sibling prefix escape", "/home/u/.safe-ag/worktrees-evil", "", true},
+		{"parent", "/home/u/.safe-ag", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := VMPath(root, tc.host)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("VMPath(%q, %q) = %q, want error", root, tc.host, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("VMPath(%q, %q) error = %v", root, tc.host, err)
+			}
+			if got != tc.want {
+				t.Fatalf("VMPath(%q, %q) = %q, want %q", root, tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultPathUnderRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got := DefaultPath("agent-claude-x")
+	want := filepath.Join(home, ".safe-ag", "worktrees", "agent-claude-x")
+	if got != want {
+		t.Fatalf("DefaultPath = %q, want %q", got, want)
+	}
+	// The default worktree must translate cleanly into the VM mount point.
+	vm, err := VMPath(Root(), got)
+	if err != nil || vm != "/worktrees/agent-claude-x" {
+		t.Fatalf("VMPath(default) = %q err=%v, want /worktrees/agent-claude-x", vm, err)
+	}
+}

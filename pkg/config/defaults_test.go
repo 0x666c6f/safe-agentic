@@ -259,3 +259,42 @@ func TestSetValueRejectsInvalidDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreesDirConfigKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "custom-worktrees")
+
+	var raw FileConfig
+	if err := SetValue(&raw, "defaults.worktrees_dir", dir); err != nil {
+		t.Fatalf("SetValue(worktrees_dir) error = %v", err)
+	}
+	cfg := raw.Effective()
+	if cfg.Defaults.WorktreesDir != dir {
+		t.Fatalf("WorktreesDir = %q, want %q", cfg.Defaults.WorktreesDir, dir)
+	}
+	if v, err := GetValue(cfg, "defaults.worktrees_dir"); err != nil || v != dir {
+		t.Fatalf("GetValue(worktrees_dir) = %q err=%v, want %q", v, err, dir)
+	}
+
+	// Relative paths are rejected (Docker bind + VM mount need an absolute path).
+	if err := SetValue(&FileConfig{}, "defaults.worktrees_dir", "relative/path"); err == nil {
+		t.Fatalf("expected rejection of relative worktrees_dir")
+	}
+
+	// Reset clears the key.
+	if err := ResetValue(&raw, "defaults.worktrees_dir"); err != nil {
+		t.Fatalf("ResetValue error = %v", err)
+	}
+	if raw.Defaults != nil && raw.Defaults.WorktreesDir != nil {
+		t.Fatalf("worktrees_dir not cleared after reset")
+	}
+}
+
+func TestWorktreesDirDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got, want := WorktreesDir(), filepath.Join(home, ".safe-ag", "worktrees"); got != want {
+		t.Fatalf("WorktreesDir() = %q, want %q", got, want)
+	}
+}

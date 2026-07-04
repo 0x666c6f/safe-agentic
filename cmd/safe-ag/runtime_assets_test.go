@@ -72,6 +72,16 @@ func TestEntrypointExtractsCodexSupportFiles(t *testing.T) {
 	}
 }
 
+func TestDockerfileStripsVaultFileCapability(t *testing.T) {
+	dockerfile, err := os.ReadFile(filepath.Join("..", "..", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	if !strings.Contains(string(dockerfile), `setcap -r /usr/bin/vault`) {
+		t.Fatalf("Dockerfile must strip vault cap_ipc_lock so no-new-privileges containers can exec the CLI")
+	}
+}
+
 func TestVMSetupRetriesDockerStart(t *testing.T) {
 	script, err := os.ReadFile(filepath.Join("..", "..", "vm", "setup.sh"))
 	if err != nil {

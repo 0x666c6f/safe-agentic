@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -36,8 +37,43 @@ type Worktree struct {
 
 var branchRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?$`)
 
+// VMMountPoint is the stable in-VM path where the host worktrees root is
+// bind-mounted by vm/setup.sh. Managed worktrees under Root() appear here, and
+// agent containers bind-mount the per-agent subdirectory into /workspace.
+const VMMountPoint = "/worktrees"
+
+// Root returns the host directory that holds all managed worktrees. It is the
+// only host path exposed to the VM (as /worktrees).
+func Root() string {
+	return config.WorktreesDir()
+}
+
 func DefaultPath(containerName string) string {
-	return filepath.Join(config.UserDir(), "worktrees", containerName)
+	return filepath.Join(Root(), containerName)
+}
+
+// VMPath translates a host worktree path under root into its in-VM path under
+// /worktrees. It fails for any path outside root, because the VM only mounts the
+// worktrees root — a worktree elsewhere on the host would be invisible (or, worse,
+// masked) inside the machine. root and hostPath are resolved to absolute paths
+// before comparison.
+func VMPath(root, hostPath string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktrees root: %w", err)
+	}
+	absPath, err := filepath.Abs(hostPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree path: %w", err)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("worktree path %s is outside the safe-agentic worktrees root %s; the VM only mounts that root at %s, so worktrees must live under it (default ~/.safe-ag/worktrees). Relocate it or set a new root with: safe-ag config set defaults.worktrees_dir <path> (must be under your home directory)", absPath, absRoot, VMMountPoint)
+	}
+	if rel == "." {
+		return VMMountPoint, nil
+	}
+	return path.Join(VMMountPoint, filepath.ToSlash(rel)), nil
 }
 
 func DefaultBranch(containerName string) string {

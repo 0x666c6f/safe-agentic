@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 	"github.com/spf13/cobra"
 )
 
@@ -37,6 +38,7 @@ var (
 	configureHostNAT        = configureHostNATImpl
 	hostIPForwardingEnabled = hostIPForwardingEnabledImpl
 	configureLaunchdSSHAuth = configureLaunchdSSHAuthImpl
+	reconcileHomeMount      = reconcileHomeMountImpl
 )
 
 func vmExistsImpl(vmName string) bool {
@@ -70,8 +72,135 @@ func startVMImpl(vmName string) error {
 	return start.Run()
 }
 
-func runVMBootstrapImpl(vmName string) ([]byte, error) {
-	return exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/sh", "/tmp/setup.sh").CombinedOutput()
+func runVMBootstrapImpl(vmName, worktreesDir, homeDir string) ([]byte, error) {
+	return exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/sh", "/tmp/setup.sh", worktreesDir, homeDir).CombinedOutput()
+}
+
+// machineCreateArgs builds the `container machine create` argument vector.
+// homeMount is "none" by default (no host sharing — the strongest posture) and
+// "rw" only when the worktree mount is explicitly enabled, so vm/setup.sh can
+// bind the worktrees root to /worktrees.
+func machineCreateArgs(vmName, homeMount string) []string {
+	return []string{"machine", "create", "alpine:3.22", "--name", vmName, "--cpus", "4", "--memory", "8G", "--home-mount", homeMount}
+}
+
+// worktreesHostDir resolves the host worktrees root, validates it lives under the
+// user's home (the only path an Apple container machine can mount into the VM),
+// and ensures it exists so the home mount carries it.
+func worktreesHostDir() (string, error) {
+	dir := config.WorktreesDir()
+	if err := validateWorktreesUnderHome(dir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create worktrees dir %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
+func validateWorktreesUnderHome(dir string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	absHome, err := filepath.Abs(home)
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolve worktrees dir: %w", err)
+	}
+	rel, err := filepath.Rel(absHome, absDir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("worktrees_dir %s must live under your home directory %s; the Apple container machine can only mount your home into the VM. Set one with: safe-ag config set defaults.worktrees_dir <path-under-home>", absDir, absHome)
+	}
+	return nil
+}
+
+// machineHomeMount reports the home-mount mode ("rw"/"ro"/"none"/"") of a machine.
+func machineHomeMount(vmName string) string {
+	out, err := exec.Command("container", "machine", "inspect", vmName).Output()
+	if err != nil {
+		return ""
+	}
+	var machines []struct {
+		HomeMount string `json:"homeMount"`
+	}
+	if err := json.Unmarshal(out, &machines); err != nil || len(machines) == 0 {
+		return ""
+	}
+	return machines[0].HomeMount
+}
+
+// reconcileHomeMountImpl switches an existing machine's home-mount to desired
+// ("none" or "rw") when it differs. Apple's container tool only applies the
+// change after a restart, so this stops the machine; the caller must (re)start
+// it. Returns true when the machine was reconfigured (and therefore stopped).
+func reconcileHomeMountImpl(vmName, desired string, stdout, stderr io.Writer) (bool, error) {
+	if machineHomeMount(vmName) == desired {
+		return false, nil
+	}
+	fmt.Fprintf(stdout, "Reconfiguring VM %s home-mount=%s (applied on restart)…\n", vmName, desired)
+	set := exec.Command("container", "machine", "set", "-n", vmName, "home-mount="+desired)
+	set.Stdout = stdout
+	set.Stderr = stderr
+	if err := set.Run(); err != nil {
+		return false, fmt.Errorf("set VM home-mount=%s: %w", desired, err)
+	}
+	stop := exec.Command("container", "machine", "stop", vmName)
+	stop.Stdout = stdout
+	stop.Stderr = stderr
+	if err := stop.Run(); err != nil {
+		return false, fmt.Errorf("stop VM to apply home-mount=%s: %w", desired, err)
+	}
+	return true, nil
+}
+
+// worktreeMountPlan resolves the desired VM posture from config and the setup
+// flags. When enabled it validates+creates the worktrees root and returns the
+// host home dir (used inside the VM to detach the rest of the home share).
+func worktreeMountPlan() (enabled bool, homeMount, worktreesDir, homeDir string, err error) {
+	if !config.WorktreesMountEnabled() {
+		return false, "none", "", "", nil
+	}
+	worktreesDir, err = worktreesHostDir()
+	if err != nil {
+		return false, "none", "", "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, "none", "", "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return true, "rw", worktreesDir, home, nil
+}
+
+// worktreesSentinelPath is the boot-local file vm/setup.sh writes with the host
+// root currently bound at /worktrees, so a re-run (and diagnose) can detect a
+// changed defaults.worktrees_dir. Keep in sync with WORKTREES_SENTINEL in
+// vm/setup.sh.
+const worktreesSentinelPath = "/run/safe-ag-worktrees-source"
+
+// verifyWorktreeMountLive confirms the /worktrees bind is actually mounted inside
+// the VM after bootstrap and points at the requested root. vm/setup.sh only warns
+// (and exits 0) if the bind fails, the host dir isn't visible, or the root
+// changed and could not be rebound, so setup must check from the host side before
+// claiming success — otherwise later --worktree spawns fail with no prior signal.
+func verifyWorktreeMountLive(ctx context.Context, vmRunner interface {
+	Run(context.Context, ...string) ([]byte, error)
+}, wantRoot string) error {
+	check := "test -d " + worktrees.VMMountPoint + " && mountpoint -q " + worktrees.VMMountPoint
+	if _, err := vmRunner.Run(ctx, "sh", "-c", check); err != nil {
+		return fmt.Errorf("worktree mount enabled but %s is not mounted in the VM. Check that: the worktrees dir is under your home directory, the machine is home-mount=rw (a restart applies the change), then rerun: safe-ag setup. Diagnose with: safe-ag diagnose", worktrees.VMMountPoint)
+	}
+	// Confirm the live bind points at the requested root, not a stale one left by a
+	// previous defaults.worktrees_dir. An empty sentinel means "unknown" (older
+	// bind or tee failure) — don't fail on that alone.
+	srcOut, _ := vmRunner.Run(ctx, "sh", "-c", "cat "+worktreesSentinelPath+" 2>/dev/null")
+	if cur := strings.TrimSpace(string(srcOut)); cur != "" && cur != wantRoot {
+		return fmt.Errorf("%s is bound to %s but you configured %s; the VM must reboot to rebind after changing worktrees_dir: safe-ag vm stop && safe-ag vm start", worktrees.VMMountPoint, cur, wantRoot)
+	}
+	return nil
 }
 
 func installVMSupportFilesImpl(vmName, buildRoot string) error {
@@ -337,18 +466,21 @@ func configureHostNATImpl(stdout, stderr io.Writer) error {
 		return err
 	}
 	subnets = append(subnets, "172.20.0.0/16")
-	iface, err := defaultHostInterface()
+	ifaces, err := hostNATInterfaces()
 	if err != nil {
 		return err
 	}
 	var rules []string
 	seen := map[string]bool{}
 	for _, subnet := range subnets {
-		if seen[subnet] {
-			continue
+		for _, iface := range ifaces {
+			key := subnet + "\x00" + iface
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			rules = append(rules, fmt.Sprintf("nat on %s from %s to any -> (%s)", iface, subnet, iface))
 		}
-		seen[subnet] = true
-		rules = append(rules, fmt.Sprintf("nat on %s from %s to any -> (%s)", iface, subnet, iface))
 	}
 	script := strings.Join([]string{
 		"/usr/sbin/sysctl -w net.inet.ip.forwarding=1 >/dev/null",
@@ -370,6 +502,56 @@ func configureHostNATImpl(stdout, stderr io.Writer) error {
 		return fmt.Errorf("configure Apple container host NAT: %w", err)
 	}
 	return nil
+}
+
+func hostNATInterfaces() ([]string, error) {
+	iface, err := defaultHostInterface()
+	if err != nil {
+		return nil, err
+	}
+	ifaces := []string{iface}
+	if vpnIfaces, err := vpnRouteInterfaces(); err == nil {
+		ifaces = append(ifaces, vpnIfaces...)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, candidate := range ifaces {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out, nil
+}
+
+func vpnRouteInterfaces() ([]string, error) {
+	out, err := exec.Command("netstat", "-rn", "-f", "inet").Output()
+	if err != nil {
+		return nil, fmt.Errorf("detect VPN route interfaces: %w", err)
+	}
+	return parseVPNRouteInterfaces(out), nil
+}
+
+func parseVPNRouteInterfaces(out []byte) []string {
+	seen := map[string]bool{}
+	var ifaces []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		iface := fields[len(fields)-1]
+		if !(strings.HasPrefix(iface, "utun") || strings.HasPrefix(iface, "ppp") || strings.HasPrefix(iface, "ipsec")) {
+			continue
+		}
+		if seen[iface] {
+			continue
+		}
+		seen[iface] = true
+		ifaces = append(ifaces, iface)
+	}
+	return ifaces
 }
 
 func appleContainerNATSubnets() ([]string, error) {
@@ -448,8 +630,55 @@ var setupCmd = &cobra.Command{
 	RunE:  runSetup,
 }
 
+var (
+	setupEnableWorktrees  bool
+	setupDisableWorktrees bool
+)
+
 func init() {
+	setupCmd.Flags().BoolVar(&setupEnableWorktrees, "enable-worktrees", false, "Enable the worktree mount (VM home-mount=rw; weakens VM isolation — see docs)")
+	setupCmd.Flags().BoolVar(&setupDisableWorktrees, "disable-worktrees", false, "Disable the worktree mount (VM home-mount=none; strongest isolation, --worktree unavailable)")
 	rootCmd.AddCommand(setupCmd)
+}
+
+// applyWorktreeSetupFlags persists the --enable-worktrees/--disable-worktrees
+// choice into config and prints the risk warning when enabling.
+func applyWorktreeSetupFlags(stdout io.Writer) error {
+	if setupEnableWorktrees && setupDisableWorktrees {
+		return fmt.Errorf("--enable-worktrees and --disable-worktrees are mutually exclusive")
+	}
+	if !setupEnableWorktrees && !setupDisableWorktrees {
+		return nil
+	}
+	raw, err := config.LoadRawConfig(config.ConfigPath())
+	if err != nil {
+		return err
+	}
+	val := "false"
+	if setupEnableWorktrees {
+		val = "true"
+	}
+	if err := config.SetValue(&raw, "defaults.worktrees_mount", val); err != nil {
+		return err
+	}
+	if err := config.SaveRawConfig(config.ConfigPath(), raw); err != nil {
+		return err
+	}
+	if setupEnableWorktrees {
+		printWorktreeMountWarning(stdout)
+	} else {
+		fmt.Fprintln(stdout, "Worktree mount disabled — VM will use home-mount=none (no host sharing).")
+	}
+	return nil
+}
+
+func printWorktreeMountWarning(w io.Writer) {
+	fmt.Fprintln(w, "⚠  Worktree mount ENABLED. The VM will run home-mount=rw, sharing your entire")
+	fmt.Fprintln(w, "   home directory with the machine at the virtiofs level. safe-agentic binds")
+	fmt.Fprintln(w, "   only the worktrees root to /worktrees and detaches/masks the rest, but this")
+	fmt.Fprintln(w, "   is a WEAKER boundary than the default (home-mount=none, no host sharing): a")
+	fmt.Fprintln(w, "   VM-root compromise or Docker escape could reach your host home. Keep secrets")
+	fmt.Fprintln(w, "   and unrelated projects out of the worktrees root.")
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
@@ -470,13 +699,23 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
+	// Apply --enable-worktrees/--disable-worktrees (persists config + warns).
+	if err := applyWorktreeSetupFlags(cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	// Resolve the desired VM posture. Default: home-mount=none (no host sharing).
+	worktreesEnabled, homeMount, worktreesDir, homeDir, err := worktreeMountPlan()
+	if err != nil {
+		return err
+	}
+
 	// Step 2: Check if Apple container machine exists.
 	vmExists := vmExists(vmName)
 
 	// Step 3: Create VM if needed.
 	if !vmExists {
-		fmt.Printf("Creating VM %s (alpine:3.22)…\n", vmName)
-		create := exec.Command("container", "machine", "create", "alpine:3.22", "--name", vmName, "--cpus", "4", "--memory", "8G", "--home-mount", "none")
+		fmt.Printf("Creating VM %s (alpine:3.22, home-mount=%s)…\n", vmName, homeMount)
+		create := exec.Command("container", append([]string(nil), machineCreateArgs(vmName, homeMount)...)...)
 		create.Stdout = cmd.OutOrStdout()
 		create.Stderr = cmd.ErrOrStderr()
 		if err := create.Run(); err != nil {
@@ -488,6 +727,11 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		time.Sleep(3 * time.Second)
 	} else {
 		fmt.Printf("✓ VM %s already exists\n", vmName)
+		// Reconcile home-mount to the desired posture (migrates in either
+		// direction: none↔rw) so the machine matches the worktree-mount setting.
+		if _, err := reconcileHomeMount(vmName, homeMount, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+			return err
+		}
 		if err := startVM(vmName); err != nil {
 			return fmt.Errorf("start VM: %w", err)
 		}
@@ -504,7 +748,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
 	}
-	setupOut, err := runVMBootstrap(vmName)
+	setupOut, err := runVMBootstrap(vmName, worktreesDir, homeDir)
 	if err != nil {
 		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
 	}
@@ -513,6 +757,18 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Println("✓ VM support files installed")
+	if worktreesEnabled {
+		// vm/setup.sh only WARNS (exit 0) if the /worktrees bind fails or the host
+		// dir isn't visible, so the user explicitly asked for worktrees but could
+		// still land on a machine where --worktree will fail. Verify the mount from
+		// the host side and fail the setup if it is not live.
+		if err := verifyWorktreeMountLive(ctx, vmRunner, worktreesDir); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Worktrees mounted: %s → %s (VM)\n", worktreesDir, worktrees.VMMountPoint)
+	} else {
+		fmt.Println("✓ Worktree mount disabled (home-mount=none). Enable with: safe-ag setup --enable-worktrees")
+	}
 
 	// Step 5: Verify Docker.
 	if _, err := vmRunner.Run(ctx, "docker", "info"); err != nil {
@@ -631,6 +887,15 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Resolve the desired posture (default home-mount=none) and reconcile it
+	// before booting so the machine matches the worktree-mount setting.
+	_, homeMount, worktreesDir, homeDir, err := worktreeMountPlan()
+	if err != nil {
+		return err
+	}
+	if _, err := reconcileHomeMount(vmName, homeMount, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		return err
+	}
 	fmt.Printf("Starting VM %s…\n", vmName)
 	if err := startVM(vmName); err != nil {
 		return fmt.Errorf("start VM: %w", err)
@@ -647,7 +912,7 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
 	}
-	setupOut, err := runVMBootstrap(vmName)
+	setupOut, err := runVMBootstrap(vmName, worktreesDir, homeDir)
 	if err != nil {
 		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
 	}
@@ -780,6 +1045,36 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		egressDetail = "IP forwarding off — VM has no internet egress; run: safe-ag vm start"
 	}
 	check("Host egress NAT (ip.forwarding)", forwarding, egressDetail)
+
+	// 6. Report the worktree-mount posture. Disabled (home-mount=none) is the
+	// default and the strongest isolation; enabling it trades that for --worktree.
+	worktreesEnabled := config.WorktreesMountEnabled()
+	homeMount := machineHomeMount(vmName)
+	if worktreesEnabled {
+		wantRoot := config.WorktreesDir()
+		_, mountErr := vmRunner.Run(ctx, "sh", "-c", "test -d "+worktrees.VMMountPoint+" && mountpoint -q "+worktrees.VMMountPoint)
+		srcOut, _ := vmRunner.Run(ctx, "sh", "-c", "cat "+worktreesSentinelPath+" 2>/dev/null")
+		curRoot := strings.TrimSpace(string(srcOut))
+		mounted := homeMount == "rw" && mountErr == nil
+		// A non-empty sentinel that disagrees with config means the machine still
+		// binds a previous worktrees_dir and needs a reboot to rebind.
+		sourceOK := curRoot == "" || curRoot == wantRoot
+		mountOK := mounted && sourceOK
+		detail := "enabled — home-mount=rw shares host home with the VM (weaker isolation); worktrees root visible at " + worktrees.VMMountPoint
+		switch {
+		case !mounted:
+			detail = fmt.Sprintf("enabled in config but home-mount=%q / %s mount absent — run: safe-ag setup to migrate the machine", homeMount, worktrees.VMMountPoint)
+		case !sourceOK:
+			detail = fmt.Sprintf("%s is bound to %s but config wants %s — reboot to rebind: safe-ag vm stop && safe-ag vm start", worktrees.VMMountPoint, curRoot, wantRoot)
+		}
+		check("Worktree mount ENABLED (weakened VM isolation)", mountOK, detail)
+	} else {
+		detail := "disabled (home-mount=none, strongest isolation); --worktree unavailable — enable with: safe-ag setup --enable-worktrees"
+		if homeMount == "rw" {
+			detail = "config disabled but VM still home-mount=rw — run: safe-ag setup to restore home-mount=none"
+		}
+		check("Worktree mount disabled (home-mount=none)", homeMount != "rw", detail)
+	}
 
 	cfg, cfgErr := config.LoadDefaults(config.DefaultsPath())
 	if cfgErr != nil {

@@ -276,6 +276,7 @@ type spawnResolved struct {
 	NetworkMode    string
 	ImageName      string
 	WorktreePath   string
+	WorktreeVMPath string
 	WorktreeBranch string
 }
 
@@ -283,17 +284,21 @@ func prepareSpawnWorktree(ctx context.Context, exec vmexec.Executor, opts SpawnO
 	if !opts.Worktree {
 		return nil
 	}
+	root := worktrees.Root()
 	candidate, err := worktreeCandidatePath(resolved.ContainerName, opts.WorktreePath)
 	if err != nil {
 		return err
 	}
-	if err := rejectKnownMaskedWorktreePath(candidate); err != nil {
+	// The VM only exposes the worktrees root (as /worktrees). Reject out-of-root
+	// paths up front, before creating a worktree we could never mount.
+	vmPath, err := worktrees.VMPath(root, candidate)
+	if err != nil {
 		return err
 	}
-	if err := validateWorktreeMountPath(candidate); err != nil {
+	if err := validateWorktreeMountPath(vmPath); err != nil {
 		return err
 	}
-	if err := ensureWorktreeParentVisibleInVM(ctx, exec, candidate, opts.DryRun); err != nil {
+	if err := ensureWorktreeMountReadyInVM(ctx, exec, vmPath, root, opts.DryRun); err != nil {
 		return err
 	}
 	wt, err := worktrees.Prepare(worktrees.Options{
@@ -306,9 +311,16 @@ func prepareSpawnWorktree(ctx context.Context, exec vmexec.Executor, opts SpawnO
 	if err != nil {
 		return err
 	}
+	// Recompute the VM path from the prepared worktree so the docker bind matches
+	// exactly what git worktree add created on the host.
+	resolvedVMPath, err := worktrees.VMPath(root, wt.Path)
+	if err != nil {
+		return err
+	}
 	resolved.WorktreePath = wt.Path
+	resolved.WorktreeVMPath = resolvedVMPath
 	resolved.WorktreeBranch = wt.Branch
-	fmt.Printf("Worktree: %s (%s)\n", wt.Path, wt.Branch)
+	fmt.Printf("Worktree: %s (%s) → VM %s\n", wt.Path, wt.Branch, resolvedVMPath)
 	if len(wt.Includes) > 0 {
 		fmt.Printf("Included local files: %s\n", strings.Join(wt.Includes, ", "))
 	}
@@ -561,7 +573,7 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 		Memory:          resolved.Memory,
 		CPUs:            resolved.CPUs,
 		PIDsLimit:       resolved.PIDsLimit,
-		WorkspaceSource: resolved.WorktreePath,
+		WorkspaceSource: resolved.WorktreeVMPath,
 	})
 	docker.AppendCacheMounts(cmd)
 	if opts.AutoTrust {

@@ -190,6 +190,12 @@ func TestStartSpawnContainerStartsDinDBeforeAgent(t *testing.T) {
 	}
 }
 
+// worktreeUnderRoot returns a worktree path under the (HOME-derived) worktrees
+// root, plus its expected in-VM path, for the given leaf name.
+func worktreeUnderRoot(home, leaf string) (string, string) {
+	return filepath.Join(home, ".safe-ag", "worktrees", leaf), "/worktrees/" + leaf
+}
+
 func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
 	_, cleanup := testSetup(t)
 	defer cleanup()
@@ -203,9 +209,12 @@ func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
 		t.Fatalf("chdir repo: %v", err)
 	}
 	defer os.Chdir(oldWD)
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 
-	worktreePath := filepath.Join(t.TempDir(), "agent-worktree")
+	// Worktrees must live under the mounted root; the container bind uses the
+	// translated in-VM path (/worktrees/...), not the host path.
+	worktreePath, vmPath := worktreeUnderRoot(home, "agent-worktree")
 	output := captureOutput(func() {
 		err := executeSpawn(SpawnOpts{
 			AgentType:      "claude",
@@ -222,12 +231,16 @@ func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
 	if !strings.Contains(output, "Worktree: "+worktreePath) {
 		t.Fatalf("dry-run output missing worktree path:\n%s", output)
 	}
-	if !strings.Contains(output, "type=bind,src="+worktreePath+",dst=/workspace") {
-		t.Fatalf("dry-run output missing workspace bind:\n%s", output)
+	if !strings.Contains(output, "→ VM "+vmPath) {
+		t.Fatalf("dry-run output missing VM path translation:\n%s", output)
+	}
+	if !strings.Contains(output, "type=bind,src="+vmPath+",dst=/workspace") {
+		t.Fatalf("dry-run output missing translated workspace bind:\n%s", output)
 	}
 	if !strings.Contains(output, "SAFE_AGENTIC_WORKTREE=1") {
 		t.Fatalf("dry-run output missing worktree env:\n%s", output)
 	}
+	// The label keeps the host path so host-side git ops (diff/snapshot) work.
 	if !strings.Contains(output, "safe-agentic.worktree="+worktreePath) {
 		t.Fatalf("dry-run output missing worktree label:\n%s", output)
 	}
@@ -239,7 +252,7 @@ func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
 	}
 }
 
-func TestExecuteSpawnWorktreeRejectsMaskedMacPath(t *testing.T) {
+func TestExecuteSpawnWorktreeRejectsOutOfRootPath(t *testing.T) {
 	_, cleanup := testSetup(t)
 	defer cleanup()
 
@@ -252,16 +265,19 @@ func TestExecuteSpawnWorktreeRejectsMaskedMacPath(t *testing.T) {
 		t.Fatalf("chdir repo: %v", err)
 	}
 	defer os.Chdir(oldWD)
-	t.Setenv("HOME", "/Users/tester")
+	t.Setenv("HOME", t.TempDir())
 
+	// A path outside the worktrees root cannot be mounted (the VM only exposes
+	// the root), so it must be rejected before any worktree is created.
 	err = executeSpawn(SpawnOpts{
-		AgentType: "claude",
-		Name:      "masked-worktree",
-		Worktree:  true,
-		DryRun:    true,
+		AgentType:    "claude",
+		Name:         "out-of-root-worktree",
+		Worktree:     true,
+		WorktreePath: filepath.Join(t.TempDir(), "elsewhere"),
+		DryRun:       true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "hidden from the safe-agentic VM") {
-		t.Fatalf("executeSpawn() error = %v, want masked worktree path error", err)
+	if err == nil || !strings.Contains(err.Error(), "outside the safe-agentic worktrees root") {
+		t.Fatalf("executeSpawn() error = %v, want out-of-root worktree error", err)
 	}
 }
 
@@ -278,12 +294,17 @@ func TestExecuteSpawnWorktreeRejectsMountOptionCharacters(t *testing.T) {
 		t.Fatalf("chdir repo: %v", err)
 	}
 	defer os.Chdir(oldWD)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 
+	// A comma in the leaf survives translation into the /worktrees bind path and
+	// must be rejected because Docker --mount cannot encode it.
+	badPath, _ := worktreeUnderRoot(home, "bad,path")
 	err = executeSpawn(SpawnOpts{
 		AgentType:    "claude",
 		Name:         "bad-worktree-path",
 		Worktree:     true,
-		WorktreePath: filepath.Join(t.TempDir(), "bad,path"),
+		WorktreePath: badPath,
 		DryRun:       true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "Docker --mount cannot safely encode") {
@@ -291,10 +312,11 @@ func TestExecuteSpawnWorktreeRejectsMountOptionCharacters(t *testing.T) {
 	}
 }
 
-func TestExecuteSpawnWorktreeChecksVMVisibilityBeforeCreate(t *testing.T) {
+func TestExecuteSpawnWorktreeChecksVMMountBeforeCreate(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
-	fake.SetError("test -f ", "not visible")
+	// Simulate a machine that was never migrated: /worktrees is not mounted.
+	fake.SetError("sh -c test -d /worktrees", "no mount")
 
 	repo := initSpawnGitRepo(t)
 	oldWD, err := os.Getwd()
@@ -305,19 +327,21 @@ func TestExecuteSpawnWorktreeChecksVMVisibilityBeforeCreate(t *testing.T) {
 		t.Fatalf("chdir repo: %v", err)
 	}
 	defer os.Chdir(oldWD)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 
-	worktreePath := filepath.Join(t.TempDir(), "agent-worktree")
+	worktreePath, _ := worktreeUnderRoot(home, "agent-worktree")
 	err = executeSpawn(SpawnOpts{
 		AgentType:    "claude",
-		Name:         "invisible-worktree",
+		Name:         "unmounted-worktree",
 		Worktree:     true,
 		WorktreePath: worktreePath,
 	})
-	if err == nil || !strings.Contains(err.Error(), "not visible inside VM") {
-		t.Fatalf("executeSpawn() error = %v, want VM visibility error", err)
+	if err == nil || !strings.Contains(err.Error(), "has no /worktrees mount") {
+		t.Fatalf("executeSpawn() error = %v, want worktree mount error", err)
 	}
 	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); !os.IsNotExist(err) {
-		t.Fatalf("worktree should not be created before visibility passes, stat err=%v", err)
+		t.Fatalf("worktree should not be created before the mount check passes, stat err=%v", err)
 	}
 }
 
@@ -505,5 +529,41 @@ func TestTruncate(t *testing.T) {
 	got := truncate("this is a long string", 10)
 	if got != "this is a ..." {
 		t.Fatalf("truncate() = %q", got)
+	}
+}
+
+func TestExecuteSpawnWorktreeRejectsStaleRoot(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	// /worktrees is mounted (mount check passes by default) but the VM's sentinel
+	// records a different (stale) root than the one this checkout resolves to —
+	// defaults.worktrees_dir changed after setup. Spawn must refuse before it
+	// creates a worktree Docker would then bind from the wrong VM path.
+	fake.SetResponse("sh -c cat /run/safe-ag-worktrees-source", "/some/old/worktrees\n")
+
+	repo := initSpawnGitRepo(t)
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+	defer os.Chdir(oldWD)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	worktreePath, _ := worktreeUnderRoot(home, "agent-worktree")
+	err = executeSpawn(SpawnOpts{
+		AgentType:    "claude",
+		Name:         "stale-root-worktree",
+		Worktree:     true,
+		WorktreePath: worktreePath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "worktrees root changed") {
+		t.Fatalf("executeSpawn() error = %v, want stale worktrees root error", err)
+	}
+	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("worktree must not be created on a stale root, stat err=%v", err)
 	}
 }

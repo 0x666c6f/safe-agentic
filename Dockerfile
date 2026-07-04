@@ -103,6 +103,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     nodejs \
     terraform \
     vault \
+ && setcap -r /usr/bin/vault \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 

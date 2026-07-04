@@ -2,6 +2,20 @@
 # Idempotent VM bootstrap: hardens Apple container machine, installs Docker, configures daemon.
 set -eu
 
+# Host worktrees root (under the mounted home) to expose at /worktrees, if any,
+# plus the host home mount point to detach once the worktrees bind is in place.
+# Both empty unless the worktree mount is explicitly enabled (home-mount=rw).
+WORKTREES_HOST="${1:-}"
+HOME_MOUNT="${2:-}"
+WORKTREES_MOUNT=/worktrees
+# Boot-local record of the host root currently bound at /worktrees. The mount
+# reports its device as "virtiofs" (so /proc/mounts cannot distinguish roots
+# after defaults.worktrees_dir changes); this sentinel stores the exact host
+# path so a re-run can detect a changed root and rebind. /run is tmpfs, so it
+# resets on reboot — exactly when the bind is recreated. Keep this path in sync
+# with worktreesSentinelPath in cmd/safe-ag/setup.go.
+WORKTREES_SENTINEL=/run/safe-ag-worktrees-source
+
 TOTAL_STEPS=5
 step() {
   step_number="$1"
@@ -73,6 +87,52 @@ echo "==> Setting up safe-agentic VM..."
 # =============================================================================
 step 1 "Hardening VM: blocking macOS filesystem access..."
 cd /
+
+# Expose ONLY the managed worktrees directory to the VM. The Apple container
+# machine can mount just the user's home directory (home-mount=rw); we bind the
+# worktrees subtree to a stable /worktrees BEFORE masking the rest of the home
+# below. The bind pins its own mount, so it survives the tmpfs mask over /Users
+# while every other host path stays hidden. Agent containers only ever bind-mount
+# a per-agent subdirectory of /worktrees, so the host exposure is exactly the
+# worktrees root and nothing else.
+if [ -n "$WORKTREES_HOST" ]; then
+  as_root mkdir -p "$WORKTREES_MOUNT"
+  # If /worktrees is already bound, keep it only when its source still matches the
+  # requested root. Otherwise defaults.worktrees_dir changed under us: drop the
+  # stale bind so we rebind to the new root below instead of silently serving the
+  # old one (which would make setup report the new root while --worktree path
+  # translations still point at the old bind).
+  if mountpoint -q "$WORKTREES_MOUNT" 2>/dev/null; then
+    if [ -f "$WORKTREES_SENTINEL" ] && [ "$(cat "$WORKTREES_SENTINEL" 2>/dev/null)" = "$WORKTREES_HOST" ]; then
+      echo "    OK: $WORKTREES_MOUNT already bound to $WORKTREES_HOST"
+    else
+      echo "    Rebinding $WORKTREES_MOUNT: worktrees root changed to $WORKTREES_HOST"
+      as_root umount -l "$WORKTREES_MOUNT" 2>/dev/null || true
+    fi
+  fi
+  if ! mountpoint -q "$WORKTREES_MOUNT" 2>/dev/null; then
+    if [ -d "$WORKTREES_HOST" ]; then
+      if as_root mount --bind "$WORKTREES_HOST" "$WORKTREES_MOUNT" 2>/dev/null; then
+        echo "    OK: bound worktrees $WORKTREES_HOST -> $WORKTREES_MOUNT"
+        printf '%s' "$WORKTREES_HOST" | as_root tee "$WORKTREES_SENTINEL" >/dev/null 2>&1 || true
+        # Detach the rest of the shared home so only the worktrees subtree stays
+        # reachable. The bind pins that subtree, so it survives this umount; the
+        # tmpfs mask over /Users below is the second layer of defense.
+        if [ -n "$HOME_MOUNT" ] && mountpoint -q "$HOME_MOUNT" 2>/dev/null; then
+          if as_root umount -l "$HOME_MOUNT" 2>/dev/null; then
+            echo "    OK: detached host home $HOME_MOUNT (only $WORKTREES_MOUNT remains)"
+          else
+            echo "    WARNING: could not detach $HOME_MOUNT; relying on tmpfs mask"
+          fi
+        fi
+      else
+        echo "    WARNING: could not bind $WORKTREES_HOST -> $WORKTREES_MOUNT"
+      fi
+    else
+      echo "    WARNING: worktrees dir $WORKTREES_HOST not visible in VM; needs home-mount=rw and a fresh VM boot after changing worktrees_dir. Enable with: safe-ag setup --enable-worktrees"
+    fi
+  fi
+fi
 
 for mnt in /Users /mnt/mac /Volumes /private; do
   if mountpoint -q "$mnt" 2>/dev/null; then
