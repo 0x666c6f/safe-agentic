@@ -7,5 +7,6 @@ export {
 };
 
 export type {
-    EventItem
+    EventItem,
+    Project
 } from "./models.js";

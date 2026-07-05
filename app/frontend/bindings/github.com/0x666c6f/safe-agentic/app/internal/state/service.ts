@@ -28,3 +28,21 @@ export function Inbox(n: number): $CancellablePromise<$models.EventItem[] | null
 export function PipelineFiles(): $CancellablePromise<string[] | null> {
     return $Call.ByID(2603917901);
 }
+
+export function ProjectRemove(url: string): $CancellablePromise<void> {
+    return $Call.ByID(3307348241, url);
+}
+
+/**
+ * ProjectUse bumps the use count, adding the repo if new.
+ */
+export function ProjectUse(url: string): $CancellablePromise<void> {
+    return $Call.ByID(2231767688, url);
+}
+
+/**
+ * Projects returns saved repos sorted by use count desc, then recency desc.
+ */
+export function Projects(): $CancellablePromise<$models.Project[] | null> {
+    return $Call.ByID(118778646);
+}

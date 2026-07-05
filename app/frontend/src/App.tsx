@@ -38,6 +38,7 @@ export default function App() {
         select(name);
         if (name) useStore.getState().setView("agents");
       }),
+      Events.On("focus.spawn", () => useStore.getState().setView("spawn")),
     ];
     return () => offs.forEach((off) => off());
   }, []);

@@ -1,46 +1,16 @@
-// Saved repo list for the spawn form, sorted by most used.
-// Backed by localStorage (per-app WKWebView storage); falls back to an
-// in-memory map when localStorage is unavailable (unit tests).
+// Saved projects (repos) for the spawn form — backed by the Go-side store
+// (~/.safe-ag/app-projects.json) shared with the systray Projects menu.
+import { Service } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
 
-const KEY = "safeag.repoHistory.v1";
-
-type Entry = { count: number; last: number };
-type History = Record<string, Entry>;
-
-const mem: { data: string | null } = { data: null };
-
-function readRaw(): string | null {
-  try { return window.localStorage.getItem(KEY); } catch { return mem.data; }
-}
-function writeRaw(v: string) {
-  try { window.localStorage.setItem(KEY, v); } catch { mem.data = v; }
+export async function recordRepoUse(url: string): Promise<void> {
+  if (url.trim()) await Service.ProjectUse(url.trim());
 }
 
-function load(): History {
-  const raw = readRaw();
-  if (!raw) return {};
-  try { return JSON.parse(raw) as History; } catch { return {}; }
+export async function topRepos(n = 6): Promise<string[]> {
+  const list = (await Service.Projects()) ?? [];
+  return list.slice(0, n).map((p: any) => p.url);
 }
 
-export function recordRepoUse(url: string, now = Date.now()): void {
-  const u = url.trim();
-  if (!u) return;
-  const h = load();
-  const e = h[u] ?? { count: 0, last: 0 };
-  h[u] = { count: e.count + 1, last: now };
-  writeRaw(JSON.stringify(h));
-}
-
-export function topRepos(n = 5): string[] {
-  const h = load();
-  return Object.entries(h)
-    .sort(([, a], [, b]) => b.count - a.count || b.last - a.last)
-    .slice(0, n)
-    .map(([url]) => url);
-}
-
-export function forgetRepo(url: string): void {
-  const h = load();
-  delete h[url];
-  writeRaw(JSON.stringify(h));
+export async function forgetRepo(url: string): Promise<void> {
+  await Service.ProjectRemove(url);
 }

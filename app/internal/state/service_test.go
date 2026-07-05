@@ -60,3 +60,22 @@ func TestPipelineFilesStripsExtensions(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectsSortAndRemove(t *testing.T) {
+	s := &Service{ProjectsPath: filepath.Join(t.TempDir(), "p.json")}
+	s.ProjectUse("git@github.com:o/a.git")
+	s.ProjectUse("git@github.com:o/b.git")
+	s.ProjectUse("git@github.com:o/b.git")
+	s.ProjectUse(" ")
+	list := s.Projects()
+	if len(list) != 2 || list[0].URL != "git@github.com:o/b.git" || list[0].Count != 2 {
+		t.Fatalf("list=%+v", list)
+	}
+	s.ProjectRemove("git@github.com:o/b.git")
+	if l := s.Projects(); len(l) != 1 {
+		t.Fatalf("remove failed: %+v", l)
+	}
+	if got := ShortRepoName("https://github.com/o/repo.git"); got != "o/repo" {
+		t.Fatalf("short name: %q", got)
+	}
+}

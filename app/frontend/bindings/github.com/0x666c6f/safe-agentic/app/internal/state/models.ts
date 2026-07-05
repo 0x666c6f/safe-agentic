@@ -8,3 +8,9 @@ export interface EventItem {
     "status": string;
     "container": string;
 }
+
+export interface Project {
+    "url": string;
+    "count": number;
+    "last": number;
+}

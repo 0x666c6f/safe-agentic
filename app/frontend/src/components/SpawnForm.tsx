@@ -12,7 +12,9 @@ export function SpawnForm() {
   });
   const [templates, setTemplates] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
-  const [savedRepos, setSavedRepos] = useState<string[]>(() => topRepos(6));
+  const [savedRepos, setSavedRepos] = useState<string[]>([]);
+  const refreshRepos = () => topRepos(6).then(setSavedRepos).catch(() => {});
+  useEffect(() => { refreshRepos(); }, []);
 
   useEffect(() => {
     AgentService.TemplateList()
@@ -29,7 +31,7 @@ export function SpawnForm() {
       const out = await AgentService.Spawn({ ...req, DryRun: dryRun } as any);
       if (dryRun) setPreview(out);
       else {
-        if (req.Repo) { recordRepoUse(req.Repo); setSavedRepos(topRepos(6)); }
+        if (req.Repo) { await recordRepoUse(req.Repo); refreshRepos(); }
         toast(`spawned:\n${out.trim().split("\n").slice(-3).join("\n")}`);
         setView("agents");
       }
@@ -66,7 +68,7 @@ export function SpawnForm() {
                 {r.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "")}
               </button>
               <button className="text-neutral-500 hover:text-red-400" title="forget"
-                onClick={() => { forgetRepo(r); setSavedRepos(topRepos(6)); }}>✕</button>
+                onClick={() => forgetRepo(r).then(refreshRepos)}>✕</button>
             </span>
           ))}
         </div>

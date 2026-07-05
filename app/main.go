@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,43 @@ func (w *wailsEmitter) Emit(name string, data any) {
 }
 
 var _ emit.Emitter = (*wailsEmitter)(nil)
+
+// trayHeader is the disabled first row: the aggregate "active status".
+func trayHeader(agents []poll.Agent, needsYou map[string]bool) string {
+	working, needs, idle := 0, 0, 0
+	for _, a := range agents {
+		if !a.Running {
+			continue
+		}
+		switch {
+		case needsYou[a.Name] || a.State == "blocked":
+			needs++
+		case a.Activity == "Working":
+			working++
+		default:
+			idle++
+		}
+	}
+	if working+needs+idle == 0 {
+		return "No active chats"
+	}
+	return fmt.Sprintf("%d working · %d need you · %d idle", working, needs, idle)
+}
+
+// chatMenuLine renders one chat row: status emoji + short name + state.
+func chatMenuLine(a poll.Agent, needsYou map[string]bool) string {
+	emoji, status := "⚪", "idle"
+	switch {
+	case needsYou[a.Name] || a.State == "blocked":
+		emoji, status = "🟡", "needs you"
+		if a.StateReason != "" {
+			status = a.StateReason
+		}
+	case a.Activity == "Working":
+		emoji, status = "🟢", "working"
+	}
+	return fmt.Sprintf("%s %s — %s", emoji, strings.TrimPrefix(a.Name, "agent-"), status)
+}
 
 func trayLabel(agents []poll.Agent, needsYou map[string]bool) string {
 	working, needs, idle := 0, 0, 0
@@ -133,18 +171,43 @@ func main() {
 		}
 		tray.SetLabel(trayLabel(agents, needsYou))
 		menu := application.NewMenu()
+		menu.Add(trayHeader(agents, needsYou)).SetEnabled(false)
+		menu.AddSeparator()
 		for _, a := range agents {
 			if !a.Running {
 				continue
 			}
 			name := a.Name
-			menu.Add(fmt.Sprintf("%s — %s", name, a.Activity)).OnClick(func(*application.Context) {
+			menu.Add(chatMenuLine(a, needsYou)).OnClick(func(*application.Context) {
 				win.Show()
 				win.Focus()
 				em.Emit("focus.agent", name)
 			})
 		}
 		menu.AddSeparator()
+		menu.Add("Projects").SetEnabled(false)
+		for _, p := range stateSvc.Projects() {
+			url := p.URL
+			menu.Add("▶ " + state.ShortRepoName(url)).OnClick(func(*application.Context) {
+				go func() {
+					stateSvc.ProjectUse(url)
+					if _, err := agentSvc.Spawn(svc.SpawnRequest{Agent: "claude", Repo: url, SSH: true}); err != nil {
+						em.Emit("event.new", map[string]any{"status": "failed",
+							"event": events.Event{Type: "tray.spawn-failed", Payload: map[string]string{"container": url}}})
+						log.Printf("tray spawn %s: %v", url, err)
+					}
+				}()
+				win.Show()
+				win.Focus()
+			})
+		}
+		menu.Add("New chat…").OnClick(func(*application.Context) {
+			win.Show()
+			win.Focus()
+			em.Emit("focus.spawn", nil)
+		})
+		menu.AddSeparator()
+		menu.Add("Open safe-ag").OnClick(func(*application.Context) { win.Show(); win.Focus() })
 		menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 		tray.SetMenu(menu)
 	}

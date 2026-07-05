@@ -1,8 +1,13 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
@@ -17,6 +22,8 @@ type EventItem struct {
 
 type Service struct {
 	AuditPath, EventsPath, PipelinesDir string
+	ProjectsPath                        string
+	pmu                                 sync.Mutex
 }
 
 func NewService() *Service {
@@ -24,6 +31,7 @@ func NewService() *Service {
 		AuditPath:    config.AuditPath(),
 		EventsPath:   config.EventsPath(),
 		PipelinesDir: config.PipelinesDir(),
+		ProjectsPath: filepath.Join(config.UserDir(), "app-projects.json"),
 	}
 }
 
@@ -88,4 +96,88 @@ func (s *Service) PipelineFiles() ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// --- Projects: saved repos for quick chat launches, most-used first. ---
+
+type Project struct {
+	URL   string `json:"url"`
+	Count int    `json:"count"`
+	Last  int64  `json:"last"`
+}
+
+func (s *Service) loadProjects() []Project {
+	data, err := os.ReadFile(s.ProjectsPath)
+	if err != nil {
+		return nil
+	}
+	var out []Project
+	if json.Unmarshal(data, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func (s *Service) saveProjects(list []Project) error {
+	if err := os.MkdirAll(filepath.Dir(s.ProjectsPath), 0o755); err != nil {
+		return err
+	}
+	data, _ := json.Marshal(list)
+	// ponytail: direct write, no tmp+rename — single-process, tiny file
+	return os.WriteFile(s.ProjectsPath, data, 0o600)
+}
+
+// Projects returns saved repos sorted by use count desc, then recency desc.
+func (s *Service) Projects() []Project {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	list := s.loadProjects()
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].Count != list[j].Count {
+			return list[i].Count > list[j].Count
+		}
+		return list[i].Last > list[j].Last
+	})
+	return list
+}
+
+// ProjectUse bumps the use count, adding the repo if new.
+func (s *Service) ProjectUse(url string) error {
+	u := strings.TrimSpace(url)
+	if u == "" {
+		return nil
+	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	list := s.loadProjects()
+	for i := range list {
+		if list[i].URL == u {
+			list[i].Count++
+			list[i].Last = time.Now().Unix()
+			return s.saveProjects(list)
+		}
+	}
+	return s.saveProjects(append(list, Project{URL: u, Count: 1, Last: time.Now().Unix()}))
+}
+
+func (s *Service) ProjectRemove(url string) error {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	list := s.loadProjects()
+	out := list[:0]
+	for _, p := range list {
+		if p.URL != url {
+			out = append(out, p)
+		}
+	}
+	return s.saveProjects(out)
+}
+
+// ShortRepoName renders "org/repo" from common git URL shapes.
+func ShortRepoName(url string) string {
+	u := strings.TrimSuffix(url, ".git")
+	for _, p := range []string{"git@github.com:", "https://github.com/", "http://github.com/"} {
+		u = strings.TrimPrefix(u, p)
+	}
+	return u
 }
