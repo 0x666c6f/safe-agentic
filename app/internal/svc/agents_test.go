@@ -68,3 +68,13 @@ func TestSpawnArgs(t *testing.T) {
 		t.Fatalf("\ngot:  %s\nwant: %s", got, want)
 	}
 }
+
+func TestSpawnArgsSanitizesName(t *testing.T) {
+	got := strings.Join(spawnArgs(SpawnRequest{Agent: "claude", Name: "test local"}), " ")
+	if got != "spawn claude --name test-local --background" {
+		t.Fatalf("argv: %q", got)
+	}
+	if got := strings.Join(spawnArgs(SpawnRequest{Agent: "claude", Name: "  !!  "}), " "); got != "spawn claude --background" {
+		t.Fatalf("all-invalid name must be dropped: %q", got)
+	}
+}

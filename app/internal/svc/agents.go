@@ -2,6 +2,8 @@ package svc
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
@@ -114,10 +116,14 @@ type SpawnRequest struct {
 	SSH, ReuseAuth, Worktree, DryRun                           bool
 }
 
+// nameSanitize maps user-typed names onto the engine's allowed charset
+// (letters, numbers, ., _, -): whitespace/invalid runs become dashes.
+var nameSanitize = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
 func spawnArgs(req SpawnRequest) []string {
 	args := []string{"spawn", req.Agent}
-	if req.Name != "" {
-		args = append(args, "--name", req.Name)
+	if n := strings.Trim(nameSanitize.ReplaceAllString(req.Name, "-"), "-."); n != "" {
+		args = append(args, "--name", n)
 	}
 	if req.Repo != "" {
 		args = append(args, "--repo", req.Repo)

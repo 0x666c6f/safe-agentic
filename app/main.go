@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/emit"
@@ -30,6 +29,12 @@ import (
 //
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// Menubar glyph: safe-agentic shield rendered as a macOS template icon
+// (black + alpha; generated from docs/assets/dashboard-favicon.png).
+//
+//go:embed assets/trayicon-template.png
+var trayIcon []byte
 
 // wailsEmitter late-binds the app so services can be constructed first.
 type wailsEmitter struct {
@@ -140,7 +145,7 @@ func main() {
 	tray := app.SystemTray.New()
 	// Icon only in the menubar (template icon adapts to light/dark);
 	// counts live in the dropdown header.
-	tray.SetIcon(icons.SystrayMacTemplate)
+	tray.SetTemplateIcon(trayIcon)
 	rebuild := func(agents []poll.Agent) {
 		needsMu.Lock()
 		defer needsMu.Unlock()

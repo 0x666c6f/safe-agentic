@@ -14,5 +14,11 @@ export function errText(action: string, e: unknown): string {
   const msg =
     e instanceof Error ? e.message || e.name :
     typeof e === "string" ? e : JSON.stringify(e);
+  // Wails RuntimeError rejections serialize the whole error object; show
+  // just its human message when the payload is JSON.
+  try {
+    const j = JSON.parse(msg);
+    if (j?.message) return `${action}: ${j.message}`;
+  } catch { /* plain string */ }
   return `${action}: ${msg || "unknown error"}`;
 }
