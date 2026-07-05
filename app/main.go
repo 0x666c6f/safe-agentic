@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/emit"
@@ -89,24 +90,6 @@ func chatMenuLine(a poll.Agent, needsYou map[string]bool) string {
 	return fmt.Sprintf("%s %s — %s", emoji, strings.TrimPrefix(a.Name, "agent-"), status)
 }
 
-func trayLabel(agents []poll.Agent, needsYou map[string]bool) string {
-	working, needs, idle := 0, 0, 0
-	for _, a := range agents {
-		if !a.Running {
-			continue
-		}
-		switch {
-		case needsYou[a.Name] || a.State == "blocked":
-			needs++
-		case a.Activity == "Working":
-			working++
-		default:
-			idle++
-		}
-	}
-	return fmt.Sprintf("🟢%d 🟡%d ⚪%d", working, needs, idle)
-}
-
 func vmName() string {
 	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
 		return v
@@ -155,6 +138,9 @@ func main() {
 	var needsMu sync.Mutex
 	needsYou := map[string]bool{}
 	tray := app.SystemTray.New()
+	// Icon only in the menubar (template icon adapts to light/dark);
+	// counts live in the dropdown header.
+	tray.SetIcon(icons.DefaultMacTemplateIcon)
 	rebuild := func(agents []poll.Agent) {
 		needsMu.Lock()
 		defer needsMu.Unlock()
@@ -169,7 +155,6 @@ func main() {
 				delete(needsYou, name)
 			}
 		}
-		tray.SetLabel(trayLabel(agents, needsYou))
 		menu := application.NewMenu()
 		menu.Add(trayHeader(agents, needsYou)).SetEnabled(false)
 		menu.AddSeparator()
