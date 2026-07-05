@@ -140,7 +140,7 @@ func main() {
 	tray := app.SystemTray.New()
 	// Icon only in the menubar (template icon adapts to light/dark);
 	// counts live in the dropdown header.
-	tray.SetIcon(icons.DefaultMacTemplateIcon)
+	tray.SetIcon(icons.SystrayMacTemplate)
 	rebuild := func(agents []poll.Agent) {
 		needsMu.Lock()
 		defer needsMu.Unlock()
