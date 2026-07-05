@@ -105,6 +105,16 @@ func (s *AgentService) CostHistory(window string) (string, error) {
 }
 
 func (s *AgentService) TemplateList() (string, error) { return s.run("template", "list") }
+
+// ConfigSync pushes current host Claude settings into the container;
+// restart applies them immediately (the session resumes).
+func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
+	args := []string{"config-sync", name}
+	if restart {
+		args = append(args, "--restart")
+	}
+	return s.run(args...)
+}
 func (s *AgentService) VMStart() (string, error)      { return s.run("vm", "start") }
 
 func (s *AgentService) PipelineRun(file string) (string, error) {

@@ -32,6 +32,14 @@ export function CheckpointRestore(name: string, ref: string): $CancellablePromis
     return $Call.ByID(2192857000, name, ref);
 }
 
+/**
+ * ConfigSync pushes current host Claude settings into the container;
+ * restart applies them immediately (the session resumes).
+ */
+export function ConfigSync(name: string, restart: boolean): $CancellablePromise<string> {
+    return $Call.ByID(95632153, name, restart);
+}
+
 export function Cost(name: string): $CancellablePromise<string> {
     return $Call.ByID(2020914969, name);
 }

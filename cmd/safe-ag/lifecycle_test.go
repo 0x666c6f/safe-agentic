@@ -584,14 +584,14 @@ func TestPushClaudeConfigCommandShape(t *testing.T) {
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	fake := vmexec.NewFake()
-	pushClaudeConfig(context.Background(), fake, "agent-x")
+	pushClaudeConfig(context.Background(), fake, "agent-x", true)
 	cmds := fake.CommandsMatching("docker exec agent-x bash -c")
 	if len(cmds) != 1 {
 		t.Fatalf("want 1 exec, got %d", len(cmds))
 	}
 	joined := strings.Join(cmds[0], " ")
 	want := base64.StdEncoding.EncodeToString([]byte(`{"model":"opus"}`))
-	if !strings.Contains(joined, want) || !strings.Contains(joined, "settings.json") {
+	if !strings.Contains(joined, want) || !strings.Contains(joined, "settings.host.json") {
 		t.Fatalf("bad push cmd: %s", joined)
 	}
 }

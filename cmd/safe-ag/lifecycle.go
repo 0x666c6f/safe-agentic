@@ -187,28 +187,93 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 }
 
-// pushClaudeConfig copies the host's CURRENT settings.json into a container,
-// best-effort. Spawn-time env injection freezes config at creation; this
-// keeps preferences dynamic for containers attached/resumed later. Applies
-// on the agent's next process start inside the container.
-func pushClaudeConfig(ctx context.Context, exec vmexec.Executor, name string) {
+// hostClaudeSettings reads the host's CURRENT settings.json.
+func hostClaudeSettings() ([]byte, bool) {
 	dir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return
+			return nil, false
 		}
 		dir = filepath.Join(home, ".claude")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// pushClaudeConfig copies the host's CURRENT settings.json into a container,
+// best-effort. Spawn-time env injection freezes config at creation; this
+// keeps preferences dynamic for containers attached/resumed later. Applies
+// on the agent's next process start inside the container. When staged is
+// true it also writes settings.host.json — a one-shot file the entrypoint
+// consumes in preference to the spawn-time env on the next restart.
+func pushClaudeConfig(ctx context.Context, exec vmexec.Executor, name string, staged bool) {
+	data, ok := hostClaudeSettings()
+	if !ok {
 		return
 	}
 	b64 := base64.StdEncoding.EncodeToString(data)
-	if _, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c",
-		"mkdir -p ~/.claude && echo '"+b64+"' | base64 -d > ~/.claude/settings.json"); err != nil {
+	script := "mkdir -p ~/.claude && echo '" + b64 + "' | base64 -d > ~/.claude/settings.json"
+	if staged {
+		script += " && cp ~/.claude/settings.json ~/.claude/settings.host.json"
+	}
+	if _, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c", script); err != nil {
 		fmt.Fprintf(os.Stderr, "note: could not sync Claude settings into %s: %v\n", name, err)
 	}
+}
+
+// ─── config-sync ───────────────────────────────────────────────────────────
+
+var configSyncRestart bool
+
+var configSyncCmd = &cobra.Command{
+	Use:   "config-sync <name|--latest>",
+	Short: "Push current host Claude settings into an agent (--restart to apply now)",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runConfigSync,
+}
+
+func init() {
+	addLatestFlag(configSyncCmd)
+	configSyncCmd.Flags().BoolVar(&configSyncRestart, "restart", false,
+		"Restart the container so the agent relaunches with the synced settings (resumes its session)")
+	rootCmd.AddCommand(configSyncCmd)
+}
+
+func runConfigSync(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	exec := newExecutor()
+	name, err := docker.ResolveTarget(ctx, exec, targetFromArgs(cmd, args))
+	if err != nil {
+		return err
+	}
+	state, err := containerState(ctx, exec, name)
+	if err != nil {
+		return fmt.Errorf("inspect container %s: %w", name, err)
+	}
+	if state != "running" {
+		return fmt.Errorf("container %s is %s; settings sync automatically when it next starts via attach/resume", name, state)
+	}
+	if _, ok := hostClaudeSettings(); !ok {
+		return fmt.Errorf("no host settings.json found to sync")
+	}
+	pushClaudeConfig(ctx, exec, name, configSyncRestart)
+	if !configSyncRestart {
+		fmt.Printf("Synced current Claude settings into %s (applies when the agent next restarts; use --restart to apply now)\n", name)
+		return nil
+	}
+	fmt.Printf("Synced settings; restarting %s to apply (session resumes from its state file)…\n", name)
+	if _, err := exec.Run(ctx, "docker", "restart", name); err != nil {
+		return fmt.Errorf("restart container %s: %w", name, err)
+	}
+	if err := tmux.WaitForSession(ctx, exec, name); err != nil {
+		return err
+	}
+	fmt.Printf("%s restarted with current settings\n", name)
+	return nil
 }
 
 func runAttach(cmd *cobra.Command, args []string) error {
@@ -237,7 +302,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 
 	switch state {
 	case "running":
-		pushClaudeConfig(ctx, exec, name)
+		pushClaudeConfig(ctx, exec, name, false)
 		if usesTmux {
 			if has, _ := tmux.HasSession(ctx, exec, name); has {
 				return tmux.Attach(exec, name)
@@ -251,7 +316,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
 			return fmt.Errorf("start container %s: %w", name, err)
 		}
-		pushClaudeConfig(ctx, exec, name)
+		pushClaudeConfig(ctx, exec, name, false)
 		if usesTmux {
 			if err := tmux.WaitForSession(ctx, exec, name); err != nil {
 				return err
@@ -311,7 +376,7 @@ func resumeAttach(ctx context.Context, exec vmexec.Executor, name, state string,
 		if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
 			return fmt.Errorf("start container %s: %w", name, err)
 		}
-		pushClaudeConfig(ctx, exec, name)
+		pushClaudeConfig(ctx, exec, name, false)
 		if err := tmux.WaitForSession(ctx, exec, name); err != nil {
 			return err
 		}
@@ -600,7 +665,7 @@ func resumeRetry(ctx context.Context, exec vmexec.Executor, name, feedback strin
 		// session-state file.
 		return fmt.Errorf("start container %s: %w", name, err)
 	} else {
-		pushClaudeConfig(ctx, exec, name)
+		pushClaudeConfig(ctx, exec, name, false)
 	}
 
 	if err := tmux.WaitForSession(ctx, exec, name); err != nil {

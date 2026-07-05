@@ -31,6 +31,18 @@ export function InfoTab({ name }: { name: string }) {
           <tr key={k}><td className="pr-4 text-neutral-500">{k}</td><td>{v || "—"}</td></tr>
         ))}</tbody>
       </table>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn" title="Push your current host Claude settings; applies on next agent restart"
+          onClick={() => AgentService.ConfigSync(name, false)
+            .then((o: string) => toast(o.trim())).catch((e: unknown) => toast(errText("config sync", e)))}>
+          Refresh prefs
+        </button>
+        <button className="btn" title="Push settings and restart the session now (resumes conversation)"
+          onClick={() => AgentService.ConfigSync(name, true)
+            .then((o: string) => toast(o.trim())).catch((e: unknown) => toast(errText("config sync", e)))}>
+          Refresh prefs & restart
+        </button>
+      </div>
       <div>
         <button className="btn" onClick={() =>
           AgentService.Cost(name).then(setCost).catch((e: unknown) => toast(errText("info", e)))}>

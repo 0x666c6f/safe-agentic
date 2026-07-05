@@ -86,6 +86,15 @@ ensure_claude_config() {
     fi
   fi
 
+  # One-shot staged settings from `safe-ag config-sync --restart`: newer than
+  # the spawn-time env, consumed once so fresh spawns never inherit it.
+  local staged="$claude_dir/settings.host.json"
+  if [ -f "$staged" ]; then
+    cat "$staged" > "$claude_config" 2>/dev/null || true
+    rm -f "$staged"
+    return 0
+  fi
+
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
     # Host settings.json is the source of truth: refresh on EVERY start so
     # reused auth volumes pick up current preferences (output style, hooks,
