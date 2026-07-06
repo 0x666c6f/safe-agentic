@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useStore, statusFor } from "../store";
 import { StatusDot } from "./StatusDot";
 import { errText } from "../types";
@@ -59,28 +59,28 @@ function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
 function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: number) => void }) {
   const { selected, select, needsYou, reviewReady, setView } = useStore();
   const st = statusFor(a, needsYou, reviewReady);
+  const isSel = selected === a.Name;
   return (
     <div
-      className={`group flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-neutral-800 ${selected === a.Name ? "bg-neutral-800" : ""}`}
+      className={`group mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isSel ? "bg-neutral-800 ring-1 ring-neutral-700" : "hover:bg-neutral-800/60"}`}
       onContextMenu={(e) => { e.preventDefault(); openMenu(a, e.clientX, e.clientY); }}
     >
       <button
         onClick={() => { select(a.Name); setView("agents"); }}
         title={[a.Repo, a.StateReason || a.Status].filter(Boolean).join(" — ")}
-        className="min-w-0 flex-1 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
       >
-        <span className="flex items-center gap-2">
-          <StatusDot status={st} />
-          <span className="truncate">{a.Name.replace(/^agent-/, "")}</span>
-        </span>
-        <span className={`block truncate pl-4 text-xs ${st === "needs-you" ? "text-yellow-400" : "text-neutral-500"}`}>
-          {[a.Repo, st === "needs-you" ? (a.StateReason || "needs you") : a.Status]
-            .filter(Boolean).join(" · ")}
+        <StatusDot status={st} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-neutral-100">{a.Name.replace(/^agent-/, "")}</span>
+          <span className={`block truncate text-xs ${st === "needs-you" ? "text-yellow-400" : "text-neutral-500"}`}>
+            {[a.Repo && a.Repo.replace(/^.*[/:]/, ""), st === "needs-you" ? (a.StateReason || "needs you") : a.Status]
+              .filter(Boolean).join(" · ") || a.Type}
+          </span>
         </span>
       </button>
-      <span className="text-xs text-neutral-500 group-hover:hidden">{a.Type}</span>
       <button
-        className="hidden rounded px-1 text-neutral-400 hover:bg-neutral-700 group-hover:block"
+        className="rounded px-1 text-neutral-500 opacity-0 hover:bg-neutral-700 hover:text-neutral-200 group-hover:opacity-100"
         title="Actions"
         onClick={(e) => { e.stopPropagation(); const r = (e.target as HTMLElement).getBoundingClientRect(); openMenu(a, r.left, r.bottom + 4); }}
       >⋯</button>
@@ -88,8 +88,16 @@ function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: num
   );
 }
 
+const NAV: { v: View; icon: string; label: string }[] = [
+  { v: "agents", icon: "◧", label: "Agents" },
+  { v: "projects", icon: "🗂", label: "Projects" },
+  { v: "fleet", icon: "🔀", label: "Fleet" },
+  { v: "timeline", icon: "🔔", label: "Activity" },
+  { v: "cost", icon: "＄", label: "Cost" },
+];
+
 export function Sidebar() {
-  const { agents, setView, view } = useStore();
+  const { agents, setView, view, needsYou } = useStore();
   const [menu, setMenu] = useState<MenuState>(null);
   const openMenu = (agent: Agent, x: number, y: number) => setMenu({ agent, x, y });
 
@@ -101,31 +109,58 @@ export function Sidebar() {
     else if (a.Fleet) fleets.set(a.Fleet, [...(fleets.get(a.Fleet) ?? []), a]);
     else solo.push(a);
   }
-  const NavBtn = ({ v, label }: { v: View; label: string }) => (
-    <button onClick={() => setView(v)}
-      className={`rounded px-2 py-1 text-xs ${view === v ? "bg-neutral-700" : "hover:bg-neutral-800"}`}>
-      {label}
-    </button>
+  const needs = agents.filter((a) => a.Running && (needsYou[a.Name] || a.State === "blocked")).length;
+  const SectionLabel = ({ children }: { children: ReactNode }) => (
+    <div className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">{children}</div>
   );
+
   return (
     <aside className="flex h-full w-64 flex-col border-r border-neutral-800 bg-neutral-900 text-neutral-200">
-      <div className="flex flex-wrap gap-1 p-2">
-        <NavBtn v="agents" label="Agents" /><NavBtn v="projects" label="Projects" />
-        <NavBtn v="fleet" label="Fleet" /><NavBtn v="timeline" label="Timeline" />
-        <NavBtn v="cost" label="Cost" /><NavBtn v="spawn" label="+ Spawn" />
+      {/* Header: brand + New chat */}
+      <div className="flex items-center gap-2 px-4 pb-2 pt-3">
+        <span className="text-sm font-semibold tracking-tight text-neutral-300">safe-ag</span>
+        {needs > 0 && (
+          <span className="rounded-full bg-yellow-500/20 px-1.5 text-xs text-yellow-400" title={`${needs} need you`}>{needs}</span>
+        )}
+        <button
+          onClick={() => setView("spawn")}
+          className="ml-auto rounded-md bg-green-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-600"
+        >+ New chat</button>
       </div>
-      <div className="flex-1 overflow-y-auto">
+
+      {/* Agent list — the focus */}
+      <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {[...fleets.entries()].map(([name, list]) => (
           <div key={name}>
-            <div className="px-3 pt-2 text-xs uppercase text-neutral-500">{name}</div>
+            <SectionLabel>🔀 {name}</SectionLabel>
             {list.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
           </div>
         ))}
-        {solo.length > 0 && <div className="px-3 pt-2 text-xs uppercase text-neutral-500">agents</div>}
+        {solo.length > 0 && <SectionLabel>Agents</SectionLabel>}
         {solo.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
-        {stopped.length > 0 && <div className="px-3 pt-2 text-xs uppercase text-neutral-500">stopped</div>}
+        {stopped.length > 0 && <SectionLabel>Stopped</SectionLabel>}
         {stopped.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
+        {agents.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-neutral-600">
+            No agents yet.<br />Start one with <span className="text-neutral-400">+ New chat</span>.
+          </div>
+        )}
       </div>
+
+      {/* Footer nav — secondary views */}
+      <nav className="flex items-center justify-around border-t border-neutral-800 px-1 py-1.5">
+        {NAV.map(({ v, icon, label }) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            title={label}
+            className={`flex flex-1 flex-col items-center gap-0.5 rounded-md py-1 text-[10px] transition-colors ${view === v ? "bg-neutral-800 text-neutral-100" : "text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-300"}`}
+          >
+            <span className="text-sm leading-none">{icon}</span>
+            {label}
+          </button>
+        ))}
+      </nav>
       <ActionMenu menu={menu} close={() => setMenu(null)} />
     </aside>
   );
