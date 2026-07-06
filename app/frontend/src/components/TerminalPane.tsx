@@ -62,7 +62,13 @@ export function TerminalPane({ container }: { container: string }) {
     let offData = () => {};
     let offExit = () => {};
     let disposed = false;
-    const stream = orderedStream((b64) => xterm.write(b64ToBytes(b64)));
+    // After a skipped (lost) chunk, ask tmux for a full repaint — its diff
+    // optimizer would otherwise leave stale cells wherever the grids diverged.
+    const stream = orderedStream(
+      (b64) => xterm.write(b64ToBytes(b64)),
+      1000,
+      () => { if (id) TerminalService.Redraw(id).catch(() => {}); },
+    );
 
     // Open the PTY AT the fitted xterm size so tmux attaches at the right
     // dimensions immediately (SIGWINCH from a later resize is unreliable

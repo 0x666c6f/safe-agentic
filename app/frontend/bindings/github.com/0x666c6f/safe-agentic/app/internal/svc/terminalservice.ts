@@ -13,6 +13,10 @@ export function Open(container: string, cols: number, rows: number): $Cancellabl
     return $Call.ByID(1079702345, container, cols, rows);
 }
 
+export function Redraw(id: string): $CancellablePromise<void> {
+    return $Call.ByID(3063660242, id);
+}
+
 export function Resize(id: string, cols: number, rows: number): $CancellablePromise<void> {
     return $Call.ByID(269798433, id, cols, rows);
 }

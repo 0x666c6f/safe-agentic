@@ -181,12 +181,29 @@ func (m *Manager) Open(container string, cols, rows int) (string, error) {
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
+				// Coalesce the burst: keep reading until a 4ms lull (or 256KB)
+				// so a scroll storm becomes a few large chunks instead of
+				// hundreds of racing events.
+				agg := append([]byte(nil), buf[:n]...)
+				for len(agg) < 256*1024 {
+					if ptmx.SetReadDeadline(time.Now().Add(4*time.Millisecond)) != nil {
+						break // non-pollable fd — no coalescing
+					}
+					n2, err2 := ptmx.Read(buf)
+					if n2 > 0 {
+						agg = append(agg, buf[:n2]...)
+					}
+					if err2 != nil {
+						break
+					}
+				}
+				ptmx.SetReadDeadline(time.Time{})
 				// Wails alpha dispatches every event on its own goroutine, so
 				// rapid chunks race to the webview and arrive out of order,
 				// interleaving escape sequences into garbage. Prefix each chunk
 				// with a sequence number; the frontend reassembles strict order.
 				payload := strconv.FormatInt(s.emitSeq.Add(1), 10) + "|" +
-					base64.StdEncoding.EncodeToString(buf[:n])
+					base64.StdEncoding.EncodeToString(agg)
 				for _, sid := range m.subscriberIDs(s) {
 					m.em.Emit("term:data:"+sid, payload)
 				}
@@ -258,6 +275,25 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 	// so a plain PTY resize is enough — tmux (window-size latest) follows the
 	// client and repaints. The PTY tracks the SMALLEST subscriber so every pane
 	// sees complete rows; larger panes just have idle margins.
+	return pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(minC), Rows: uint16(minR)})
+}
+
+// Redraw forces tmux to repaint the whole screen by shrinking the PTY one
+// column and restoring it. Used by the frontend after it had to skip a lost
+// chunk: xterm's grid has diverged from tmux's model of the client screen, and
+// tmux's diff optimizer would otherwise leave the stale cells forever.
+func (m *Manager) Redraw(id string) error {
+	m.mu.Lock()
+	s, ok := m.byID[id]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("unknown terminal session %q", id)
+	}
+	minC, minR := s.minSize()
+	m.mu.Unlock()
+	if minC > 1 {
+		pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(minC - 1), Rows: uint16(minR)})
+	}
 	return pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(minC), Rows: uint16(minR)})
 }
 

@@ -3,8 +3,13 @@
 // sequences garble the terminal. The Go side prefixes each chunk with a
 // sequence number ("42|<base64>"); this reassembles strict order. The first
 // seen seq becomes the baseline (panes can attach mid-stream), and a gap is
-// skipped only after `stallMs` without the missing chunk showing up.
-export function orderedStream(write: (b64: string) => void, stallMs = 250) {
+// skipped only after `stallMs` without the missing chunk showing up — that
+// desyncs the grid from tmux's model, so `onSkip` should force a full repaint.
+export function orderedStream(
+  write: (b64: string) => void,
+  stallMs = 1000,
+  onSkip?: () => void,
+) {
   let next = 0; // 0 = adopt the first arrival as baseline
   const pending = new Map<number, string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -17,7 +22,11 @@ export function orderedStream(write: (b64: string) => void, stallMs = 250) {
     }
     clear();
     if (pending.size) {
-      timer = setTimeout(() => { next = Math.min(...pending.keys()); flush(); }, stallMs);
+      timer = setTimeout(() => {
+        next = Math.min(...pending.keys());
+        flush();
+        onSkip?.();
+      }, stallMs);
     }
   };
   return {

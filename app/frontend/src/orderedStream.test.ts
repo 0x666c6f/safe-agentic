@@ -23,18 +23,22 @@ describe("orderedStream", () => {
     expect(out).toEqual(["e", "f"]);
   });
 
-  it("skips a gap only after the stall timeout", () => {
+  it("skips a gap only after the stall timeout, reporting the skip", () => {
     const out: string[] = [];
-    const s = orderedStream((b) => out.push(b), 250);
+    let skips = 0;
+    const s = orderedStream((b) => out.push(b), 250, () => skips++);
     s.push("1|a");
     s.push("3|c");
     expect(out).toEqual(["a"]); // waiting for 2
     vi.advanceTimersByTime(249);
     expect(out).toEqual(["a"]);
+    expect(skips).toBe(0);
     vi.advanceTimersByTime(1);
     expect(out).toEqual(["a", "c"]); // gave up on 2
+    expect(skips).toBe(1);
     s.push("4|d");
     expect(out).toEqual(["a", "c", "d"]);
+    expect(skips).toBe(1);
   });
 
   it("passes through unnumbered payloads", () => {
