@@ -33,7 +33,7 @@ export function Palette() {
   const actions: [string, () => void][] = [
     ...selActions,
     ["Spawn agent", () => setView("spawn")],
-    ["Fleet view", () => setView("fleet")],
+    ["Pipelines", () => setView("fleet")],
     ["Timeline", () => setView("timeline")],
     ["Cost", () => setView("cost")],
     ["Stop all running", () => agents.filter((a) => a.Running)

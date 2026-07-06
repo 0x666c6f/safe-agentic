@@ -91,7 +91,7 @@ function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: num
 const NAV: { v: View; icon: string; label: string }[] = [
   { v: "agents", icon: "◧", label: "Agents" },
   { v: "projects", icon: "🗂", label: "Projects" },
-  { v: "fleet", icon: "🔀", label: "Fleet" },
+  { v: "fleet", icon: "🔀", label: "Pipelines" },
   { v: "timeline", icon: "🔔", label: "Activity" },
   { v: "cost", icon: "＄", label: "Cost" },
 ];

@@ -172,8 +172,19 @@ func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
 }
 func (s *AgentService) VMStart() (string, error) { return s.run("vm", "start") }
 
-func (s *AgentService) PipelineRun(file string) (string, error) {
-	return s.run("pipeline", file, "--background")
+// PipelineRun runs (or --dry-run validates) a saved pipeline by name, passing
+// any ${vars} the manifest declares as --var key=value.
+func (s *AgentService) PipelineRun(name string, vars map[string]string, dryRun bool) (string, error) {
+	args := []string{"pipeline", name}
+	for k, v := range vars {
+		args = append(args, "--var", k+"="+v)
+	}
+	if dryRun {
+		args = append(args, "--dry-run")
+	} else {
+		args = append(args, "--background")
+	}
+	return s.run(args...)
 }
 
 type SpawnRequest struct {

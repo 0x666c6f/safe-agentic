@@ -84,8 +84,12 @@ export function PickFolder(): $CancellablePromise<string> {
     return $Call.ByID(86929653);
 }
 
-export function PipelineRun(file: string): $CancellablePromise<string> {
-    return $Call.ByID(2852768419, file);
+/**
+ * PipelineRun runs (or --dry-run validates) a saved pipeline by name, passing
+ * any ${vars} the manifest declares as --var key=value.
+ */
+export function PipelineRun(name: string, vars: { [_ in string]?: string } | null, dryRun: boolean): $CancellablePromise<string> {
+    return $Call.ByID(2852768419, name, vars, dryRun);
 }
 
 export function Refresh(): $CancellablePromise<void> {

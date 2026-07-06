@@ -5,7 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Workspace } from "./components/Workspace";
 import { SpawnForm } from "./components/SpawnForm";
 import { ProjectsView } from "./components/ProjectsView";
-import { FleetView } from "./components/FleetView";
+import { PipelinesView } from "./components/PipelinesView";
 import { Timeline } from "./components/Timeline";
 import { CostView } from "./components/CostView";
 import { Palette } from "./components/Palette";
@@ -95,7 +95,7 @@ export default function App() {
             : <EmptyState />)}
           {view === "spawn" && <SpawnForm />}
           {view === "projects" && <ProjectsView />}
-          {view === "fleet" && <FleetView />}
+          {view === "fleet" && <PipelinesView />}
           {view === "timeline" && <Timeline />}
           {view === "cost" && <CostView />}
         </main>

@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +78,30 @@ func TestProjectsSortAndRemove(t *testing.T) {
 	}
 	if got := ShortRepoName("https://github.com/o/repo.git"); got != "o/repo" {
 		t.Fatalf("short name: %q", got)
+	}
+}
+
+func TestPipelineCRUD(t *testing.T) {
+	dir := t.TempDir()
+	s := &Service{PipelinesDir: dir}
+	if err := s.PipelineSave("quality/gate", "name: gate\nsteps: []\n"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.PipelineList()
+	if err != nil || len(list) != 1 || list[0] != "quality/gate" {
+		t.Fatalf("list=%v err=%v", list, err)
+	}
+	content, err := s.PipelineRead("quality/gate")
+	if err != nil || !strings.Contains(content, "name: gate") {
+		t.Fatalf("read=%q err=%v", content, err)
+	}
+	if _, err := s.pipelinePath("../evil"); err == nil {
+		t.Fatal("traversal name must be rejected")
+	}
+	if err := s.PipelineDelete("quality/gate"); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := s.PipelineList(); len(l) != 0 {
+		t.Fatalf("delete failed: %v", l)
 	}
 }

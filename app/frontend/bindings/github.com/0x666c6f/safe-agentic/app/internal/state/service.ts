@@ -25,8 +25,27 @@ export function Inbox(n: number): $CancellablePromise<$models.EventItem[] | null
     return $Call.ByID(3385797668, n);
 }
 
+export function PipelineDelete(name: string): $CancellablePromise<void> {
+    return $Call.ByID(3695924437, name);
+}
+
 export function PipelineFiles(): $CancellablePromise<string[] | null> {
     return $Call.ByID(2603917901);
+}
+
+/**
+ * PipelineList returns user pipeline names (recursive, relative, no extension).
+ */
+export function PipelineList(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(2211967526);
+}
+
+export function PipelineRead(name: string): $CancellablePromise<string> {
+    return $Call.ByID(262007570, name);
+}
+
+export function PipelineSave(name: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(1232917943, name, content);
 }
 
 /**

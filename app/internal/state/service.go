@@ -2,8 +2,11 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -96,6 +99,81 @@ func (s *Service) PipelineFiles() ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// --- Pipeline management (user-editable YAML manifests). ---
+
+// validPipelineName rejects traversal and disallowed characters; allows
+// slashes so pipelines can live in subdirs (e.g. "quality/release").
+var validPipelineName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+func (s *Service) pipelinePath(name string) (string, error) {
+	if !validPipelineName.MatchString(name) || strings.Contains(name, "..") {
+		return "", fmt.Errorf("invalid pipeline name %q", name)
+	}
+	return filepath.Join(s.PipelinesDir, name+".yaml"), nil
+}
+
+// PipelineList returns user pipeline names (recursive, relative, no extension).
+func (s *Service) PipelineList() ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(s.PipelinesDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable
+		}
+		if d.IsDir() || !(strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(s.PipelinesDir, path)
+		if rerr != nil {
+			return nil
+		}
+		out = append(out, strings.TrimSuffix(strings.TrimSuffix(rel, ".yaml"), ".yml"))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *Service) PipelineRead(name string) (string, error) {
+	p, err := s.pipelinePath(name)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		// tolerate .yml on disk
+		if data2, err2 := os.ReadFile(strings.TrimSuffix(p, ".yaml") + ".yml"); err2 == nil {
+			return string(data2), nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *Service) PipelineSave(name, content string) error {
+	p, err := s.pipelinePath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(content), 0o644)
+}
+
+func (s *Service) PipelineDelete(name string) error {
+	p, err := s.pipelinePath(name)
+	if err != nil {
+		return err
+	}
+	if rmErr := os.Remove(p); rmErr != nil {
+		return os.Remove(strings.TrimSuffix(p, ".yaml") + ".yml")
+	}
+	return nil
 }
 
 // --- Projects: saved repos for quick chat launches, most-used first. ---
