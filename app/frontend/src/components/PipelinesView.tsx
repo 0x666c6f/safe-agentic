@@ -15,16 +15,14 @@ const Toggle = ({ on, set, label }: { on: boolean; set: (v: boolean) => void; la
   </label>
 );
 
-function StepCard({ step, index, total, all, projects, onChange, onRemove, onMove }: {
-  step: Step; index: number; total: number; all: Step[]; projects: string[];
-  onChange: (s: Step) => void; onRemove: () => void; onMove: (dir: -1 | 1) => void;
+function StepCard({ step, projects, canMoveUp, canMoveDown, onChange, onRemove, onMoveStage }: {
+  step: Step; projects: string[]; canMoveUp: boolean; canMoveDown: boolean;
+  onChange: (s: Step) => void; onRemove: () => void; onMoveStage: (dir: -1 | 1) => void;
 }) {
   const up = (patch: Partial<Step>) => onChange({ ...step, ...patch });
-  const priorNames = all.slice(0, index).map((s) => s.name).filter(Boolean);
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900/60">
+    <div className="flex min-w-72 flex-1 flex-col rounded-lg border border-neutral-800 bg-neutral-900/60">
       <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-neutral-700 text-xs">{index + 1}</span>
         <input
           className="min-w-0 flex-1 bg-transparent text-sm font-medium text-neutral-100 outline-none"
           value={step.name} placeholder="step name"
@@ -38,8 +36,8 @@ function StepCard({ step, index, total, all, projects, onChange, onRemove, onMov
             </button>
           ))}
         </div>
-        <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={index === 0} onClick={() => onMove(-1)} title="move up">↑</button>
-        <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={index === total - 1} onClick={() => onMove(1)} title="move down">↓</button>
+        <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={!canMoveUp} onClick={() => onMoveStage(-1)} title="move to previous stage">⇞</button>
+        <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={!canMoveDown} onClick={() => onMoveStage(1)} title="move to next stage">⇟</button>
         <button className="px-1 text-neutral-500 hover:text-red-400" onClick={onRemove} title="remove step">✕</button>
       </div>
       <div className="flex flex-col gap-2 p-3">
@@ -59,7 +57,7 @@ function StepCard({ step, index, total, all, projects, onChange, onRemove, onMov
           </div>
         )}
         <textarea
-          className="input min-h-24 w-full font-mono text-xs" placeholder="What should this step do? (supports ${vars})"
+          className="input min-h-20 w-full font-mono text-xs" placeholder="What should this step do? (supports ${vars})"
           value={step.prompt} onChange={(e) => up({ prompt: e.target.value })}
         />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -68,18 +66,6 @@ function StepCard({ step, index, total, all, projects, onChange, onRemove, onMov
           <Toggle on={step.reuseGhAuth} set={(v) => up({ reuseGhAuth: v })} label="gh auth" />
           <Toggle on={step.autoTrust} set={(v) => up({ autoTrust: v })} label="auto-trust" />
         </div>
-        {priorNames.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-            runs after:
-            {priorNames.map((n) => (
-              <label key={n} className="flex items-center gap-1">
-                <input type="checkbox" checked={step.dependsOn.includes(n)}
-                  onChange={(e) => up({ dependsOn: e.target.checked ? [...step.dependsOn, n] : step.dependsOn.filter((d) => d !== n) })} />
-                {n}
-              </label>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -90,7 +76,7 @@ export function PipelinesView() {
   const [list, setList] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [model, setModel] = useState<Pipeline | null>(null);
-  const [raw, setRaw] = useState<string | null>(null); // set when a pipeline can't be form-edited
+  const [raw, setRaw] = useState<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [vars, setVars] = useState<Record<string, string>>({});
@@ -141,13 +127,26 @@ export function PipelinesView() {
     finally { setBusy(false); }
   };
 
-  const patchStep = (i: number, s: Step) => { if (!model) return; const steps = [...model.steps]; steps[i] = s; setModel({ ...model, steps }); setDirty(true); };
-  const addStep = () => { if (!model) return; setModel({ ...model, steps: [...model.steps, newStep()] }); setDirty(true); };
-  const removeStep = (i: number) => { if (!model) return; setModel({ ...model, steps: model.steps.filter((_, j) => j !== i) }); setDirty(true); };
-  const moveStep = (i: number, dir: -1 | 1) => {
-    if (!model) return; const j = i + dir; if (j < 0 || j >= model.steps.length) return;
-    const steps = [...model.steps]; [steps[i], steps[j]] = [steps[j], steps[i]]; setModel({ ...model, steps }); setDirty(true);
-  };
+  const mutate = (fn: (p: Pipeline) => Pipeline) => { if (!model) return; setModel(fn(model)); setDirty(true); };
+  const patchStep = (si: number, wi: number, s: Step) =>
+    mutate((p) => { const stages = p.stages.map((st) => [...st]); stages[si][wi] = s; return { ...p, stages }; });
+  const removeStep = (si: number, wi: number) =>
+    mutate((p) => {
+      const stages = p.stages.map((st) => [...st]);
+      stages[si].splice(wi, 1);
+      return { ...p, stages: stages.filter((st) => st.length > 0) };
+    });
+  const addParallel = (si: number) =>
+    mutate((p) => { const stages = p.stages.map((st) => [...st]); stages[si].push(newStep()); return { ...p, stages }; });
+  const addStage = (after: number) =>
+    mutate((p) => { const stages = p.stages.map((st) => [...st]); stages.splice(after + 1, 0, [newStep()]); return { ...p, stages }; });
+  const moveStage = (si: number, wi: number, dir: -1 | 1) =>
+    mutate((p) => {
+      const stages = p.stages.map((st) => [...st]);
+      const [s] = stages[si].splice(wi, 1);
+      stages[si + dir].push(s);
+      return { ...p, stages: stages.filter((st) => st.length > 0) };
+    });
 
   const detectedVars = useMemo(() => {
     if (rawMode && raw !== null) return [...new Set([...raw.matchAll(/\$\{(\w+)\}/g)].map((m) => m[1]))];
@@ -184,12 +183,11 @@ export function PipelinesView() {
       <div className="flex min-w-0 flex-1 flex-col">
         {!selected ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-neutral-500">
-            <div>Build a multi-step pipeline visually.</div>
+            <div>Build a pipeline visually — parallel steps side by side, stages top to bottom.</div>
             <button className="btn bg-green-800 hover:bg-green-700" onClick={() => setNaming("")}>+ New pipeline</button>
           </div>
         ) : (
           <>
-            {/* action bar */}
             <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
               <span className="truncate text-sm font-semibold">{selected}{dirty ? " •" : ""}</span>
               {model && (
@@ -203,7 +201,6 @@ export function PipelinesView() {
               <button className="px-1 text-neutral-500 hover:text-red-400" onClick={del} title="delete">✕</button>
             </div>
 
-            {/* inputs */}
             {detectedVars.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 bg-neutral-900/40 px-3 py-2">
                 <span className="text-xs text-neutral-500">inputs:</span>
@@ -216,22 +213,39 @@ export function PipelinesView() {
               </div>
             )}
 
-            {/* body */}
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {rawMode || !model ? (
                 <textarea className="input h-full min-h-96 w-full font-mono text-xs" spellCheck={false}
                   value={raw ?? ""} onChange={(e) => { setRaw(e.target.value); setDirty(true); }} />
               ) : (
-                <div className="mx-auto flex max-w-3xl flex-col gap-3">
-                  <label className="flex items-center gap-2 text-sm">
+                <div className="mx-auto flex max-w-5xl flex-col gap-1">
+                  <label className="mb-2 flex items-center gap-2 text-sm">
                     <span className="text-neutral-500">Pipeline name</span>
-                    <input className="input flex-1" value={model.name} onChange={(e) => { setModel({ ...model, name: e.target.value }); setDirty(true); }} />
+                    <input className="input flex-1" value={model.name} onChange={(e) => mutate((p) => ({ ...p, name: e.target.value }))} />
                   </label>
-                  {model.steps.map((s, i) => (
-                    <StepCard key={s.id} step={s} index={i} total={model.steps.length} all={model.steps} projects={projects}
-                      onChange={(ns) => patchStep(i, ns)} onRemove={() => removeStep(i)} onMove={(d) => moveStep(i, d)} />
+                  {model.stages.map((stage, si) => (
+                    <div key={si}>
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs font-medium text-neutral-300">Stage {si + 1}</span>
+                        <span className="text-xs text-neutral-600">{stage.length > 1 ? `${stage.length} steps in parallel` : "1 step"}</span>
+                        <button className="btn ml-auto" onClick={() => addParallel(si)} title="add a step that runs in parallel within this stage">⫲ + parallel step</button>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        {stage.map((s, wi) => (
+                          <StepCard key={s.id} step={s} projects={projects}
+                            canMoveUp={si > 0} canMoveDown={si < model.stages.length - 1}
+                            onChange={(ns) => patchStep(si, wi, ns)}
+                            onRemove={() => removeStep(si, wi)}
+                            onMoveStage={(d) => moveStage(si, wi, d)} />
+                        ))}
+                      </div>
+                      <div className="flex flex-col items-center py-1 text-neutral-600">
+                        <span>↓</span>
+                        <button className="rounded px-2 py-0.5 text-xs text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+                          onClick={() => addStage(si)} title="add a stage that runs after this one">+ stage after</button>
+                      </div>
+                    </div>
                   ))}
-                  <button className="btn self-start" onClick={addStep}>+ Add step</button>
                 </div>
               )}
             </div>
