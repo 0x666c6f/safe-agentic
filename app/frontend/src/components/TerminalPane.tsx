@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { RotateCw, X } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import { Events } from "@wailsio/runtime";
 import { TerminalService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
@@ -33,7 +32,8 @@ export function TerminalPane({ container }: { container: string }) {
     xterm.loadAddon(fit);
     xterm.loadAddon(search);
     xterm.open(ref.current);
-    try { xterm.loadAddon(new WebglAddon()); } catch { /* canvas fallback */ }
+    // No WebglAddon: its glyph atlas corrupts in WKWebView (red blocks,
+    // smeared glyphs). The DOM renderer is correct and fast enough here.
     fit.fit();
     xterm.writeln(`\x1b[90mattaching to ${container}…\x1b[0m`);
 
