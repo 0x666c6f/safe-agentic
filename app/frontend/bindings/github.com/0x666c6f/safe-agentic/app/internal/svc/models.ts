@@ -11,6 +11,39 @@ export interface PRInfo {
     "title": string;
 }
 
+/**
+ * Quota is one agent's quota, or an Error explaining why it's unavailable.
+ */
+export interface Quota {
+    /**
+     * "claude" | "codex"
+     */
+    "agent": string;
+    "ok": boolean;
+    "error": string;
+    "windows": QuotaWindow[] | null;
+}
+
+/**
+ * QuotaWindow is one rate-limit window (used percent + reset time).
+ */
+export interface QuotaWindow {
+    /**
+     * "5h" | "week"
+     */
+    "label": string;
+
+    /**
+     * used, 0..100
+     */
+    "percent": number;
+
+    /**
+     * unix seconds; 0 if unknown
+     */
+    "resetsAt": number;
+}
+
 export interface SpawnRequest {
     "Agent": string;
     "Name": string;
