@@ -59,6 +59,11 @@ export function SpawnForm() {
         onChange={(e) => set("Name", e.target.value)} />
       <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
         onChange={(e) => set("Repo", e.target.value)} />
+      {req.Repo.trim() && !/[/:.]/.test(req.Repo) && (
+        <div className="text-xs text-yellow-500">
+          ⚠ "{req.Repo}" doesn't look like a repo URL — the agent will refuse to clone it. Leave empty for a blank workspace.
+        </div>
+      )}
       {savedRepos.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {savedRepos.map((r) => (
