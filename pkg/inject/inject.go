@@ -294,9 +294,12 @@ func sanitizeCodexConfig(content, codexHome string, includeAgents bool) string {
 
 	var out []string
 	skip := false
+	scope := "" // "" = top-level, else current table name
+	hooksInScope := map[string]bool{}
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if table, ok := tomlTableName(trimmed); ok {
+			scope = table
 			skip = tableIsBlocked(table, blockedTables)
 		}
 		if skip {
@@ -308,7 +311,15 @@ func sanitizeCodexConfig(content, codexHome string, includeAgents bool) string {
 		if strings.HasPrefix(trimmed, "check_for_update_on_startup =") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "codex_hooks =") {
+		// codex renamed codex_hooks → hooks; a config carrying both (or the
+		// rewrite colliding with an existing hooks) yields a duplicate-key
+		// error that aborts codex. Rewrite codex_hooks → hooks, but emit at
+		// most one hooks key per scope (top-level or table).
+		if strings.HasPrefix(trimmed, "codex_hooks =") || strings.HasPrefix(trimmed, "hooks =") {
+			if hooksInScope[scope] {
+				continue
+			}
+			hooksInScope[scope] = true
 			out = append(out, strings.Replace(line, "codex_hooks", "hooks", 1))
 			continue
 		}
