@@ -140,6 +140,28 @@ ensure_claude_support_files() {
   echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
 }
 
+# ensure_claude_onboarded marks onboarding complete in .claude.json so Claude
+# Code never shows the first-run theme/color picker inside the container.
+# Runs on EVERY start (not seed-only) because reused auth volumes were seeded
+# before this and keep prompting. Merges the key; never clobbers auth fields.
+ensure_claude_onboarded() {
+  local auth_path="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.claude.json"
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$auth_path" <<'PY' 2>/dev/null || true
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception:
+    d = {}
+if d.get("hasCompletedOnboarding") is True:
+    sys.exit(0)
+d["hasCompletedOnboarding"] = True
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
 inject_security_preamble() {
   local agent_type="${AGENT_TYPE:-}"
   local template="${SAFE_AGENTIC_PREAMBLE_TEMPLATE:-/usr/local/lib/safe-agentic/security-preamble.md}"
@@ -280,9 +302,9 @@ if command -v gh >/dev/null 2>&1 && [ -s /home/agent/.config/gh/hosts.yml ]; the
   gh auth setup-git -h github.com >/dev/null 2>&1 || true
 fi
 case "${AGENT_TYPE:-}" in
-  claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config; ensure_claude_onboarded ;;
   codex)  ensure_codex_auth; ensure_codex_support_files; ensure_codex_config ;;
-  *)      ensure_codex_auth; ensure_codex_support_files; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  *)      ensure_codex_auth; ensure_codex_support_files; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config; ensure_claude_onboarded ;;
 esac
 
 # Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/

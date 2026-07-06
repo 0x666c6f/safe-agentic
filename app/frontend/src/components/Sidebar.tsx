@@ -9,11 +9,13 @@ type MenuState = { agent: Agent; x: number; y: number } | null;
 
 function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
   const { toast, select, setView, selected } = useStore();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [close]);
+  useEffect(() => { setConfirmDelete(false); }, [menu]);
   if (!menu) return null;
   const { agent: a } = menu;
   const act = (label: string, fn: () => Promise<unknown>) => () => {
@@ -41,13 +43,14 @@ function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
         {a.Running && <Item label="Refresh prefs & restart" onClick={act("config sync", () => AgentService.ConfigSync(a.Name, true))} />}
         <Item label="Create PR" onClick={act("pr", () => AgentService.PR(a.Name))} />
         <div className="my-1 border-t border-neutral-700" />
-        <Item danger label="Delete session" onClick={() => {
-          close();
-          if (!window.confirm(`Delete ${a.Name}? This stops and removes the container.`)) return;
-          AgentService.Stop(a.Name)
-            .then(() => { toast(`deleted ${a.Name}`); if (selected === a.Name) select(null); })
-            .catch((e) => toast(errText("delete", e)));
-        }} />
+        {confirmDelete
+          ? <Item danger label={`Confirm delete ${a.Name.replace(/^agent-/, "")}?`} onClick={() => {
+              close();
+              AgentService.Stop(a.Name)
+                .then(() => { toast(`deleted ${a.Name}`); if (selected === a.Name) select(null); })
+                .catch((e) => toast(errText("delete", e)));
+            }} />
+          : <Item danger label="Delete session" onClick={() => setConfirmDelete(true)} />}
       </div>
     </div>
   );
