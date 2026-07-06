@@ -145,6 +145,10 @@ ensure_claude_support_files() {
   [ -n "${SAFE_AGENTIC_CLAUDE_SUPPORT_B64:-}" ] || return 0
   mkdir -p "$claude_dir" 2>/dev/null || return 0
   echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
+  # The support tar loses the executable bit; Claude runs statusline/hooks
+  # scripts directly, so restore +x or the custom status line never shows.
+  chmod +x "$claude_dir/statusline-command.sh" 2>/dev/null || true
+  find "$claude_dir/hooks" -maxdepth 1 -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 }
 
 # ensure_claude_onboarded marks onboarding complete in .claude.json so Claude
