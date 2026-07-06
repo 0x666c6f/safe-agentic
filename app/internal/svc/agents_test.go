@@ -43,6 +43,40 @@ func TestRetryWithFeedback(t *testing.T) {
 	}
 }
 
+func TestPipelineRunRepoUsesRepoFlag(t *testing.T) {
+	r, calls := recorderRunner()
+	s := &AgentService{Runner: r}
+	if _, err := s.PipelineRun("claude-pr-review",
+		map[string]string{"repo": "https://github.com/org/repo.git", "pr": "223"}, false); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join((*calls)[0], " ")
+	if strings.Contains(got, "--var repo=") {
+		t.Fatalf("repo is reserved and must not be a --var: %q", got)
+	}
+	if !strings.Contains(got, "--repo https://github.com/org/repo.git") {
+		t.Fatalf("repo must be passed via --repo: %q", got)
+	}
+	if !strings.Contains(got, "--var pr=223") || !strings.Contains(got, "--background") {
+		t.Fatalf("expected pr var + --background: %q", got)
+	}
+}
+
+func TestPipelineRunSkipsEmptyVars(t *testing.T) {
+	r, calls := recorderRunner()
+	s := &AgentService{Runner: r}
+	if _, err := s.PipelineRun("p", map[string]string{"repo": "", "pr": ""}, true); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join((*calls)[0], " ")
+	if strings.Contains(got, "--repo") || strings.Contains(got, "--var") {
+		t.Fatalf("empty vars should be skipped: %q", got)
+	}
+	if !strings.Contains(got, "--dry-run") {
+		t.Fatalf("expected --dry-run: %q", got)
+	}
+}
+
 func TestSpawnArgsNoRepo(t *testing.T) {
 	req := SpawnRequest{Agent: "shell", DryRun: false}
 	got := strings.Join(spawnArgs(req), " ")

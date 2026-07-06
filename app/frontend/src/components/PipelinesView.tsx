@@ -4,7 +4,7 @@ import { errText, type Agent } from "../types";
 import { StatusDot } from "./StatusDot";
 import {
   type Pipeline, type Step, type StepType,
-  newStep, emptyPipeline, parsePipeline, dumpPipeline, pipelineVars,
+  newStep, emptyPipeline, parsePipeline, dumpPipeline, pipelineVars, parsePrUrl,
 } from "../pipeline";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
@@ -84,6 +84,7 @@ export function PipelinesView() {
   const [result, setResult] = useState("");
   const [busy, setBusy] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState("");
 
   const reload = () => Service.PipelineList().then((p: string[] | null) => setList(p ?? [])).catch(() => {});
   useEffect(() => { reload(); Service.Projects().then((p: any[] | null) => setProjects((p ?? []).map((x) => x.url))).catch(() => {}); }, []);
@@ -92,7 +93,7 @@ export function PipelinesView() {
     try {
       const text = await Service.PipelineRead(name);
       const parsed = parsePipeline(text);
-      setSelected(name); setDirty(false); setResult(""); setVars({});
+      setSelected(name); setDirty(false); setResult(""); setVars({}); setPrUrl("");
       if (parsed) { setModel(parsed); setRaw(null); setRawMode(false); }
       else { setModel(null); setRaw(text); setRawMode(true); }
     } catch (e) { toast(errText("read pipeline", e)); }
@@ -101,7 +102,7 @@ export function PipelinesView() {
   const create = (name: string) => {
     const n = name.trim(); if (!n) return;
     setSelected(n); setModel(emptyPipeline(n)); setRaw(null); setRawMode(false);
-    setDirty(true); setResult(""); setVars({}); setNaming(null);
+    setDirty(true); setResult(""); setVars({}); setPrUrl(""); setNaming(null);
   };
 
   const currentYaml = () => rawMode && raw !== null ? raw : model ? dumpPipeline(model) : "";
@@ -153,8 +154,25 @@ export function PipelinesView() {
     return model ? pipelineVars(model) : [];
   }, [model, raw, rawMode]);
 
-  const fleets = new Map<string, Agent[]>();
-  for (const a of agents) if (a.Fleet) fleets.set(a.Fleet, [...(fleets.get(a.Fleet) ?? []), a]);
+  // When the pipeline takes both a repo-ish and a pr-ish input, offer a single
+  // "PR URL" field that fills both from one pasted GitHub PR link.
+  const prFill = useMemo(() => {
+    const repoVar = detectedVars.find((v) => /repo/i.test(v));
+    const prVar = detectedVars.find((v) => /^pr$|pull|pr_?num|number/i.test(v));
+    return repoVar && prVar ? { repoVar, prVar } : null;
+  }, [detectedVars]);
+
+  // Match a pipeline step to its spawned container: names end with
+  // -<stepName>-<YYYYMMDD>-<HHMMSS>. Returns undefined when the step hasn't run
+  // (e.g. an earlier stage failed), so the tree can show it as "not run".
+  const stepAgent = (stepName: string): Agent | undefined => {
+    const re = new RegExp(`-${stepName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d{8}-\\d{6}$`);
+    return agents.find((a) => a.Fleet === selected && re.test(a.Name));
+  };
+  // Fleets that ran but aren't the selected pipeline — still surface them so a
+  // background run stays visible even when you're editing another pipeline.
+  const otherRuns = new Map<string, Agent[]>();
+  for (const a of agents) if (a.Fleet && a.Fleet !== selected) otherRuns.set(a.Fleet, [...(otherRuns.get(a.Fleet) ?? []), a]);
 
   return (
     <div className="flex h-full min-h-0">
@@ -204,6 +222,20 @@ export function PipelinesView() {
             {detectedVars.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 bg-neutral-900/40 px-3 py-2">
                 <span className="text-xs text-neutral-500">inputs:</span>
+                {prFill && (
+                  <label className="flex items-center gap-1 text-xs" title="Paste a GitHub PR URL to fill both fields">
+                    <span className="text-neutral-400">PR URL</span>
+                    <input className="input w-72 text-xs" placeholder="https://github.com/org/repo/pull/123"
+                      value={prUrl}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrUrl(val);
+                        const parsed = parsePrUrl(val);
+                        if (parsed) setVars((s) => ({ ...s, [prFill.repoVar]: parsed.repo, [prFill.prVar]: parsed.pr }));
+                      }} />
+                    {prUrl && (parsePrUrl(prUrl) ? <span className="text-green-500">✓</span> : <span className="text-neutral-600">…</span>)}
+                  </label>
+                )}
                 {detectedVars.map((v) => (
                   <label key={v} className="flex items-center gap-1 text-xs">
                     <span className="text-neutral-400">{v}</span>
@@ -255,18 +287,55 @@ export function PipelinesView() {
         )}
       </div>
 
-      {/* running */}
-      {fleets.size > 0 && (
-        <div className="w-56 shrink-0 overflow-y-auto border-l border-neutral-800 p-3">
-          <div className="mb-2 text-xs font-semibold uppercase text-neutral-500">Running</div>
-          {[...fleets.entries()].map(([name, l]) => (
+      {/* run tree — the selected pipeline's structure with live/final status.
+          Built from the manifest so it persists after agents stop. */}
+      {selected && (model || otherRuns.size > 0) && (
+        <div className="w-64 shrink-0 overflow-y-auto border-l border-neutral-800 p-3 text-xs">
+          {model && (
+            <div className="mb-3">
+              <div className="mb-1 flex items-center gap-1 font-semibold text-neutral-300">
+                <span>🔄</span><span className="truncate">{selected}</span>
+              </div>
+              {model.stages.map((stage, si) => {
+                const last = si === model.stages.length - 1;
+                return (
+                  <div key={si} className="flex">
+                    <span className="select-none pr-1 font-mono text-neutral-700">{last ? "└─" : "├─"}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-neutral-500">📦 Stage {si + 1}{stage.length > 1 ? " ∥" : ""}</div>
+                      <div className={`ml-1 flex flex-col gap-0.5 border-l pl-2 ${last ? "border-transparent" : "border-neutral-800"}`}>
+                        {stage.map((step) => {
+                          const a = stepAgent(step.name);
+                          return a ? (
+                            <button key={step.id} className="flex items-center gap-1.5 py-0.5 text-left hover:underline"
+                              onClick={() => { select(a.Name); setView("agents"); }}>
+                              <StatusDot status={statusFor(a, needsYou, reviewReady)} />
+                              <span className="truncate text-neutral-300">{step.name}</span>
+                            </button>
+                          ) : (
+                            <div key={step.id} className="flex items-center gap-1.5 py-0.5 text-neutral-600">
+                              <span className="h-2 w-2 shrink-0 rounded-full border border-neutral-700" />
+                              <span className="truncate">{step.name}</span>
+                              <span className="text-neutral-700">· not run</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {[...otherRuns.entries()].map(([name, l]) => (
             <div key={name} className="mb-3">
-              <div className="mb-1 text-xs text-neutral-400">{name}</div>
+              <div className="mb-1 flex items-center gap-1 text-neutral-500"><span>🔄</span><span className="truncate">{name}</span></div>
               {l.sort((a, b) => a.Hierarchy.localeCompare(b.Hierarchy)).map((a) => (
-                <div key={a.Name} className="flex items-center gap-2 py-0.5 text-xs">
+                <button key={a.Name} className="flex w-full items-center gap-1.5 py-0.5 text-left hover:underline"
+                  onClick={() => { select(a.Name); setView("agents"); }}>
                   <StatusDot status={statusFor(a, needsYou, reviewReady)} />
-                  <button className="truncate hover:underline" onClick={() => { select(a.Name); setView("agents"); }}>{a.Name.replace(/^agent-/, "")}</button>
-                </div>
+                  <span className="truncate text-neutral-400">{a.Name.replace(/^agent-/, "")}</span>
+                </button>
               ))}
             </div>
           ))}

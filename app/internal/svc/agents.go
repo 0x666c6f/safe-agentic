@@ -219,8 +219,21 @@ func (s *AgentService) VMStart() (string, error) { return s.run("vm", "start") }
 func (s *AgentService) PipelineRun(name string, vars map[string]string, dryRun bool) (string, error) {
 	args := []string{"pipeline", name}
 	for k, v := range vars {
-		args = append(args, "--var", k+"="+v)
+		if v == "" {
+			continue
+		}
+		// `repo` is reserved by the engine: it must be passed via --repo, not
+		// --var repo=… (which errors "repo is reserved; use --repo instead").
+		if k == "repo" {
+			args = append(args, "--repo", v)
+		} else {
+			args = append(args, "--var", k+"="+v)
+		}
 	}
+	// Seed the host's Claude/Codex login + skip the trust prompt for every
+	// agent, matching GUI spawn defaults — otherwise pipeline agents (manifests
+	// set reuse_auth, not seed_auth) start unauthenticated ("Not logged in").
+	args = append(args, "--seed-auth", "--auto-trust")
 	if dryRun {
 		args = append(args, "--dry-run")
 	} else {
