@@ -1,14 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useStore, statusFor } from "../store";
 import { StatusDot } from "./StatusDot";
-import { errText } from "../types";
+import { QuotaBar } from "./QuotaBar";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import type { Agent, View } from "../types";
 
 type MenuState = { agent: Agent; x: number; y: number } | null;
 
 function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
-  const { toast, select, setView, selected } = useStore();
+  const { run, select, setView, selected, markDeleting, unmarkDeleting } = useStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -20,8 +20,7 @@ function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
   const { agent: a } = menu;
   const act = (label: string, fn: () => Promise<unknown>) => () => {
     close();
-    fn().then((out) => toast(typeof out === "string" && out.trim() ? `${label}:\n${out.trim().split("\n").slice(-2).join("\n")}` : `${label}: ok`))
-      .catch((e) => toast(errText(label, e)));
+    run(label, fn());
   };
   const Item = ({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) => (
     <button onClick={onClick}
@@ -37,18 +36,20 @@ function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <Item label="Open" onClick={() => { close(); select(a.Name); setView("agents"); }} />
-        <Item label="Clone session" onClick={act("clone", () => AgentService.Clone(a.Name))} />
-        {!a.Running && <Item label="Retry (same config)" onClick={act("retry", () => AgentService.Retry(a.Name, ""))} />}
-        {a.Running && <Item label="Checkpoint now" onClick={act("checkpoint", () => AgentService.CheckpointCreate(a.Name, ""))} />}
-        {a.Running && <Item label="Refresh prefs & restart" onClick={act("config sync", () => AgentService.ConfigSync(a.Name, true))} />}
-        <Item label="Create PR" onClick={act("pr", () => AgentService.PR(a.Name))} />
+        <Item label="Clone session" onClick={act("Cloning session", () => AgentService.Clone(a.Name))} />
+        {!a.Running && <Item label="Retry (same config)" onClick={act("Retrying agent", () => AgentService.Retry(a.Name, ""))} />}
+        {a.Running && <Item label="Checkpoint now" onClick={act("Creating checkpoint", () => AgentService.CheckpointCreate(a.Name, ""))} />}
+        {a.Running && <Item label="Refresh prefs & restart" onClick={act("Syncing prefs & restarting", () => AgentService.ConfigSync(a.Name, true))} />}
+        <Item label="Create PR" onClick={act("Creating PR", () => AgentService.PR(a.Name))} />
         <div className="my-1 border-t border-neutral-700" />
         {confirmDelete
           ? <Item danger label={`Confirm delete ${a.Name.replace(/^agent-/, "")}?`} onClick={() => {
               close();
-              AgentService.Stop(a.Name)
-                .then(() => { toast(`deleted ${a.Name}`); if (selected === a.Name) select(null); })
-                .catch((e) => toast(errText("delete", e)));
+              const name = a.Name;
+              markDeleting(name); // grey the row immediately; poll reconciliation clears it when gone
+              run(`Deleting ${name.replace(/^agent-/, "")}`, AgentService.Stop(name))
+                .then(() => { if (selected === name) select(null); })
+                .catch(() => unmarkDeleting(name));
             }} />
           : <Item danger label="Delete session" onClick={() => setConfirmDelete(true)} />}
       </div>
@@ -56,10 +57,25 @@ function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
   );
 }
 
+const Spinner = ({ tint }: { tint: string }) => (
+  <span className={`inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 ${tint}`} />
+);
+
 function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: number) => void }) {
-  const { selected, select, needsYou, reviewReady, setView } = useStore();
+  const { selected, select, needsYou, reviewReady, setView, deleting } = useStore();
   const st = statusFor(a, needsYou, reviewReady);
   const isSel = selected === a.Name;
+  if (deleting.includes(a.Name)) {
+    return (
+      <div className="mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm opacity-50">
+        <Spinner tint="border-neutral-600 border-t-neutral-300" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-neutral-300 line-through">{a.Name.replace(/^agent-/, "")}</span>
+          <span className="block text-xs text-neutral-500">deleting…</span>
+        </span>
+      </div>
+    );
+  }
   return (
     <div
       className={`group mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isSel ? "bg-neutral-800 ring-1 ring-neutral-700" : "hover:bg-neutral-800/60"}`}
@@ -97,7 +113,7 @@ const NAV: { v: View; icon: string; label: string }[] = [
 ];
 
 export function Sidebar() {
-  const { agents, setView, view, needsYou } = useStore();
+  const { agents, setView, view, needsYou, pendingSpawns } = useStore();
   const [menu, setMenu] = useState<MenuState>(null);
   const openMenu = (agent: Agent, x: number, y: number) => setMenu({ agent, x, y });
 
@@ -118,7 +134,7 @@ export function Sidebar() {
     <aside className="flex h-full w-64 flex-col border-r border-neutral-800 bg-neutral-900 text-neutral-200">
       {/* Header: brand + New chat */}
       <div className="flex items-center gap-2 px-4 pb-2 pt-3">
-        <span className="text-sm font-semibold tracking-tight text-neutral-300">safe-ag</span>
+        <span className="text-sm font-semibold tracking-tight text-neutral-300">Safe Agentic</span>
         {needs > 0 && (
           <span className="rounded-full bg-yellow-500/20 px-1.5 text-xs text-yellow-400" title={`${needs} need you`}>{needs}</span>
         )}
@@ -130,6 +146,15 @@ export function Sidebar() {
 
       {/* Agent list — the focus */}
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        {pendingSpawns.map((p) => (
+          <div key={p.id} className="mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm opacity-80">
+            <Spinner tint="border-green-800 border-t-green-400" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-neutral-200">starting…</span>
+              <span className="block truncate text-xs text-neutral-500">{p.label}</span>
+            </span>
+          </div>
+        ))}
         {[...fleets.entries()].map(([name, list]) => (
           <div key={name}>
             <SectionLabel>🔀 {name}</SectionLabel>
@@ -140,12 +165,15 @@ export function Sidebar() {
         {solo.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
         {stopped.length > 0 && <SectionLabel>Stopped</SectionLabel>}
         {stopped.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
-        {agents.length === 0 && (
+        {agents.length === 0 && pendingSpawns.length === 0 && (
           <div className="px-4 py-6 text-center text-xs text-neutral-600">
             No agents yet.<br />Start one with <span className="text-neutral-400">+ New chat</span>.
           </div>
         )}
       </div>
+
+      {/* Quota remaining for Claude + Codex */}
+      <QuotaBar />
 
       {/* Footer nav — secondary views */}
       <nav className="flex items-center justify-around border-t border-neutral-800 px-1 py-1.5">

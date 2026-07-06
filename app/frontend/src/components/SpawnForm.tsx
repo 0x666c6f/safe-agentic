@@ -4,8 +4,12 @@ import { useStore } from "../store";
 import { errText } from "../types";
 import { recordRepoUse, topRepos, forgetRepo } from "../repoHistory";
 
+const shortRepo = (u: string) =>
+  u.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "");
+
 export function SpawnForm() {
-  const { toast, setView } = useStore();
+  const { run, setView, addPendingSpawn, removePendingSpawn } = useStore();
+  const [busy, setBusy] = useState<"" | "spawn" | "dry">("");
   const [req, setReq] = useState({
     Agent: "claude", Name: "", Repo: "", Prompt: "", Template: "", Network: "",
     Memory: "", CPUs: "", MaxCost: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
@@ -27,15 +31,23 @@ export function SpawnForm() {
 
   const set = (k: string, v: unknown) => setReq((r) => ({ ...r, [k]: v }));
   const submit = async (dryRun: boolean) => {
+    if (dryRun) {
+      setBusy("dry");
+      try { setPreview(await AgentService.Spawn({ ...req, DryRun: true } as any)); }
+      catch (e) { setPreview(errText("dry-run", e)); }
+      finally { setBusy(""); }
+      return;
+    }
+    // Optimistic: show a "starting…" row and jump to the list right away — the
+    // real container only lands on the next poll, so this bridges the gap.
+    const label = `${req.Agent}${req.Repo ? " · " + shortRepo(req.Repo) : ""}`;
+    const pid = addPendingSpawn(label);
+    setView("agents");
     try {
-      const out = await AgentService.Spawn({ ...req, DryRun: dryRun } as any);
-      if (dryRun) setPreview(out);
-      else {
-        if (req.Repo) { await recordRepoUse(req.Repo); refreshRepos(); }
-        toast(`spawned:\n${out.trim().split("\n").slice(-3).join("\n")}`);
-        setView("agents");
-      }
-    } catch (e) { toast(errText(dryRun ? "dry-run" : "spawn", e)); }
+      await run(`Spawning ${label}`, AgentService.Spawn({ ...req, DryRun: false } as any));
+      if (req.Repo) { recordRepoUse(req.Repo); }
+      setTimeout(() => AgentService.Refresh(), 1500); // nudge the poller to swap in the real row
+    } catch { removePendingSpawn(pid); }
   };
 
   const Check = ({ k, label }: { k: "SSH" | "ReuseAuth" | "Worktree"; label: string }) => (
@@ -93,8 +105,12 @@ export function SpawnForm() {
           value={req.MaxCost} onChange={(e) => set("MaxCost", e.target.value)} />
       </div>
       <div className="flex gap-2">
-        <button className="btn" onClick={() => submit(true)}>Dry-run preview</button>
-        <button className="btn bg-green-800 hover:bg-green-700" onClick={() => submit(false)}>Spawn</button>
+        <button className="btn disabled:opacity-50" disabled={!!busy} onClick={() => submit(true)}>
+          {busy === "dry" ? "Validating…" : "Dry-run preview"}
+        </button>
+        <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50" disabled={!!busy} onClick={() => submit(false)}>
+          {busy === "spawn" ? "Spawning…" : "Spawn"}
+        </button>
       </div>
       {preview && <pre className="whitespace-pre-wrap rounded bg-neutral-900 p-3 text-xs">{preview}</pre>}
     </div>

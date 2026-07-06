@@ -1,5 +1,8 @@
 import { create } from "zustand";
+import { errText } from "./types";
 import type { Agent, AgentStatus, Tab, View } from "./types";
+
+export type ToastKind = "pending" | "ok" | "error";
 
 // orderAgents returns agents in sidebar display order (fleets, solo, stopped)
 // — the canonical order for ⌘1..9 and j/k navigation.
@@ -14,6 +17,7 @@ export function orderAgents(agents: Agent[]): Agent[] {
 }
 
 let toastSeq = 0;
+let spawnSeq = 0;
 const NEEDS = new Set(["needs-auth", "stuck", "blocked"]);
 const REVIEW = new Set(["ready-for-review", "ready-for-pr"]);
 
@@ -37,7 +41,11 @@ interface State {
   split: string | null;
   vmOk: boolean;
   vmError: string;
-  toasts: { id: number; text: string }[];
+  toasts: { id: number; text: string; kind: ToastKind }[];
+  // Optimistic UI: placeholders for spawns in flight (the real container only
+  // shows up on the next poll), and names being deleted (greyed until gone).
+  pendingSpawns: { id: number; label: string }[];
+  deleting: string[];
   view: View;
   tab: Tab;
   setTab: (t: Tab) => void;
@@ -47,6 +55,15 @@ interface State {
   setSplit: (name: string | null) => void;
   setVM: (ok: boolean, error: string) => void;
   toast: (text: string) => void;
+  // run wraps a slow action: shows a live "⋯ label" toast while the promise is
+  // in flight, then flips it to "✓ label" or the error. Returns the promise so
+  // callers can still chain. This is the app's default feedback for any action
+  // that isn't instant.
+  run: <T>(label: string, p: Promise<T>) => Promise<T>;
+  addPendingSpawn: (label: string) => number;
+  removePendingSpawn: (id: number) => void;
+  markDeleting: (name: string) => void;
+  unmarkDeleting: (name: string) => void;
   dismissToast: (id: number) => void;
   setView: (v: View) => void;
 }
@@ -54,9 +71,20 @@ interface State {
 export const useStore = create<State>()((set) => ({
   agents: [], needsYou: {}, reviewReady: {},
   selected: null, split: null, vmOk: true, vmError: "",
-  toasts: [], view: "agents", tab: "terminal",
+  toasts: [], pendingSpawns: [], deleting: [], view: "agents", tab: "terminal",
   setTab: (tab) => set({ tab }),
-  setAgents: (agents) => set({ agents }),
+  setAgents: (agents) =>
+    set((s) => {
+      // Reconcile optimistic state against the fresh poll snapshot:
+      // - each newly-appeared container clears one "spawning…" placeholder
+      // - drop "deleting" marks for containers that are now gone
+      const prev = new Set(s.agents.map((a) => a.Name));
+      const appeared = agents.filter((a) => !prev.has(a.Name)).length;
+      const pendingSpawns = appeared > 0 ? s.pendingSpawns.slice(appeared) : s.pendingSpawns;
+      const present = new Set(agents.map((a) => a.Name));
+      const deleting = s.deleting.filter((n) => present.has(n));
+      return { agents, pendingSpawns, deleting };
+    }),
   applyEvent: (status, container) =>
     set((s) => {
       if (!container) return {};
@@ -83,9 +111,37 @@ export const useStore = create<State>()((set) => ({
       if (s.toasts.some((t) => t.text === text)) return {};
       const id = ++toastSeq;
       setTimeout(() => useStore.getState().dismissToast(id), 8000);
-      const toasts = [...s.toasts, { id, text }];
+      const toasts = [...s.toasts, { id, text, kind: "ok" as ToastKind }];
       return { toasts: toasts.slice(-5) };
     }),
+  run: async (label, p) => {
+    const id = ++toastSeq;
+    set((s) => ({ toasts: [...s.toasts, { id, text: label, kind: "pending" as ToastKind }].slice(-5) }));
+    const finish = (text: string, kind: ToastKind, ttl: number) => {
+      set((s) => ({ toasts: s.toasts.map((t) => (t.id === id ? { ...t, text, kind } : t)) }));
+      setTimeout(() => useStore.getState().dismissToast(id), ttl);
+    };
+    try {
+      const out = await p;
+      const tail = typeof out === "string" && out.trim()
+        ? "\n" + out.trim().split("\n").slice(-2).join("\n") : "";
+      finish(`${label}${tail}`, "ok", 6000);
+      return out;
+    } catch (e) {
+      finish(errText(label, e), "error", 10000);
+      throw e;
+    }
+  },
+  addPendingSpawn: (label) => {
+    const id = ++spawnSeq;
+    set((s) => ({ pendingSpawns: [...s.pendingSpawns, { id, label }] }));
+    // Safety net: never let a placeholder linger if the container never appears.
+    setTimeout(() => useStore.getState().removePendingSpawn(id), 90000);
+    return id;
+  },
+  removePendingSpawn: (id) => set((s) => ({ pendingSpawns: s.pendingSpawns.filter((p) => p.id !== id) })),
+  markDeleting: (name) => set((s) => (s.deleting.includes(name) ? {} : { deleting: [...s.deleting, name] })),
+  unmarkDeleting: (name) => set((s) => ({ deleting: s.deleting.filter((n) => n !== name) })),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setView: (view) => set({ view }),
 }));

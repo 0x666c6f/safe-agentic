@@ -13,10 +13,9 @@ const shortName = (u: string) =>
     : u.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "");
 
 export function ProjectsView() {
-  const { toast, setView } = useStore();
+  const { toast, run, setView, addPendingSpawn, removePendingSpawn } = useStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [newUrl, setNewUrl] = useState("");
-  const [busy, setBusy] = useState("");
 
   const reload = () => Service.Projects().then((p: Project[] | null) => setProjects(p ?? [])).catch(() => {});
   useEffect(() => { reload(); }, []);
@@ -38,20 +37,19 @@ export function ProjectsView() {
   };
 
   const launch = async (p: Project, agent: string) => {
-    setBusy(p.url);
+    const label = `${agent} · ${shortName(p.url)}`;
+    const pid = addPendingSpawn(label);
+    setView("agents"); // jump to the list; the "starting…" row shows immediately
     try {
       if (isLocal(p.url)) {
-        toast(`copying ${shortName(p.url)} into a new ${agent} agent…`);
-        const out = await AgentService.SpawnFromLocal(agent, p.url);
-        toast(out);
+        await run(`Copying ${shortName(p.url)} into ${agent}`, AgentService.SpawnFromLocal(agent, p.url));
       } else {
         await Service.ProjectUse(p.url);
-        await AgentService.Spawn({ Agent: agent, Repo: p.url, SSH: true } as any);
-        toast(`spawning ${agent} on ${shortName(p.url)}`);
+        await run(`Spawning ${label}`, AgentService.Spawn({ Agent: agent, Repo: p.url, SSH: true } as any));
       }
-      setView("agents");
-    } catch (e) { toast(errText("launch", e)); }
-    finally { setBusy(""); reload(); }
+      setTimeout(() => AgentService.Refresh(), 1500);
+    } catch { removePendingSpawn(pid); }
+    finally { reload(); }
   };
 
   const remove = async (url: string) => {
@@ -82,10 +80,8 @@ export function ProjectsView() {
             </span>
             <span className="min-w-0 flex-1 truncate text-sm" title={p.url}>{shortName(p.url)}</span>
             {p.count > 0 && <span className="text-xs text-neutral-600">×{p.count}</span>}
-            <button className="btn" disabled={busy === p.url} onClick={() => launch(p, "claude")}>
-              {busy === p.url ? "…" : "▶ claude"}
-            </button>
-            <button className="btn" disabled={busy === p.url} onClick={() => launch(p, "codex")}>codex</button>
+            <button className="btn" onClick={() => launch(p, "claude")}>▶ claude</button>
+            <button className="btn" onClick={() => launch(p, "codex")}>codex</button>
             <button className="text-neutral-500 hover:text-red-400" title="forget" onClick={() => remove(p.url)}>✕</button>
           </div>
         ))}
