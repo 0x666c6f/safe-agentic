@@ -10,9 +10,10 @@ import type { Tab } from "../types";
 const TABS: Tab[] = ["terminal", "diff", "output", "info"];
 
 export function Workspace({ name }: { name: string }) {
-  const { split, setSplit, agents, tab, setTab } = useStore();
+  const { splits, toggleSplit, agents, tab, setTab, run } = useStore();
   const me = agents.find((a) => a.Name === name);
-  const others = agents.filter((a) => a.Running && a.Name !== name);
+  const others = agents.filter((a) => a.Running && a.Name !== name && !splits.includes(a.Name));
+  const panes = splits.filter((n) => n !== name);
   const blocked = me?.Running && me.State === "blocked";
   // Failed = stopped with a non-clean exit (State "exited", not "done").
   const failed = me && !me.Running && me.State === "exited";
@@ -46,8 +47,7 @@ export function Workspace({ name }: { name: string }) {
         <div className="flex items-start gap-3 bg-red-950/70 px-4 py-2 text-sm text-red-100">
           <span className="shrink-0 font-medium">✕ failed to start</span>
           <span className="min-w-0 flex-1 whitespace-pre-wrap font-mono text-xs text-red-200">{failReason || me!.Status}</span>
-          <button className="btn shrink-0" onClick={() =>
-            AgentService.Retry(name, "").then(() => useStore.getState().toast("retried")).catch((e) => useStore.getState().toast(String(e)))}>
+          <button className="btn shrink-0" onClick={() => run("Retrying agent", AgentService.Retry(name, ""))}>
             Retry
           </button>
         </div>
@@ -81,14 +81,16 @@ export function Workspace({ name }: { name: string }) {
             PR #{pr.number} ↗
           </button>
         )}
-        <select
-          className="ml-auto rounded bg-neutral-800 px-2 py-1 text-xs"
-          value={split ?? ""}
-          onChange={(e) => setSplit(e.target.value || null)}
-        >
-          <option value="">no split</option>
-          {others.map((a) => <option key={a.Name} value={a.Name}>{a.Name}</option>)}
-        </select>
+        {others.length > 0 && (
+          <select
+            className="ml-auto rounded bg-neutral-800 px-2 py-1 text-xs"
+            value=""
+            onChange={(e) => e.target.value && toggleSplit(e.target.value)}
+          >
+            <option value="">+ split</option>
+            {others.map((a) => <option key={a.Name} value={a.Name}>{a.Name}</option>)}
+          </select>
+        )}
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
@@ -101,11 +103,17 @@ export function Workspace({ name }: { name: string }) {
           {tab === "info" && <InfoTab name={name} />}
           {tab === "diff" && <DiffTab name={name} />}
         </div>
-        {split && (
-          <div className="min-w-0 flex-1 border-l border-neutral-800">
-            <TerminalPane container={split} />
+        {panes.map((n) => (
+          <div key={n} className="flex min-w-0 flex-1 flex-col border-l border-neutral-800">
+            <div className="flex items-center justify-between border-b border-neutral-800 px-2 py-1 text-xs text-neutral-400">
+              <span className="truncate">{n.replace(/^agent-/, "")}</span>
+              <button className="hover:text-neutral-100" title="Close split" onClick={() => toggleSplit(n)}>✕</button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <TerminalPane container={n} />
+            </div>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

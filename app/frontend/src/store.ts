@@ -38,7 +38,7 @@ interface State {
   needsYou: Record<string, boolean>;
   reviewReady: Record<string, boolean>;
   selected: string | null;
-  split: string | null;
+  splits: string[];
   vmOk: boolean;
   vmError: string;
   toasts: { id: number; text: string; kind: ToastKind }[];
@@ -52,7 +52,7 @@ interface State {
   setAgents: (agents: Agent[]) => void;
   applyEvent: (status: string, container: string) => void;
   select: (name: string | null) => void;
-  setSplit: (name: string | null) => void;
+  toggleSplit: (name: string) => void;
   setVM: (ok: boolean, error: string) => void;
   toast: (text: string) => void;
   // run wraps a slow action: shows a live "⋯ label" toast while the promise is
@@ -70,7 +70,7 @@ interface State {
 
 export const useStore = create<State>()((set) => ({
   agents: [], needsYou: {}, reviewReady: {},
-  selected: null, split: null, vmOk: true, vmError: "",
+  selected: null, splits: [], vmOk: true, vmError: "",
   toasts: [], pendingSpawns: [], deleting: [], view: "agents", tab: "terminal",
   setTab: (tab) => set({ tab }),
   setAgents: (agents) =>
@@ -83,7 +83,9 @@ export const useStore = create<State>()((set) => ({
       const pendingSpawns = appeared > 0 ? s.pendingSpawns.slice(appeared) : s.pendingSpawns;
       const present = new Set(agents.map((a) => a.Name));
       const deleting = s.deleting.filter((n) => present.has(n));
-      return { agents, pendingSpawns, deleting };
+      // Split panes only make sense for live terminals — drop stopped agents.
+      const splits = s.splits.filter((n) => agents.some((a) => a.Name === n && a.Running));
+      return { agents, pendingSpawns, deleting, splits };
     }),
   applyEvent: (status, container) =>
     set((s) => {
@@ -101,9 +103,14 @@ export const useStore = create<State>()((set) => ({
       // Default tab follows the agent's state: terminal for running,
       // output for stopped (attach would fail).
       const a = s.agents.find((x) => x.Name === selected);
-      return { selected, tab: a && !a.Running ? "output" : "terminal" };
+      // Selecting an agent closes its split pane: the main pane and a split
+      // must never attach the same tmux session twice.
+      return { selected, splits: s.splits.filter((n) => n !== selected), tab: a && !a.Running ? "output" : "terminal" };
     }),
-  setSplit: (split) => set({ split }),
+  toggleSplit: (name) =>
+    set((s) => ({
+      splits: s.splits.includes(name) ? s.splits.filter((n) => n !== name) : [...s.splits, name],
+    })),
   setVM: (vmOk, vmError) => set({ vmOk, vmError }),
   toast: (text) =>
     set((s) => {

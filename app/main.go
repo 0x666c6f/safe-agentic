@@ -152,12 +152,44 @@ func main() {
 			PromptForSingleSelection()
 	}
 
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "Safe Agentic",
-		Width:  1400,
-		Height: 900,
-		URL:    "/",
-	})
+	newWindow := func() *application.WebviewWindow {
+		return app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Title:  "Safe Agentic",
+			Width:  1400,
+			Height: 900,
+			URL:    "/",
+		})
+	}
+	newWindow()
+
+	// showApp raises a live window. Never hold a window pointer across tray
+	// clicks: the original window may have been closed while another stays open.
+	showApp := func() {
+		wins := app.Window.GetAll()
+		if len(wins) == 0 {
+			newWindow() // shows + focuses on creation
+			return
+		}
+		w := app.Window.Current()
+		if w == nil {
+			w = wins[0]
+		}
+		w.Show()
+		w.Focus()
+	}
+
+	// Stock menu plus File → New Window, which makes the app multi-window.
+	appMenu := application.NewMenu()
+	appMenu.AddRole(application.AppMenu)
+	fileMenu := appMenu.AddSubmenu("File")
+	fileMenu.Add("New Window").SetAccelerator("CmdOrCtrl+N").
+		OnClick(func(*application.Context) { newWindow() })
+	fileMenu.AddRole(application.CloseWindow)
+	appMenu.AddRole(application.EditMenu)
+	appMenu.AddRole(application.ViewMenu)
+	appMenu.AddRole(application.WindowMenu)
+	appMenu.AddRole(application.HelpMenu)
+	app.Menu.SetApplicationMenu(appMenu)
 
 	// Systray: counts + per-agent focus items.
 	var needsMu sync.Mutex
@@ -195,8 +227,7 @@ func main() {
 			}
 			name := a.Name
 			menu.Add(chatMenuLine(a, needsYou)).OnClick(func(*application.Context) {
-				win.Show()
-				win.Focus()
+				showApp()
 				em.Emit("focus.agent", name)
 			})
 		}
@@ -213,17 +244,15 @@ func main() {
 						log.Printf("tray spawn %s: %v", url, err)
 					}
 				}()
-				win.Show()
-				win.Focus()
+				showApp()
 			})
 		}
 		menu.Add("New chat…").OnClick(func(*application.Context) {
-			win.Show()
-			win.Focus()
+			showApp()
 			em.Emit("focus.spawn", nil)
 		})
 		menu.AddSeparator()
-		menu.Add("Open Safe Agentic").OnClick(func(*application.Context) { win.Show(); win.Focus() })
+		menu.Add("Open Safe Agentic").OnClick(func(*application.Context) { showApp() })
 		menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 		tray.SetMenu(menu)
 	}

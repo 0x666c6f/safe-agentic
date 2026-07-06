@@ -31,6 +31,22 @@ describe("store", () => {
     expect(statusFor(agent({ Running: false, Finished: true }), {}, {})).toBe("stopped");
   });
 
+  it("splits: toggle, pruned on select and when the agent stops", () => {
+    useStore.setState({ agents: [agent({ Name: "agent-a" }), agent({ Name: "agent-b" })] });
+    const s = useStore.getState();
+    s.toggleSplit("agent-a");
+    s.toggleSplit("agent-b");
+    expect(useStore.getState().splits).toEqual(["agent-a", "agent-b"]);
+    s.toggleSplit("agent-a");
+    expect(useStore.getState().splits).toEqual(["agent-b"]);
+    // selecting an agent closes its split (never attach one session twice)
+    s.select("agent-b");
+    expect(useStore.getState().splits).toEqual([]);
+    s.toggleSplit("agent-a");
+    useStore.getState().setAgents([agent({ Name: "agent-a", Running: false })]);
+    expect(useStore.getState().splits).toEqual([]);
+  });
+
   it("toast lifecycle", () => {
     useStore.getState().toast("boom");
     const t = useStore.getState().toasts;
