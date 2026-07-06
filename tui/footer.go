@@ -56,29 +56,6 @@ func NewFooter() *Footer {
 	return f
 }
 
-var allShortcuts = []shortcut{
-	{"a", "Attach"},
-	{"s", "Stop"},
-	{"l", "Logs"},
-	{"d", "Describe"},
-	{"f", "Diff"},
-	{"R", "Review"},
-	{"t", "Todos"},
-	{"x", "Chkpt"},
-	{"g", "PR"},
-	{"$", "Cost"},
-	{"A", "Audit"},
-	{"n", "New"},
-	{"p", "Preview"},
-	{"e", "Export"},
-	{"c", "Copy"},
-	{"m", "MCP"},
-	{"/", "Filter"},
-	{":", "Cmd"},
-	{"^k", "KillAll"},
-	{"q", "Quit"},
-}
-
 const shortcutCellWidth = 14 // min column width per shortcut
 
 type shortcut struct {
@@ -91,7 +68,7 @@ func (f *Footer) showShortcuts() {
 	if width < 20 {
 		width = 120 // fallback before first draw
 	}
-	text, rows := renderShortcutGrid(allShortcuts, width)
+	text, rows := renderShortcutGrid(footerShortcutList(), width)
 	f.hints.SetText(text)
 	f.rows = rows
 }

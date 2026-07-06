@@ -59,7 +59,7 @@ func handleHelpMode() bool {
 	fmt.Println()
 	fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
 	fmt.Println()
-	fmt.Println("Keybindings: a=attach s=stop l=logs d=describe n=new q=quit")
+	fmt.Println(helpText())
 	os.Exit(0)
 	return true
 }

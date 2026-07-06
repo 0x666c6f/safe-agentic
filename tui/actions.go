@@ -902,6 +902,35 @@ func (ac *Actions) SpawnNew() {
 	ShowSpawnForm(ac.app)
 }
 
+// Steer opens a small input overlay and sends the entered text into the
+// selected agent's tmux session via `safe-ag steer`.
+func (ac *Actions) Steer() {
+	agent := ac.selectedOrWarn()
+	if agent == nil {
+		return
+	}
+	ShowSteerForm(ac.app, agent.Name)
+}
+
+// VMStart shells out to `safe-ag vm start` to recover an unreachable VM,
+// suspending the TUI while it runs (like the other interactive shell-outs),
+// then forcing an immediate re-poll on return.
+func (ac *Actions) VMStart() {
+	ac.app.SuspendAndRun(func() {
+		fmt.Println("Running 'safe-ag vm start'...")
+		cmd := newCLICmd("vm", "start")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("vm start failed: %v\n", err)
+		}
+		fmt.Print("\nPress Enter to return to the TUI...")
+		_, _ = fmt.Scanln()
+	})
+	ac.app.poller.ForceRefresh()
+}
+
 // McpLogin runs MCP login interactively (suspends TUI).
 func (ac *Actions) McpLogin() {
 	agent := ac.selectedOrWarn()
@@ -941,7 +970,9 @@ func (ac *Actions) KillAll() {
 		}
 		ac.app.footer.ShowStatus("Stopping all agents...", false)
 		go func() {
-			cmd := newCLICmd("stop", "--all")
+			// --yes: Ctrl-K already confirmed in the TUI; the child CLI has non-TTY
+			// stdin, so the destructive-op gate would otherwise reject it.
+			cmd := newCLICmd("stop", "--all", "--yes")
 			out, err := cmd.CombinedOutput()
 			ac.app.poller.ForceRefresh()
 			ac.app.tapp.QueueUpdateDraw(func() {

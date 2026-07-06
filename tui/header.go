@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -31,24 +32,31 @@ func (h *Header) ShowLoading() {
 	))
 }
 
-// Update refreshes the header content.
-func (h *Header) Update(running, total int, stale bool) {
-	staleIndicator := ""
-	if stale {
-		staleIndicator = fmt.Sprintf(" [%s]STALE[-]", colorToTag(colorStale))
+// Update refreshes the header content. A non-zero staleSince means the poller
+// can no longer reach the VM: the whole bar turns into an unmissable red alert
+// so stale rows are never mistaken for live ones.
+func (h *Header) Update(running, total int, staleSince time.Time) {
+	if !staleSince.IsZero() {
+		h.view.SetBackgroundColor(colorBannerBg)
+		h.view.SetText(fmt.Sprintf(
+			" [white::b]⚠ VM UNREACHABLE[white::-] — data stale since %s. Press [white::b]S[white::-] to run 'safe-ag vm start'.    agents: %d/%d",
+			staleSince.Format("15:04:05"),
+			running,
+			total,
+		))
+		return
 	}
 
-	text := fmt.Sprintf(
-		" [%s::b]safe-agentic[-::-]        ctx: %s VM    [::d]⏱ %ds[-::-]    agents: [%s]%d[-]/%d%s",
+	h.view.SetBackgroundColor(tcell.ColorDefault)
+	h.view.SetText(fmt.Sprintf(
+		" [%s::b]safe-agentic[-::-]        ctx: %s VM    [::d]⏱ %ds[-::-]    agents: [%s]%d[-]/%d",
 		colorToTag(colorTitle),
 		vmName,
 		pollInterval,
 		colorToTag(colorRunning),
 		running,
 		total,
-		staleIndicator,
-	)
-	h.view.SetText(text)
+	))
 }
 
 // Primitive returns the underlying tview primitive.

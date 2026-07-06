@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
 	"github.com/gdamore/tcell/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
 )
 
@@ -350,12 +352,18 @@ func (at *AgentTable) visibleColumns() []int {
 
 func (at *AgentTable) renderHeaderRow(visibleCols []int) {
 	for ci, colIdx := range visibleCols {
-		at.table.SetCell(0, ci, headerCell(at.headerTitle(colIdx)))
+		at.table.SetCell(0, ci, headerCell(at.headerTitle(ci, colIdx)))
 	}
 }
 
-func (at *AgentTable) headerTitle(colIdx int) string {
+// headerTitle renders a visible column's header. The leading digit is the
+// number key that sorts this column (1..9, by on-screen position, so number
+// keys always match what's actually shown). The sorted column gets an arrow.
+func (at *AgentTable) headerTitle(visibleIdx, colIdx int) string {
 	title := columns[colIdx].Title
+	if visibleIdx < 9 {
+		title = fmt.Sprintf("%d %s", visibleIdx+1, title)
+	}
 	if colIdx != at.sortCol {
 		return title
 	}
@@ -474,16 +482,16 @@ func colorTypeCell(cell *tview.TableCell, agentType string) {
 }
 
 func statusColor(agent Agent) tcell.Color {
-	if agent.Deleting {
+	switch {
+	case agent.Deleting:
 		return colorDeleting
-	}
-	if agent.Finished {
+	case agent.Running:
 		return colorRunning
+	case agent.Finished: // stopped cleanly (exit 0)
+		return colorExitedClean
+	default: // stopped with a non-zero exit / crash
+		return colorFailed
 	}
-	if agent.Running {
-		return colorRunning
-	}
-	return colorExited
 }
 
 func activityColor(agent Agent) tcell.Color {
@@ -491,13 +499,13 @@ func activityColor(agent Agent) tcell.Color {
 	case agent.Deleting:
 		return colorDeleting
 	case agent.Finished:
-		return colorRunning
+		return colorExitedClean
 	case agent.Activity == "Working":
 		return colorRunning
 	case agent.Activity == "Idle":
 		return colorStopped
 	case agent.Activity == "Stopped":
-		return colorExited
+		return colorFailed
 	default:
 		return tcell.ColorDefault
 	}
@@ -534,9 +542,39 @@ func (at *AgentTable) restoreSelection() {
 	}
 }
 
+// padRight pads s to width using display columns, not bytes, so rows with emoji
+// type icons and box-drawing tree glyphs line up (a naive len() over-counts
+// multibyte runes and misaligns every iconized row).
 func padRight(s string, width int) string {
-	if len(s) >= width {
+	w := runewidth.StringWidth(s)
+	if w >= width {
 		return s
 	}
-	return s + fmt.Sprintf("%*s", width-len(s), "")
+	return s + strings.Repeat(" ", width-w)
+}
+
+// SelectFirst moves the selection to the first data row (go-to-top / g).
+func (at *AgentTable) SelectFirst() {
+	first := -1
+	for row := range at.rowToAgent {
+		if first == -1 || row < first {
+			first = row
+		}
+	}
+	if first >= 0 {
+		at.table.Select(first, 0)
+	}
+}
+
+// SelectLast moves the selection to the last data row (go-to-bottom / G).
+func (at *AgentTable) SelectLast() {
+	last := -1
+	for row := range at.rowToAgent {
+		if row > last {
+			last = row
+		}
+	}
+	if last >= 0 {
+		at.table.Select(last, 0)
+	}
 }

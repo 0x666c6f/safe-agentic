@@ -188,6 +188,65 @@ func cleanVMCopyPath(value string, field string) (string, error) {
 	return filepath.Clean(raw), nil
 }
 
+// ShowSteerForm shows a small input overlay to send a follow-up message to an
+// agent's tmux session (via `safe-ag steer <name> <message>`).
+func ShowSteerForm(app *App, containerName string) {
+	form := tview.NewForm().
+		AddInputField("Message:", "", 60, nil, nil)
+
+	send := func() {
+		text := strings.TrimSpace(form.GetFormItemByLabel("Message:").(*tview.InputField).GetText())
+		if text == "" {
+			app.footer.ShowStatus("Message required", true)
+			app.tapp.SetFocus(form)
+			return
+		}
+		closeSteerForm(app)
+		app.footer.ShowStatus("Sending to "+containerName+"...", false)
+		go func() {
+			out, err := newCLICmd("steer", containerName, text).CombinedOutput()
+			app.tapp.QueueUpdateDraw(func() {
+				if err != nil {
+					msg := strings.TrimSpace(string(out))
+					if msg == "" {
+						msg = "Steer failed"
+					}
+					app.footer.ShowStatus(msg, true)
+					return
+				}
+				app.footer.ShowStatus("Sent to "+containerName, false)
+			})
+		}()
+	}
+
+	form.AddButton("Send", send)
+	form.AddButton("Cancel", func() { closeSteerForm(app) })
+
+	form.SetBorder(true).
+		SetTitle(" Steer: " + containerName + " (Esc to close) ").
+		SetTitleColor(colorTitle).
+		SetBorderColor(colorBorder).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, 7, 0, true).
+			AddItem(nil, 0, 1, false),
+			70, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	app.pages.AddAndSwitchToPage("steer", modal, true)
+	app.tapp.SetFocus(form)
+}
+
+func closeSteerForm(app *App) {
+	app.pages.SwitchToPage("main")
+	app.pages.RemovePage("steer")
+	app.tapp.SetFocus(app.table.Table())
+}
+
 // ShowSpawnForm shows a modal form for spawning a new agent.
 func ShowSpawnForm(app *App) {
 	agentType := "claude"
@@ -389,7 +448,9 @@ func executeSpawnForm(spec spawnFormSpec) (string, error) {
 	if spec.docker && spec.dockerSocket {
 		return "", fmt.Errorf("--docker and --docker-socket are mutually exclusive")
 	}
-	spawnArgs := append(buildSpawnFormArgs(spec), "--background")
+	// --yes: the spawn form itself is the user's confirmation; the child CLI
+	// has non-TTY stdin, so the risk gate would otherwise reject the spawn.
+	spawnArgs := append(buildSpawnFormArgs(spec), "--background", "--yes")
 	spawnOut, spawnErr := newAgentCmd(spawnArgs...).CombinedOutput()
 	return strings.TrimSpace(string(spawnOut)), spawnErr
 }

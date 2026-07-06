@@ -28,6 +28,7 @@ type App struct {
 	pendingAgents []Agent
 	pendingStale  bool
 	pendingUpdate bool
+	staleSince    time.Time // when the VM first became unreachable (zero = healthy)
 }
 
 // NewApp creates and wires up the full TUI.
@@ -160,8 +161,16 @@ func (a *App) flushPendingUpdates() {
 	a.pendingUpdate = false
 	a.pendingMu.Unlock()
 
+	if stale {
+		if a.staleSince.IsZero() {
+			a.staleSince = time.Now()
+		}
+	} else {
+		a.staleSince = time.Time{}
+	}
+
 	a.table.Update(agents)
-	a.header.Update(a.table.RunningCount(), a.table.TotalCount(), stale)
+	a.header.Update(a.table.RunningCount(), a.table.TotalCount(), a.staleSince)
 	if a.preview.Visible() {
 		if agent := a.table.SelectedAgent(); agent != nil {
 			a.updatePreview(agent)
@@ -235,12 +244,19 @@ func (a *App) handleGlobalInput(event *tcell.EventKey) (bool, *tcell.EventKey) {
 		a.actions.StopAgent()
 	case tcell.KeyCtrlK:
 		a.actions.KillAll()
+	case tcell.KeyCtrlR:
+		a.forceRefresh()
 	case tcell.KeyEnter:
 		a.actions.Attach()
 	default:
 		return false, nil
 	}
 	return true, nil
+}
+
+func (a *App) forceRefresh() {
+	a.poller.ForceRefresh()
+	a.footer.ShowStatus("Refreshing…", false)
 }
 
 func (a *App) handleRuneInput(r rune) (bool, *tcell.EventKey) {
@@ -250,12 +266,6 @@ func (a *App) handleRuneInput(r rune) (bool, *tcell.EventKey) {
 	}
 
 	switch r {
-	case 'p':
-		a.togglePreview()
-	case '/':
-		a.startFilterInput()
-	case ':':
-		a.startCommandInput()
 	case 'j':
 		return true, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
 	case 'k':
@@ -268,26 +278,52 @@ func (a *App) handleRuneInput(r rune) (bool, *tcell.EventKey) {
 	return true, nil
 }
 
+// simpleRuneActions builds the rune→action map from the single keyBindings
+// table so the input handler can never drift from the footer / help surfaces.
 func (a *App) simpleRuneActions() map[rune]func() {
-	return map[rune]func(){
-		'q': a.tapp.Stop,
-		'a': a.actions.Attach,
-		'r': a.actions.Resume,
-		's': a.actions.StopAgent,
-		'l': a.actions.Logs,
-		'd': a.actions.Describe,
-		'e': a.actions.ExportSessions,
-		'c': a.actions.CopyFiles,
-		'n': a.actions.SpawnNew,
-		'f': a.actions.Diff,
-		'x': a.actions.Checkpoint,
-		't': a.actions.Todo,
-		'm': a.actions.McpLogin,
-		'g': a.actions.CreatePR,
-		'R': a.actions.Review,
-		'$': a.actions.Cost,
-		'A': a.actions.Audit,
-		'?': a.showHelpOverlay,
+	handlers := a.keyHandlers()
+	out := make(map[rune]func(), len(keyBindings))
+	for _, kb := range keyBindings {
+		if kb.Handler == "" {
+			continue
+		}
+		if r := kb.runeKey(); r != 0 {
+			if h, ok := handlers[kb.Handler]; ok {
+				out[r] = h
+			}
+		}
+	}
+	return out
+}
+
+// keyHandlers maps keyBinding.Handler ids to their implementations.
+func (a *App) keyHandlers() map[string]func() {
+	return map[string]func(){
+		"attach":     a.actions.Attach,
+		"resume":     a.actions.Resume,
+		"stop":       a.actions.StopAgent,
+		"vmstart":    a.actions.VMStart,
+		"steer":      a.actions.Steer,
+		"new":        a.actions.SpawnNew,
+		"pr":         a.actions.CreatePR,
+		"preview":    a.togglePreview,
+		"logs":       a.actions.Logs,
+		"describe":   a.actions.Describe,
+		"diff":       a.actions.Diff,
+		"checkpoint": a.actions.Checkpoint,
+		"todo":       a.actions.Todo,
+		"export":     a.actions.ExportSessions,
+		"copy":       a.actions.CopyFiles,
+		"cost":       a.actions.Cost,
+		"audit":      a.actions.Audit,
+		"review":     a.actions.Review,
+		"mcp":        a.actions.McpLogin,
+		"top":        a.table.SelectFirst,
+		"bottom":     a.table.SelectLast,
+		"filter":     a.startFilterInput,
+		"command":    a.startCommandInput,
+		"quit":       a.tapp.Stop,
+		"help":       a.showHelpOverlay,
 	}
 }
 
@@ -317,11 +353,16 @@ func (a *App) startCommandInput() {
 	a.tapp.SetFocus(a.footer.InputField())
 }
 
+// sortByRune maps a number key to the Nth *visible* column, so the digits
+// always sort a column the user can actually see (and its header shows the
+// matching arrow), even on narrow terminals where columns are dropped.
 func (a *App) sortByRune(r rune) {
-	col := int(r - '1')
-	if col < len(columns) {
-		a.table.SetSort(col)
+	idx := int(r - '1')
+	visible := a.table.visibleColumns()
+	if idx < 0 || idx >= len(visible) {
+		return
 	}
+	a.table.SetSort(visible[idx])
 }
 
 func (a *App) handleCommand(cmd string) {
@@ -396,41 +437,7 @@ func (a *App) updatePreview(agent *Agent) {
 }
 
 func (a *App) showHelpOverlay() {
-	content := `Keybindings
-
-Navigation
-  j / k / Up / Down   Move selection up/down
-  1-9                 Sort by column (1=Name, 2=Type, etc.)
-  /                   Filter agents by keyword
-  :                   Command mode (quit, fleet, pipeline, profile, action, comments, timeline, inbox, pr-review, pr-fix, audit)
-
-Actions
-  Enter / a           Attach to selected agent (tmux)
-  r                   Resume agent session
-  n                   Spawn new agent (form)
-  s / Ctrl+D          Stop selected agent
-  Ctrl+K              Stop all agents
-
-Inspect
-  p                   Toggle preview pane (last output)
-  l                   Logs (safe-ag logs)
-  d                   Describe container (docker inspect)
-  f                   Diff (safe-ag diff)
-  x                   Checkpoint create
-  t                   Todo list
-  e                   Export sessions
-  c                   Transfer files VM <-> agent
-  $                   Cost estimate
-  A                   Audit log
-  R                   Code review (safe-ag review)
-  g                   Create PR
-  m                   MCP OAuth login
-
-Other
-  ?                   This help overlay
-  q / Ctrl+C          Quit
-  Esc                 Close overlay / reset filter`
-	ShowOverlay(a, "help", "Help", content)
+	ShowOverlay(a, "help", "Help", helpText())
 }
 
 func capturePreview(name string, lines int) (string, error) {

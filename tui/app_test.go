@@ -141,6 +141,8 @@ func TestAppHandleInputStatusAndOverlayModes(t *testing.T) {
 
 func TestAppHandleInputNavigationAndSorting(t *testing.T) {
 	a := newInputTestApp()
+	// Wide table so all columns are visible; number keys map to visible columns.
+	a.table.Table().SetRect(0, 0, 200, 20)
 	if got := a.handleInput(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone)); got == nil || got.Key() != tcell.KeyDown {
 		t.Fatalf("j should map to down, got %#v", got)
 	}
@@ -152,6 +154,27 @@ func TestAppHandleInputNavigationAndSorting(t *testing.T) {
 	}
 	if a.table.sortCol != 1 || !a.table.sortAsc {
 		t.Fatalf("sort state = col %d asc %v, want col 1 asc true", a.table.sortCol, a.table.sortAsc)
+	}
+}
+
+// On a narrow terminal only some columns are visible, so a number key beyond the
+// visible count is a no-op (never sorts a hidden column).
+func TestSortByRuneMapsToVisibleColumns(t *testing.T) {
+	a := newInputTestApp()
+	a.table.Table().SetRect(0, 0, 50, 20) // width 50 → NAME, TYPE, STATE, ACTIVITY
+	visible := a.table.visibleColumns()
+	if len(visible) < 2 {
+		t.Fatalf("expected at least 2 visible columns, got %v", visible)
+	}
+	a.sortByRune('2') // 2nd visible column
+	if a.table.sortCol != visible[1] {
+		t.Fatalf("sortCol = %d, want visible[1] = %d", a.table.sortCol, visible[1])
+	}
+	// A digit past the visible count must not change the sort (no hidden-column sort).
+	before := a.table.sortCol
+	a.sortByRune('9')
+	if a.table.sortCol != before {
+		t.Fatalf("digit past visible columns changed sort to %d", a.table.sortCol)
 	}
 }
 
