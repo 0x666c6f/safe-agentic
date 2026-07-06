@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,6 +70,7 @@ type session struct {
 	cmd       *exec.Cmd
 	container string
 	subs      map[string]size // subscriber id → its requested size
+	emitSeq   atomic.Int64    // orders term:data chunks (see pump below)
 }
 
 // minSize returns the smallest requested cols/rows across subscribers.
@@ -179,7 +181,12 @@ func (m *Manager) Open(container string, cols, rows int) (string, error) {
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
-				payload := base64.StdEncoding.EncodeToString(buf[:n])
+				// Wails alpha dispatches every event on its own goroutine, so
+				// rapid chunks race to the webview and arrive out of order,
+				// interleaving escape sequences into garbage. Prefix each chunk
+				// with a sequence number; the frontend reassembles strict order.
+				payload := strconv.FormatInt(s.emitSeq.Add(1), 10) + "|" +
+					base64.StdEncoding.EncodeToString(buf[:n])
 				for _, sid := range m.subscriberIDs(s) {
 					m.em.Emit("term:data:"+sid, payload)
 				}

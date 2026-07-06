@@ -3,6 +3,7 @@ package term
 import (
 	"encoding/base64"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,18 +49,35 @@ func TestOpenWriteEchoClose(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		var got strings.Builder
-		for _, e := range rec.Named("term:data:" + id) {
-			raw, _ := base64.StdEncoding.DecodeString(e.Data.(string))
-			got.Write(raw)
-		}
-		if strings.Contains(got.String(), "hello") {
+		if strings.Contains(decodeChunks(rec, id), "hello") {
 			m.Close(id)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("echo not received over PTY")
+}
+
+// decodeChunks joins a subscriber's term:data payloads ("seq|base64" — seq
+// must be present and monotonically increasing).
+func decodeChunks(rec *emit.Recorder, id string) string {
+	var got strings.Builder
+	last := 0
+	for _, e := range rec.Named("term:data:" + id) {
+		payload := e.Data.(string)
+		seqStr, b64, ok := strings.Cut(payload, "|")
+		if !ok {
+			panic("term:data payload missing seq prefix: " + payload)
+		}
+		seq, err := strconv.Atoi(seqStr)
+		if err != nil || seq <= last {
+			panic("term:data seq not increasing: " + payload)
+		}
+		last = seq
+		raw, _ := base64.StdEncoding.DecodeString(b64)
+		got.Write(raw)
+	}
+	return got.String()
 }
 
 func TestWriteUnknownID(t *testing.T) {
@@ -96,12 +114,7 @@ func TestSecondOpenSameContainerSharesPTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := func(id string) bool {
-		var got strings.Builder
-		for _, e := range rec.Named("term:data:" + id) {
-			raw, _ := base64.StdEncoding.DecodeString(e.Data.(string))
-			got.Write(raw)
-		}
-		return strings.Contains(got.String(), "fanout")
+		return strings.Contains(decodeChunks(rec, id), "fanout")
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && !(seen(id1) && seen(id2)) {

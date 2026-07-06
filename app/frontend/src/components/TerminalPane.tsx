@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Clipboard, Events } from "@wailsio/runtime";
 import { TerminalService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { orderedStream } from "../orderedStream";
 import { errText } from "../types";
 import "@xterm/xterm/css/xterm.css";
 
@@ -61,6 +62,7 @@ export function TerminalPane({ container }: { container: string }) {
     let offData = () => {};
     let offExit = () => {};
     let disposed = false;
+    const stream = orderedStream((b64) => xterm.write(b64ToBytes(b64)));
 
     // Open the PTY AT the fitted xterm size so tmux attaches at the right
     // dimensions immediately (SIGWINCH from a later resize is unreliable
@@ -76,7 +78,7 @@ export function TerminalPane({ container }: { container: string }) {
         // otherwise a stale wider size leaks through and status lines overflow.
         fit.fit();
         TerminalService.Resize(tid, xterm.cols, xterm.rows);
-        offData = Events.On(`term:data:${tid}`, (e: any) => xterm.write(b64ToBytes(unwrap(e))));
+        offData = Events.On(`term:data:${tid}`, (e: any) => stream.push(unwrap(e)));
         offExit = Events.On(`term:exit:${tid}`, () =>
           xterm.writeln("\r\n\x1b[33m[disconnected — press ⟳ Reattach]\x1b[0m"));
         xterm.focus();
@@ -93,6 +95,7 @@ export function TerminalPane({ container }: { container: string }) {
     return () => {
       disposed = true;
       ro.disconnect();
+      stream.dispose();
       osc52.dispose();
       onData.dispose();
       offData(); offExit();
