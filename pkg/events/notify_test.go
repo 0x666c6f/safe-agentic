@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"runtime"
@@ -238,6 +239,71 @@ func TestSystemNotifyCommandSelection(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	if got := SystemNotifyCommand(SystemNotification{Container: "c", Message: "m"}); got[0] != "osascript" {
 		t.Errorf("expected osascript fallback, got %q", got[0])
+	}
+}
+
+// Dispatch must deliver to every target kind through the package seams, without
+// running a real command or making a real HTTP request.
+func TestDispatch(t *testing.T) {
+	origCmd, origSlack := commandRunner, slackPoster
+	defer func() { commandRunner, slackPoster = origCmd, origSlack }()
+
+	var gotCmd, gotCmdEnv, gotSlackURL, gotSlackText string
+	commandRunner = func(command string, env []string) error {
+		gotCmd = command
+		gotCmdEnv = strings.Join(env, "\n")
+		return nil
+	}
+	slackPoster = func(url, text string) error {
+		gotSlackURL, gotSlackText = url, text
+		return nil
+	}
+
+	targets := ParseNotifyTargets("terminal,slack:https://hooks.slack.com/x,command:/n.sh")
+	note := SystemNotification{Container: "agent-foo", Message: "Agent finished", Sound: SoundSuccess}
+
+	var buf bytes.Buffer
+	if err := Dispatch(targets, note, &buf); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "agent-foo") || !strings.Contains(buf.String(), "Agent finished") {
+		t.Errorf("terminal target missing content: %q", buf.String())
+	}
+	if gotSlackURL != "https://hooks.slack.com/x" {
+		t.Errorf("slack url = %q", gotSlackURL)
+	}
+	if !strings.Contains(gotSlackText, "Agent finished") {
+		t.Errorf("slack text = %q", gotSlackText)
+	}
+	if gotCmd != "/n.sh" {
+		t.Errorf("command = %q", gotCmd)
+	}
+	if !strings.Contains(gotCmdEnv, "SAFE_AG_CONTAINER=agent-foo") {
+		t.Errorf("command env missing container: %q", gotCmdEnv)
+	}
+}
+
+// A target with a missing required value must surface an error, and a broken
+// target must not stop the others from firing.
+func TestDispatchErrorsAreCollectedNotFatal(t *testing.T) {
+	origSlack := slackPoster
+	defer func() { slackPoster = origSlack }()
+
+	slackCalled := false
+	slackPoster = func(url, text string) error {
+		slackCalled = true
+		return nil
+	}
+
+	// A bare "command" (no value) errors; the following slack target must still fire.
+	targets := ParseNotifyTargets("command,slack:https://hooks.slack.com/x")
+	err := Dispatch(targets, SystemNotification{Container: "c", Message: "m"}, nil)
+	if err == nil {
+		t.Fatal("expected an error from the valueless command target")
+	}
+	if !slackCalled {
+		t.Error("slack target should still fire despite the earlier error")
 	}
 }
 

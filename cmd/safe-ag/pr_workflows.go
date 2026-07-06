@@ -21,17 +21,19 @@ var (
 )
 
 var prReviewCmd = &cobra.Command{
-	Use:   "pr-review [claude|codex|dual] [pr]",
-	Short: "Run a one-shot PR review workflow",
-	Args:  cobra.RangeArgs(0, 2),
-	RunE:  runPRReview,
+	Use:     "pr-review [claude|codex|dual] [pr]",
+	Short:   "Run a one-shot PR review workflow",
+	GroupID: groupWorkflow,
+	Args:    cobra.RangeArgs(0, 2),
+	RunE:    runPRReview,
 }
 
 var prFixCmd = &cobra.Command{
-	Use:   "pr-fix [pr]",
-	Short: "Run the PR fix workflow for the current or specified PR",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runPRFixWorkflow,
+	Use:     "pr-fix [pr]",
+	Short:   "Run the PR fix workflow for the current or specified PR",
+	GroupID: groupWorkflow,
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runPRFixWorkflow,
 }
 
 func init() {

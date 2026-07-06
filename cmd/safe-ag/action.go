@@ -15,8 +15,9 @@ import (
 var actionFiles []string
 
 var actionCmd = &cobra.Command{
-	Use:   "action",
-	Short: "Run configured project or user actions inside an agent",
+	Use:     "action",
+	Short:   "Run configured project or user actions inside an agent",
+	GroupID: groupManage,
 }
 
 var actionListCmd = &cobra.Command{

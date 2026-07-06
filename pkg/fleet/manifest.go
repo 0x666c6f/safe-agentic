@@ -318,6 +318,9 @@ func ParseFleetWithOptions(path string, opts ParseOptions) (*FleetManifest, erro
 		if err := ensureAgentSpecResolved("agent", m.Agents[i]); err != nil {
 			return nil, err
 		}
+		if err := ensureAgentTypeValid("agent", m.Agents[i]); err != nil {
+			return nil, err
+		}
 	}
 	return &m, nil
 }
@@ -863,6 +866,9 @@ func ensurePipelineResolved(m *PipelineManifest) error {
 			if err := ensureAgentSpecResolved("agent", agent); err != nil {
 				return err
 			}
+			if err := ensureAgentTypeValid("stage "+stage.Name+" agent", agent); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -927,4 +933,29 @@ func ensureResolvedField(label, value string) error {
 		return fmt.Errorf("%s contains unresolved variables: %s", label, value)
 	}
 	return nil
+}
+
+// validAgentTypes are the agent kinds an entry may declare. It mirrors what
+// `spawn` accepts downstream so a manifest fails at parse time rather than
+// deep inside a spawn.
+var validAgentTypes = []string{"claude", "codex", "shell"}
+
+// ensureAgentTypeValid rejects an agent entry whose type is missing or not one
+// of validAgentTypes, naming the entry and the allowed types. Previously such
+// entries were silently skipped at spawn time, hiding manifest typos.
+func ensureAgentTypeValid(kind string, spec AgentSpec) error {
+	for _, t := range validAgentTypes {
+		if spec.Type == t {
+			return nil
+		}
+	}
+	label := spec.Name
+	if label == "" {
+		label = "(unnamed)"
+	}
+	allowed := strings.Join(validAgentTypes, ", ")
+	if spec.Type == "" {
+		return fmt.Errorf("%s %q is missing a type; set type to one of: %s", kind, label, allowed)
+	}
+	return fmt.Errorf("%s %q has unknown type %q; must be one of: %s", kind, label, spec.Type, allowed)
 }

@@ -16,10 +16,11 @@ var handoffToLocal string
 var handoffToWorktree bool
 
 var handoffCmd = &cobra.Command{
-	Use:   "handoff [name|--latest]",
-	Short: "Handoff an agent workspace to a local path or managed worktree",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runHandoff,
+	Use:     "handoff [name|--latest]",
+	Short:   "Handoff an agent workspace to a local path or managed worktree",
+	GroupID: groupWorkflow,
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runHandoff,
 }
 
 func init() {

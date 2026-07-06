@@ -17,8 +17,9 @@ var worktreeCleanupAll bool
 var worktreeCleanupDryRun bool
 
 var worktreeCmd = &cobra.Command{
-	Use:   "worktree",
-	Short: "Manage safe-agentic host worktrees",
+	Use:     "worktree",
+	Short:   "Manage safe-agentic host worktrees",
+	GroupID: groupWorkflow,
 }
 
 var worktreeListCmd = &cobra.Command{

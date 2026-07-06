@@ -1,8 +1,12 @@
 package main
 
 import (
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"context"
+	"fmt"
 	"os"
+
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
 )
@@ -32,4 +36,30 @@ func targetFromArgs(cmd *cobra.Command, args []string) string {
 		return args[0]
 	}
 	return ""
+}
+
+// splitLatestTarget resolves the container target for commands that take the
+// target as the first positional AND additional positionals after it. With
+// --latest the first positional is NOT consumed as the target, so the caller's
+// remaining positionals shift left. It errors when neither --latest nor a
+// positional target is supplied.
+func splitLatestTarget(cmd *cobra.Command, args []string) (target string, rest []string, err error) {
+	if latest, _ := cmd.Flags().GetBool("latest"); latest {
+		return "--latest", args, nil
+	}
+	if len(args) == 0 {
+		return "", nil, fmt.Errorf("provide a container name or --latest")
+	}
+	return args[0], args[1:], nil
+}
+
+// resolveTargetCoded resolves a container target and tags a resolution failure
+// (not found / ambiguous / no containers) with the not-found exit code so
+// scripts can distinguish it from a generic error.
+func resolveTargetCoded(ctx context.Context, exec vmexec.Executor, target string) (string, error) {
+	name, err := docker.ResolveTarget(ctx, exec, target)
+	if err != nil {
+		return "", withExitCode(exitNotFound, err)
+	}
+	return name, nil
 }

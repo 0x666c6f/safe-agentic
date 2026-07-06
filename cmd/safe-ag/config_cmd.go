@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/0x666c6f/safe-agentic/pkg/catalog"
@@ -20,8 +21,10 @@ import (
 // ─── config ────────────────────────────────────────────────────────────────
 
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage CLI defaults",
+	Use:     "config",
+	Short:   "View and change persistent CLI defaults",
+	Long:    "Manage defaults in ~/.safe-ag/config.toml so future spawns pick them up without repeating flags (e.g. default to --ssh or enable the worktree mount).",
+	GroupID: groupConfig,
 }
 
 func init() {
@@ -29,7 +32,68 @@ func init() {
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configResetCmd)
+	configCmd.AddCommand(configKeysCmd)
 	rootCmd.AddCommand(configCmd)
+}
+
+// config keys
+
+var configKeysCmd = &cobra.Command{
+	Use:   "keys",
+	Short: "List config keys with their current and default values",
+	Args:  cobra.NoArgs,
+	RunE:  runConfigKeys,
+}
+
+func runConfigKeys(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadDefaults(config.ConfigPath())
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	defaults := config.Defaults()
+
+	// Reduce the alias table to its canonical dotted keys so env-var aliases
+	// (SAFE_AGENTIC_*, GIT_*) don't appear as duplicate rows.
+	seen := map[string]bool{}
+	var keys []string
+	for _, k := range config.AllowedKeys() {
+		canonical, err := config.ResolveKey(k)
+		if err != nil || seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		keys = append(keys, canonical)
+	}
+	sort.Strings(keys)
+
+	type row struct{ key, cur, def string }
+	rows := make([]row, 0, len(keys))
+	keyW, curW := len("KEY"), len("CURRENT")
+	for _, k := range keys {
+		cur, _ := config.GetValue(cfg, k)
+		def, _ := config.GetValue(defaults, k)
+		r := row{k, orDash(cur), orDash(def)}
+		rows = append(rows, r)
+		if len(r.key) > keyW {
+			keyW = len(r.key)
+		}
+		if len(r.cur) > curW {
+			curW = len(r.cur)
+		}
+	}
+
+	fmt.Printf("%-*s  %-*s  %s\n", keyW, "KEY", curW, "CURRENT", "DEFAULT")
+	for _, r := range rows {
+		fmt.Printf("%-*s  %-*s  %s\n", keyW, r.key, curW, r.cur, r.def)
+	}
+	return nil
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // config show
@@ -171,8 +235,9 @@ func configAllowedKeysList() string {
 // ─── template ──────────────────────────────────────────────────────────────
 
 var templateCmd = &cobra.Command{
-	Use:   "template",
-	Short: "Manage prompt templates",
+	Use:     "template",
+	Short:   "List, show, and create reusable prompt templates",
+	GroupID: groupConfig,
 }
 
 func init() {
@@ -417,9 +482,13 @@ Write the reusable prompt body here.
 
 var mcpLoginCmd = &cobra.Command{
 	Use:   "mcp-login <service> [container]",
-	Short: "Authenticate an MCP service",
-	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runMCPLogin,
+	Short: "Run an MCP service's OAuth login inside an agent",
+	Long: `Run the interactive OAuth login for an MCP service (e.g. linear, notion) inside
+a container. Without [container] it targets the most recent running agent, or
+prints how to start one.`,
+	Args:    cobra.RangeArgs(1, 2),
+	GroupID: groupConfig,
+	RunE:    runMCPLogin,
 }
 
 func init() {
@@ -454,17 +523,19 @@ func runMCPLogin(cmd *cobra.Command, args []string) error {
 
 // ─── aws-refresh ───────────────────────────────────────────────────────────
 
-var awsRefreshLatest bool
-
 var awsRefreshCmd = &cobra.Command{
 	Use:   "aws-refresh [name|--latest] [profile]",
-	Short: "Refresh AWS credentials in a running container",
-	Args:  cobra.RangeArgs(0, 2),
-	RunE:  runAWSRefresh,
+	Short: "Re-inject fresh AWS credentials into a running agent",
+	Long: `Re-read ~/.aws credentials and push them into a running container whose creds
+have expired. Pass [profile] to switch to a different AWS profile than the one
+the agent was spawned with.`,
+	Args:    cobra.RangeArgs(0, 2),
+	GroupID: groupManage,
+	RunE:    runAWSRefresh,
 }
 
 func init() {
-	awsRefreshCmd.Flags().BoolVar(&awsRefreshLatest, "latest", false, "Target the most recently started container")
+	addLatestFlag(awsRefreshCmd)
 	rootCmd.AddCommand(awsRefreshCmd)
 }
 
@@ -472,25 +543,26 @@ func runAWSRefresh(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	vmRunner := newExecutor()
 
+	latest, _ := cmd.Flags().GetBool("latest")
 	target := ""
 	profileArg := ""
-
-	switch len(args) {
-	case 0:
+	switch {
+	case latest:
+		// --latest targets the newest container; a lone positional is the profile.
 		target = "--latest"
-	case 1:
-		if awsRefreshLatest || args[0] == "--latest" {
-			target = "--latest"
-		} else {
-			// Could be a container name or a profile name; treat as container name.
-			target = args[0]
+		if len(args) >= 1 {
+			profileArg = args[0]
 		}
-	case 2:
+	case len(args) == 0:
+		target = "--latest"
+	case len(args) == 1:
+		target = args[0]
+	default:
 		target = args[0]
 		profileArg = args[1]
 	}
 
-	name, err := docker.ResolveTarget(ctx, vmRunner, target)
+	name, err := resolveTargetCoded(ctx, vmRunner, target)
 	if err != nil {
 		return err
 	}

@@ -27,10 +27,11 @@ var (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status [name|--latest]",
-	Short: "Show live agent state (blocked/working/done/idle/exited)",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runStatus,
+	Use:     "status [name|--latest]",
+	Short:   "Show live agent state (blocked/working/done/idle/exited)",
+	GroupID: groupObserve,
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runStatus,
 }
 
 func init() {

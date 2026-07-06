@@ -15,8 +15,9 @@ var reviewCommentsPath string
 var reviewCommentsAll bool
 
 var reviewCommentsCmd = &cobra.Command{
-	Use:   "review-comments",
-	Short: "Manage local file/line review comments for agents",
+	Use:     "review-comments",
+	Short:   "Manage local file/line review comments for agents",
+	GroupID: groupWorkflow,
 }
 
 var reviewCommentsListCmd = &cobra.Command{

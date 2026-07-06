@@ -31,8 +31,9 @@ type CronConfig struct {
 }
 
 var cronCmd = &cobra.Command{
-	Use:   "cron",
-	Short: "Manage scheduled agent/pipeline runs",
+	Use:     "cron",
+	Short:   "Manage scheduled agent/pipeline runs",
+	GroupID: groupSetup,
 }
 
 var cronAddCmd = &cobra.Command{

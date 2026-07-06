@@ -17,10 +17,11 @@ var searchLines int
 var searchCaseSensitive bool
 
 var searchCmd = &cobra.Command{
-	Use:   "search <query> [name|--latest]",
-	Short: "Search agent session logs",
-	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runSearch,
+	Use:     "search <query> [name|--latest]",
+	Short:   "Search agent session logs",
+	GroupID: groupObserve,
+	Args:    cobra.RangeArgs(1, 2),
+	RunE:    runSearch,
 }
 
 func init() {

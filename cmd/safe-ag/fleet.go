@@ -11,7 +11,11 @@ import (
 
 	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/docker"
+	"github.com/0x666c6f/safe-agentic/pkg/events"
 	"github.com/0x666c6f/safe-agentic/pkg/fleet"
+	"github.com/0x666c6f/safe-agentic/pkg/inject"
+	"github.com/0x666c6f/safe-agentic/pkg/labels"
 	"github.com/0x666c6f/safe-agentic/pkg/profiles"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
@@ -27,15 +31,25 @@ var fleetManifestVars []string
 
 var fleetCmd = &cobra.Command{
 	Use:   "fleet <manifest.yaml>",
-	Short: "Spawn agents from a fleet manifest",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runFleet,
+	Short: "Spawn a group of agents in parallel from a YAML manifest",
+	Long: `Spawn several agents at once from a fleet manifest. Every agent in the file
+launches in parallel, each in its own hardened container.
+
+Use 'fleet status' to watch progress. For staged, dependency-ordered runs use
+'safe-ag pipeline' instead.`,
+	Example: `  safe-ag fleet manifest.yaml
+  safe-ag fleet manifest.yaml --dry-run
+  safe-ag fleet manifest.yaml --repo git@github.com:org/repo.git --var env=staging
+  safe-ag fleet status`,
+	Args:    cobra.ExactArgs(1),
+	GroupID: groupFleet,
+	RunE:    runFleet,
 }
 
 func init() {
-	fleetCmd.Flags().BoolVar(&fleetDryRun, "dry-run", false, "Print what would run without executing")
-	fleetCmd.Flags().StringSliceVar(&fleetManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
-	fleetCmd.Flags().StringSliceVar(&fleetManifestVars, "var", nil, "Manifest variable assignment (key=value)")
+	fleetCmd.Flags().BoolVar(&fleetDryRun, "dry-run", false, "Print the agents that would spawn, then exit without launching")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestRepos, "repo", nil, "Fallback repo URL for manifest agents that don't set repo/repos; repeatable")
+	fleetCmd.Flags().StringSliceVar(&fleetManifestVars, "var", nil, "Manifest variable as key=value, filling ${key} placeholders; repeatable")
 	fleetCmd.AddCommand(fleetStatusCmd)
 	rootCmd.AddCommand(fleetCmd)
 }
@@ -118,7 +132,7 @@ var launchDetachedPipeline = launchDetachedPipelineImpl
 
 var pipelineCmd = &cobra.Command{
 	Use:   "pipeline <pipeline.yaml|name>",
-	Short: "Run sequential pipeline with dependency ordering",
+	Short: "Run a multi-step pipeline with dependency ordering",
 	Long: `Run a multi-step pipeline defined in a YAML manifest.
 
 The manifest can be passed as a filesystem path or as a saved pipeline name
@@ -130,15 +144,20 @@ dependencies have completed successfully.
 
 Unsupported control fields such as on_failure, retry, when, and outputs are
 rejected instead of silently ignored.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPipeline,
+	Example: `  safe-ag pipeline pipeline.yaml
+  safe-ag pipeline pipeline.yaml --dry-run
+  safe-ag pipeline my-saved-pipeline --var branch=main
+  safe-ag pipeline pipeline.yaml --background`,
+	Args:    cobra.ExactArgs(1),
+	GroupID: groupFleet,
+	RunE:    runPipeline,
 }
 
 func init() {
-	pipelineCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "Print execution plan without running")
-	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Run the pipeline in the background and return immediately")
-	pipelineCmd.Flags().StringSliceVar(&pipelineManifestRepos, "repo", nil, "Default repo URL for agents missing repo/repos")
-	pipelineCmd.Flags().StringSliceVar(&pipelineManifestVars, "var", nil, "Manifest variable assignment (key=value)")
+	pipelineCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "Print the resolved execution plan (stage order), then exit without running")
+	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Launch the pipeline detached and return immediately instead of waiting")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestRepos, "repo", nil, "Fallback repo URL for manifest agents that don't set repo/repos; repeatable")
+	pipelineCmd.Flags().StringSliceVar(&pipelineManifestVars, "var", nil, "Manifest variable as key=value, filling ${key} placeholders; repeatable")
 	pipelineCmd.AddCommand(pipelineListCmd, pipelineShowCmd, pipelineInspectCmd, pipelineRenderCmd, pipelineValidateCmd, pipelineCreateCmd)
 	rootCmd.AddCommand(pipelineCmd)
 }
@@ -288,10 +307,6 @@ func printFleetDryRun(path string, m *fleet.FleetManifest) {
 }
 
 func printFleetDryRunSpec(spec fleet.AgentSpec) {
-	if spec.Type == "" {
-		fmt.Printf("  [skip] %q — missing type\n", spec.Name)
-		return
-	}
 	opts := specToSpawnOpts(spec, "fleet-dry-run")
 	fmt.Printf("  Would spawn: safe-ag spawn %s", opts.AgentType)
 	appendFleetDryRunFlags(opts)
@@ -365,10 +380,8 @@ func createFleetVolume(ctx context.Context, exec vmexec.Executor, fleetVolume st
 func spawnFleetAgents(cmd *cobra.Command, agents []fleet.AgentSpec, fleetVolume string) (int, error) {
 	var spawned int
 	for _, spec := range agents {
-		if spec.Type == "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "[fleet] skipping entry %q — missing type\n", spec.Name)
-			continue
-		}
+		// Missing/unknown types are rejected at manifest parse time, so every
+		// spec here is spawnable.
 		if err := executeSpawn(specToSpawnOpts(spec, fleetVolume)); err != nil {
 			return 0, fmt.Errorf("spawn %q: %w", spec.Name, err)
 		}
@@ -740,9 +753,7 @@ func spawnPipelineStageAgents(stage fleet.PipelineStage, rootLabel string, curre
 }
 
 func spawnPipelineAgent(stage fleet.PipelineStage, spec fleet.AgentSpec, rootLabel string, currentPath []string, timestamp string) (string, error) {
-	if spec.Type == "" {
-		return "", nil
-	}
+	// Missing/unknown types are rejected at manifest parse time.
 	opts := specToSpawnOpts(spec, rootLabel)
 	opts.Name = pipelineContainerSuffix(stage, spec, currentPath, timestamp)
 	opts.Hierarchy = pipelineStageHierarchy(currentPath, stage.Name)
@@ -826,8 +837,9 @@ func waitForContainers(ctx context.Context, exec vmexec.Executor, names []string
 				if err != nil {
 					return fmt.Errorf("inspect exit code for %s: %w", name, err)
 				}
+				dispatchContainerNotify(ctx, exec, name, exitCode)
 				if exitCode != 0 {
-					return fmt.Errorf("container %s exited with status %d", name, exitCode)
+					return withExitCode(exitAgentFail, fmt.Errorf("container %s exited with status %d", name, exitCode))
 				}
 				done[name] = true
 				fmt.Printf("  ✓ %s exited\n", name)
@@ -844,6 +856,36 @@ func waitForContainers(ctx context.Context, exec vmexec.Executor, names []string
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// dispatchContainerNotify delivers a completed container's result to the
+// --notify targets recorded in its label (set at spawn time). This is the
+// reliable completion hook for background fleet/pipeline agents, which the
+// operator is typically not watching. Failures are swallowed so a broken
+// notifier never aborts the pipeline.
+func dispatchContainerNotify(ctx context.Context, exec vmexec.Executor, name string, exitCode int) {
+	raw, _ := docker.InspectLabel(ctx, exec, name, labels.NotifyB64)
+	if raw == "" {
+		return
+	}
+	spec, err := inject.DecodeB64(raw)
+	if err != nil || spec == "" {
+		return
+	}
+	targets := events.ParseNotifyTargets(spec)
+	if len(targets) == 0 {
+		return
+	}
+	status, msg := "done", "Agent finished"
+	if exitCode != 0 {
+		status = events.StatusFailed
+		msg = fmt.Sprintf("Agent exited with code %d", exitCode)
+	}
+	_ = events.Dispatch(targets, events.SystemNotification{
+		Container: name,
+		Message:   msg,
+		Sound:     events.SoundForStatus(status),
+	}, os.Stdout)
 }
 
 // ─── helper ──────────────────────────────────────────────────────────────────

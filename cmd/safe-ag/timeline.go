@@ -23,17 +23,19 @@ var timelineLines int
 var inboxAll bool
 
 var timelineCmd = &cobra.Command{
-	Use:   "timeline",
-	Short: "Show recent safe-agentic events",
-	Args:  cobra.NoArgs,
-	RunE:  runTimeline,
+	Use:     "timeline",
+	Short:   "Show recent safe-agentic events",
+	GroupID: groupObserve,
+	Args:    cobra.NoArgs,
+	RunE:    runTimeline,
 }
 
 var inboxCmd = &cobra.Command{
-	Use:   "inbox",
-	Short: "Show events that may need attention",
-	Args:  cobra.NoArgs,
-	RunE:  runInbox,
+	Use:     "inbox",
+	Short:   "Show events that may need attention",
+	GroupID: groupObserve,
+	Args:    cobra.NoArgs,
+	RunE:    runInbox,
 }
 
 func init() {

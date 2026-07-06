@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"strings"
 	"time"
 
+	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/catalog"
 	"github.com/0x666c6f/safe-agentic/pkg/config"
@@ -16,6 +18,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/labels"
 	"github.com/0x666c6f/safe-agentic/pkg/policy"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
+	"github.com/0x666c6f/safe-agentic/pkg/risk"
 	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 	"github.com/0x666c6f/safe-agentic/pkg/validate"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
@@ -68,97 +71,125 @@ type SpawnOpts struct {
 	WorktreePath      string
 	WorktreeInclude   string
 	DryRun            bool
+	Yes               bool
+	// Interactive marks a spawn launched from the `spawn`/`run` CLI commands
+	// (as opposed to fleet/pipeline/retry, which drive executeSpawn directly).
+	// Only interactive spawns get the risk confirmation prompt.
+	Interactive bool
 }
 
 var spawnOpts SpawnOpts
 
 var spawnCmd = &cobra.Command{
 	Use:   "spawn <claude|codex|shell>",
-	Short: "Spawn a new agent container",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSpawn,
+	Short: "Spawn a sandboxed agent container (full control over flags)",
+	Long: `Spawn a Claude, Codex, or plain shell agent in a hardened container.
+
+This is the full-control form: every isolation and auth default is off unless
+you opt in (--ssh, --reuse-auth, --aws, ...). For a quick start with smart
+defaults, use 'safe-ag run' instead.`,
+	Example: `  safe-ag spawn claude --ssh --repo git@github.com:org/repo.git
+  safe-ag spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
+  safe-ag spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+  safe-ag spawn claude --repo https://github.com/org/repo.git --network agent-isolated
+  safe-ag spawn claude --background --on-complete 'safe-ag pr --latest' --repo git@github.com:org/repo.git`,
+	Args:    cobra.ExactArgs(1),
+	GroupID: groupSpawn,
+	RunE:    runSpawn,
 }
 
 var runCmd = &cobra.Command{
 	Use:   "run <repo-url> [repo-url...] [prompt]",
 	Short: "Quick-start an agent with smart defaults",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runQuickStart,
+	Long: `Quick-start a Claude agent on one or more repos with a trailing prompt.
+
+Smart defaults: --ssh is auto-enabled for SSH (git@) URLs. A thinner form of
+'spawn' for the common case; use 'spawn' when you need full flag control.`,
+	Example: `  safe-ag run git@github.com:org/repo.git "Fix the CI tests"
+  safe-ag run https://github.com/org/repo.git "Add unit tests"
+  safe-ag run git@github.com:org/repo.git   # no prompt: interactive agent`,
+	Args:    cobra.MinimumNArgs(1),
+	GroupID: groupSpawn,
+	RunE:    runQuickStart,
 }
 
 func init() {
 	f := spawnCmd.Flags()
-	f.StringSliceVar(&spawnOpts.Repos, "repo", nil, "Repository URL to clone (repeatable)")
-	f.StringVar(&spawnOpts.Name, "name", "", "Container name")
-	f.StringVar(&spawnOpts.Prompt, "prompt", "", "Initial prompt")
-	f.StringVar(&spawnOpts.Template, "template", "", "Prompt template name")
-	f.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable assignment (key=value)")
-	f.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
-	f.StringVar(&spawnOpts.InstructionsFile, "instructions-file", "", "Instructions from file")
-	f.BoolVar(&spawnOpts.SSH, "ssh", false, "Enable SSH agent forwarding")
-	f.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Disable default SSH agent forwarding")
-	f.BoolVar(&spawnOpts.ReuseAuth, "reuse-auth", false, "Reuse shared auth volume")
-	f.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Disable default shared auth volume")
-	f.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "Use ephemeral auth volume")
-	f.BoolVar(&spawnOpts.ReuseGHAuth, "reuse-gh-auth", false, "Reuse GitHub CLI auth")
-	f.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Disable default GitHub CLI auth reuse")
-	f.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Copy host Claude/Codex auth into this session")
-	f.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Disable default host auth seeding")
-	f.BoolVar(&spawnOpts.DockerAccess, "docker", false, "Enable Docker-in-Docker")
-	f.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Disable default Docker-in-Docker")
-	f.BoolVar(&spawnOpts.DockerSocket, "docker-socket", false, "Mount host Docker socket")
-	f.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Disable default host Docker socket")
-	f.StringVar(&spawnOpts.Network, "network", "", "Custom Docker network")
-	f.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit (e.g., 8g)")
-	f.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit")
-	f.IntVar(&spawnOpts.PIDsLimit, "pids-limit", 0, "PIDs limit (>= 64)")
-	f.StringVar(&spawnOpts.Identity, "identity", "", "Git identity (Name <email>)")
-	f.StringVar(&spawnOpts.AWSProfile, "aws", "", "AWS profile for credential injection")
-	f.BoolVar(&spawnOpts.AutoTrust, "auto-trust", false, "Skip trust prompt")
-	f.BoolVar(&spawnOpts.Background, "background", false, "Run in background (no tmux attach)")
-	f.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
-	f.StringVar(&spawnOpts.OnExit, "on-exit", "", "Command to run on exit")
-	f.StringVar(&spawnOpts.OnComplete, "on-complete", "", "Command to run on success")
-	f.StringVar(&spawnOpts.OnFail, "on-fail", "", "Command to run on failure")
-	f.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Kill if estimated cost exceeds budget")
-	f.StringVar(&spawnOpts.Notify, "notify", "", "Notification targets")
-	f.StringVar(&spawnOpts.FleetVolume, "fleet-volume", "", "Shared fleet volume name")
-	f.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed git worktree from the current checkout")
-	f.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
-	f.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
-	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "Include file for ignored local files; defaults to .safe-aginclude")
-	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Show what would run without executing")
+	f.StringSliceVar(&spawnOpts.Repos, "repo", nil, "Repo to clone into the container (SSH or HTTPS URL); repeat for multiple")
+	f.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
+	f.StringVar(&spawnOpts.Prompt, "prompt", "", "Initial task prompt handed to the agent on launch")
+	f.StringVar(&spawnOpts.Template, "template", "", "Use a named prompt template instead of --prompt (see 'safe-ag template list')")
+	f.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable as key=value, filling ${key} placeholders; repeatable")
+	f.StringVar(&spawnOpts.Instructions, "instructions", "", "Extra standing instructions added to the agent's context (e.g. focus areas)")
+	f.StringVar(&spawnOpts.InstructionsFile, "instructions-file", "", "Read --instructions text from this file instead of the flag")
+	f.BoolVar(&spawnOpts.SSH, "ssh", false, "Forward your SSH agent in (needed to clone/push private repos); off by default")
+	f.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Force SSH forwarding off even when your config defaults it on")
+	f.BoolVar(&spawnOpts.ReuseAuth, "reuse-auth", false, "Share one persistent Claude/Codex auth volume across runs (default: throwaway)")
+	f.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Force a throwaway auth volume even when your config defaults reuse on")
+	f.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "One-off throwaway auth for this run; never touch the shared auth volume")
+	f.BoolVar(&spawnOpts.ReuseGHAuth, "reuse-gh-auth", false, "Mount your shared GitHub CLI (gh) login so the agent can use gh; off by default")
+	f.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Force GitHub CLI auth off even when your config defaults it on")
+	f.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Inject your host Claude/Codex login as env vars so the agent starts signed in")
+	f.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Force host auth seeding off even when your config defaults it on")
+	f.BoolVar(&spawnOpts.DockerAccess, "docker", false, "Enable Docker-in-Docker inside the container; off by default")
+	f.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Force Docker-in-Docker off even when your config defaults it on")
+	f.BoolVar(&spawnOpts.DockerSocket, "docker-socket", false, "Mount the host Docker socket into the container (broad access); off by default")
+	f.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Force host Docker socket off even when your config defaults it on")
+	f.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	f.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
+	f.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
+	f.IntVar(&spawnOpts.PIDsLimit, "pids-limit", 0, "Max processes in the container; must be >= 64 (default 512)")
+	f.StringVar(&spawnOpts.Identity, "identity", "", "Git author as \"Name <email>\" (default: detected from your host git config)")
+	f.StringVar(&spawnOpts.AWSProfile, "aws", "", "Inject a ~/.aws profile as env-var creds (tmpfs-backed; refresh with 'aws-refresh')")
+	f.BoolVar(&spawnOpts.AutoTrust, "auto-trust", false, "Auto-accept the agent's in-container \"trust this folder\" prompt")
+	f.BoolVar(&spawnOpts.Background, "background", false, "Run detached without attaching tmux (pair with --on-complete/--notify)")
+	f.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Run repo-provided setup hooks (safe-agentic.json .scripts.setup) in the container")
+	f.StringVar(&spawnOpts.OnExit, "on-exit", "", "Shell command run in the container when the session ends (always, any exit code)")
+	f.StringVar(&spawnOpts.OnComplete, "on-complete", "", "Shell command run in the container when the agent exits 0 (success)")
+	f.StringVar(&spawnOpts.OnFail, "on-fail", "", "Shell command run in the container when the agent exits non-zero (failure)")
+	f.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget in USD, recorded on the container (advisory — not yet enforced)")
+	f.StringVar(&spawnOpts.Notify, "notify", "", "Notify when done: comma-separated targets — terminal, system, slack:<webhook>, command:<cmd> (runs on host with $SAFE_AG_CONTAINER/$SAFE_AG_MESSAGE)")
+	f.StringVar(&spawnOpts.FleetVolume, "fleet-volume", "", "Name of a shared Docker volume to mount at /fleet for cross-agent scratch")
+	f.BoolVar(&spawnOpts.Worktree, "worktree", false, "Mount a git worktree of the current checkout instead of cloning (needs 'setup --enable-worktrees')")
+	f.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch to create for --worktree (default: auto-generated)")
+	f.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Host path for the --worktree checkout (must sit under the worktrees root)")
+	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "File listing gitignored paths to copy into the worktree, e.g. .env (default: .safe-aginclude)")
+	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
+	f.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
 
 	rf := runCmd.Flags()
-	rf.StringVar(&spawnOpts.Name, "name", "", "Container name")
-	rf.StringVar(&spawnOpts.Network, "network", "", "Custom Docker network")
-	rf.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit")
-	rf.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit")
-	rf.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget")
-	rf.StringVar(&spawnOpts.Template, "template", "", "Prompt template")
-	rf.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable assignment (key=value)")
-	rf.StringVar(&spawnOpts.Instructions, "instructions", "", "Task instructions")
-	rf.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Disable default SSH agent forwarding")
-	rf.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Disable default shared auth volume")
-	rf.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "Use ephemeral auth volume")
-	rf.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Disable default GitHub CLI auth reuse")
-	rf.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Copy host Claude/Codex auth into this session")
-	rf.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Disable default host auth seeding")
-	rf.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Disable default Docker-in-Docker")
-	rf.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Disable default host Docker socket")
-	rf.BoolVar(&spawnOpts.Background, "background", false, "Background mode")
-	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
-	rf.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed git worktree from the current checkout")
-	rf.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
-	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
-	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Dry run")
+	rf.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
+	rf.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	rf.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
+	rf.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
+	rf.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget in USD, recorded on the container (advisory — not yet enforced)")
+	rf.StringVar(&spawnOpts.Template, "template", "", "Use a named prompt template instead of the trailing prompt (see 'safe-ag template list')")
+	rf.StringSliceVar(&spawnOpts.TemplateVars, "var", nil, "Template variable as key=value, filling ${key} placeholders; repeatable")
+	rf.StringVar(&spawnOpts.Instructions, "instructions", "", "Extra standing instructions added to the agent's context (e.g. focus areas)")
+	rf.BoolVar(&spawnOpts.NoSSH, "no-ssh", false, "Force SSH forwarding off (it is auto-enabled for git@ SSH URLs)")
+	rf.BoolVar(&spawnOpts.NoReuseAuth, "no-reuse-auth", false, "Force a throwaway auth volume even when your config defaults reuse on")
+	rf.BoolVar(&spawnOpts.EphemeralAuth, "ephemeral-auth", false, "One-off throwaway auth for this run; never touch the shared auth volume")
+	rf.BoolVar(&spawnOpts.NoReuseGHAuth, "no-reuse-gh-auth", false, "Force GitHub CLI auth off even when your config defaults it on")
+	rf.BoolVar(&spawnOpts.SeedAuth, "seed-auth", false, "Inject your host Claude/Codex login as env vars so the agent starts signed in")
+	rf.BoolVar(&spawnOpts.NoSeedAuth, "no-seed-auth", false, "Force host auth seeding off even when your config defaults it on")
+	rf.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Force Docker-in-Docker off even when your config defaults it on")
+	rf.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Force host Docker socket off even when your config defaults it on")
+	rf.BoolVar(&spawnOpts.Background, "background", false, "Run detached without attaching tmux (pair with --on-complete/--notify)")
+	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Run repo-provided setup hooks (safe-agentic.json .scripts.setup) in the container")
+	rf.BoolVar(&spawnOpts.Worktree, "worktree", false, "Mount a git worktree of the current checkout instead of cloning (needs 'setup --enable-worktrees')")
+	rf.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch to create for --worktree (default: auto-generated)")
+	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Host path for the --worktree checkout (must sit under the worktrees root)")
+	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
+	rf.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
 
-	rootCmd.AddCommand(spawnCmd, runCmd)
+	rootCmd.AddCommand(spawnCmd, runCmd, notifyWaitCmd)
 }
 
 func runSpawn(cmd *cobra.Command, args []string) error {
-	spawnOpts.AgentType = args[0]
-	return executeSpawn(spawnOpts)
+	opts := spawnOpts
+	opts.AgentType = args[0]
+	opts.Interactive = true
+	return executeSpawn(opts)
 }
 
 func runQuickStart(cmd *cobra.Command, args []string) error {
@@ -188,6 +219,7 @@ func runQuickStart(cmd *cobra.Command, args []string) error {
 	opts.Prompt = strings.Join(promptParts, " ")
 	opts.SSH = ssh
 	opts.Identity = identity
+	opts.Interactive = true
 	return executeSpawn(opts)
 }
 
@@ -218,6 +250,11 @@ func executeSpawn(opts SpawnOpts) error {
 		return err
 	}
 	if err := validateResolvedSpawn(resolved); err != nil {
+		return err
+	}
+	// Confirm BEFORE the side-effecting prepares below: an aborted spawn must
+	// not leave a worktree, network, SSH relay, or copied auth volume behind.
+	if err := confirmInteractiveSpawn(opts, resolved); err != nil {
 		return err
 	}
 	if err := prepareSpawnWorktree(ctx, exec, opts, &resolved); err != nil {
@@ -409,7 +446,7 @@ func requireSpawnHostEgress(opts SpawnOpts, cfg config.Config) error {
 	if hostIPForwardingEnabled() {
 		return nil
 	}
-	return fmt.Errorf("host egress NAT is off; VM has no internet egress. Run `safe-ag vm start` and approve the macOS administrator prompt, then retry")
+	return withExitCode(exitInfra, fmt.Errorf("host egress NAT is off; VM has no internet egress. Run `safe-ag vm start` and approve the macOS administrator prompt, then retry"))
 }
 
 func validateResolvedSpawn(resolved spawnResolved) error {
@@ -863,6 +900,12 @@ func logSpawnEvent(opts SpawnOpts, resolved spawnResolved) {
 
 func maybeAttachSpawn(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved spawnResolved) error {
 	if opts.Background || opts.AgentType == "shell" {
+		// A background spawn has no CLI process left to observe completion, so
+		// --notify forks a detached watcher. Interactive-only: fleet/pipeline
+		// runs come through here too but their own wait loop dispatches.
+		if opts.Background && opts.Notify != "" && opts.Interactive {
+			launchDetachedNotifyWait(resolved.ContainerName)
+		}
 		return nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -870,9 +913,121 @@ func maybeAttachSpawn(ctx context.Context, exec vmexec.Executor, opts SpawnOpts,
 		return nil
 	}
 	if err := waitForSessionOrExit(ctx, exec, resolved.ContainerName); err != nil {
+		// The container died before its session came up: a startup failure.
+		dispatchSpawnNotify(opts, events.SystemNotification{
+			Container: resolved.ContainerName,
+			Message:   "Agent failed to start",
+			Sound:     events.SoundForStatus(events.StatusFailed),
+		})
+		return withExitCode(exitAgentFail, err)
+	}
+	if err := tmux.Attach(exec, resolved.ContainerName); err != nil {
 		return err
 	}
-	return tmux.Attach(exec, resolved.ContainerName)
+	return finishForegroundSpawn(ctx, exec, opts, resolved.ContainerName)
+}
+
+// finishForegroundSpawn runs after the operator's tmux session ends. It reads
+// the agent's inferred state; on a terminal state it dispatches --notify
+// targets and propagates an agent failure as exit code 3. A still-working or
+// blocked agent (the operator merely detached) fires nothing, since foreground
+// agents keep their container alive for reattach.
+func finishForegroundSpawn(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, name string) error {
+	info := gatherStatus(ctx, exec, name)
+	switch info.State {
+	case string(agentstate.StateDone), string(agentstate.StateExited):
+		dispatchSpawnNotify(opts, notifyNoteFromStatus(name, info))
+	}
+	if info.State == string(agentstate.StateExited) {
+		return withExitCode(exitAgentFail, fmt.Errorf("agent %s exited with code %d", name, info.ExitCode))
+	}
+	return nil
+}
+
+// dispatchSpawnNotify delivers note to the spawn's --notify targets, if any.
+// Failures are swallowed: a broken notifier must not fail the spawn command.
+func dispatchSpawnNotify(opts SpawnOpts, note events.SystemNotification) {
+	if opts.Notify == "" {
+		return
+	}
+	targets := events.ParseNotifyTargets(opts.Notify)
+	if len(targets) == 0 {
+		return
+	}
+	_ = events.Dispatch(targets, note, os.Stdout)
+}
+
+// notifyNoteFromStatus builds a notification describing an agent's terminal state.
+func notifyNoteFromStatus(name string, info statusInfo) events.SystemNotification {
+	status, msg := "done", "Agent finished"
+	if info.State == string(agentstate.StateExited) {
+		status = events.StatusFailed
+		msg = fmt.Sprintf("Agent exited with code %d", info.ExitCode)
+	}
+	return events.SystemNotification{
+		Container: name,
+		Message:   msg,
+		Sound:     events.SoundForStatus(status),
+	}
+}
+
+// notifyWaitCmd is the hidden worker behind `spawn --background --notify`: a
+// detached copy of the CLI that waits for the container to finish and
+// dispatches its --notify targets (waitForContainers reads them from the
+// container's label).
+var notifyWaitCmd = &cobra.Command{
+	Use:    "notify-wait <container>",
+	Short:  "Wait for a container and dispatch its --notify targets (internal)",
+	Hidden: true,
+	Args:   cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return waitForContainers(context.Background(), newExecutor(), []string{args[0]})
+	},
+}
+
+// launchDetachedNotifyWait forks `safe-ag notify-wait <container>` so the
+// notification outlives this CLI invocation. Best-effort: a failure to fork is
+// reported but never fails the spawn itself.
+func launchDetachedNotifyWait(container string) {
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: --notify watcher not started: %v\n", err)
+		return
+	}
+	watcher := osexec.Command(self, "notify-wait", container)
+	watcher.Stdin, watcher.Stdout, watcher.Stderr = nil, nil, nil
+	if err := watcher.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: --notify watcher not started: %v\n", err)
+		return
+	}
+	_ = watcher.Process.Release()
+}
+
+// confirmInteractiveSpawn prompts before an interactive spawn that enables a
+// risky mode (SSH, shared/seed auth, AWS, Docker, a custom network, setup
+// scripts). Only `spawn`/`run` set Interactive; fleet, pipeline, and retry
+// drive executeSpawn directly and are never gated here. --yes skips the prompt;
+// a non-terminal stdin without --yes fails rather than hanging.
+func confirmInteractiveSpawn(opts SpawnOpts, resolved spawnResolved) error {
+	if !opts.Interactive || opts.Yes || opts.DryRun {
+		return nil
+	}
+	notices := risk.SpawnNotices(spawnRiskInput(opts, resolved))
+	if len(notices) == 0 {
+		return nil
+	}
+	flags := make([]string, 0, len(notices))
+	for _, n := range notices {
+		flags = append(flags, n.Flag)
+	}
+	ok, err := confirmProceed("This spawn enables "+strings.Join(flags, ", "), false)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("spawn aborted")
+	}
+	return nil
 }
 
 // waitForSessionOrExit blocks until the agent's tmux session is ready, or

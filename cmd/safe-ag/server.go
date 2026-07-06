@@ -68,10 +68,11 @@ var serverListen string
 var serverToken string
 
 var serverCmd = &cobra.Command{
-	Use:   "server",
-	Short: "Serve safe-agentic state over a JSON protocol",
-	Args:  cobra.NoArgs,
-	RunE:  runServer,
+	Use:     "server",
+	Short:   "Serve safe-agentic state over a JSON protocol",
+	GroupID: groupSetup,
+	Args:    cobra.NoArgs,
+	RunE:    runServer,
 }
 
 func init() {

@@ -21,8 +21,9 @@ var browserNodePath string
 var browserAnnotations []string
 
 var browserCmd = &cobra.Command{
-	Use:   "browser",
-	Short: "Capture browser verification artifacts",
+	Use:     "browser",
+	Short:   "Capture browser verification artifacts",
+	GroupID: groupWorkflow,
 }
 
 var browserCaptureCmd = &cobra.Command{

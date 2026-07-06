@@ -13,8 +13,9 @@ var profileDirs []string
 var profileRunDryRun bool
 
 var profileCmd = &cobra.Command{
-	Use:   "profile",
-	Short: "Run reusable agent profiles",
+	Use:     "profile",
+	Short:   "Run reusable agent profiles",
+	GroupID: groupSpawn,
 }
 
 var profileListCmd = &cobra.Command{

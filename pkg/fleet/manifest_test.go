@@ -30,6 +30,57 @@ func writeProfile(t *testing.T, dir, name, content string) string {
 	return profileDir
 }
 
+// ─── agent type validation ───────────────────────────────────────────────────
+
+func TestParseFleet_MissingTypeIsHardError(t *testing.T) {
+	p := writeTemp(t, `agents:
+  - name: worker
+    repo: git@github.com:o/r.git
+`)
+	_, err := ParseFleet(p)
+	if err == nil {
+		t.Fatal("expected a hard error for an agent missing type")
+	}
+	for _, want := range []string{"worker", "missing a type", "claude, codex, shell"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestParseFleet_UnknownTypeIsHardError(t *testing.T) {
+	p := writeTemp(t, `agents:
+  - name: worker
+    type: gpt
+    repo: git@github.com:o/r.git
+`)
+	_, err := ParseFleet(p)
+	if err == nil {
+		t.Fatal("expected a hard error for an unknown agent type")
+	}
+	for _, want := range []string{"worker", "unknown type", "gpt", "claude, codex, shell"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestParsePipeline_MissingTypeIsHardError(t *testing.T) {
+	p := writeTemp(t, `name: p
+steps:
+  - name: build
+    repo: git@github.com:o/r.git
+    prompt: do it
+`)
+	_, err := ParsePipeline(p)
+	if err == nil {
+		t.Fatal("expected a hard error for a stage agent missing type")
+	}
+	if !strings.Contains(err.Error(), "build") || !strings.Contains(err.Error(), "type") {
+		t.Errorf("error should name the stage and mention type: %v", err)
+	}
+}
+
 // ─── FleetManifest ──────────────────────────────────────────────────────────
 
 func TestParseFleet_TwoAgents(t *testing.T) {

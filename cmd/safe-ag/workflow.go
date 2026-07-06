@@ -53,15 +53,23 @@ var (
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [name|--latest]",
-	Short: "Show git diff of agent changes",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runDiff,
+	Short: "Show the git diff of an agent's workspace",
+	Long: `Show 'git diff' for the repo in the agent's /workspace, whether the container
+is running or stopped. The primary way to inspect an agent's changes (the
+lighter 'safe-ag output --diff' shares the same git command but adds no flags).`,
+	Example: `  safe-ag diff my-task            # full diff of the agent's workspace
+  safe-ag diff --latest --stat    # just the changed-file summary
+  safe-ag diff my-task -s         # side-by-side view via delta`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupWorkflow,
+	RunE:    runDiff,
 }
 
 func init() {
-	diffCmd.Flags().BoolVar(&diffStat, "stat", false, "Show diffstat instead of full diff")
+	diffCmd.Flags().BoolVar(&diffStat, "stat", false, "Show the changed-file summary (git diff --stat) instead of the full diff")
 	diffCmd.Flags().BoolVarP(&diffSideBySide, "side-by-side", "s", false,
 		"Render the diff side-by-side with delta (falls back to plain diff if delta is unavailable)")
+	addLatestFlag(diffCmd)
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -73,11 +81,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--stat and --side-by-side are mutually exclusive")
 	}
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}
@@ -136,8 +140,9 @@ func terminalWidth() int {
 // ─── checkpoint ────────────────────────────────────────────────────────────
 
 var checkpointCmd = &cobra.Command{
-	Use:   "checkpoint",
-	Short: "Manage working tree snapshots",
+	Use:     "checkpoint",
+	Short:   "Snapshot and restore an agent's working tree",
+	GroupID: groupWorkflow,
 }
 
 func init() {
@@ -149,11 +154,12 @@ func init() {
 var checkpointCreateCmd = &cobra.Command{
 	Use:   "create <name|--latest> [label]",
 	Short: "Create a working tree snapshot",
-	Args:  cobra.RangeArgs(1, 2),
+	Args:  cobra.RangeArgs(0, 2),
 	RunE:  runCheckpointCreate,
 }
 
 func init() {
+	addLatestFlag(checkpointCreateCmd)
 	checkpointCmd.AddCommand(checkpointCreateCmd)
 }
 
@@ -161,13 +167,16 @@ func runCheckpointCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := args[0]
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	label := "snapshot"
-	if len(args) >= 2 {
-		label = args[1]
+	if len(rest) >= 1 {
+		label = rest[0]
 	}
 
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -230,6 +239,7 @@ var checkpointListCmd = &cobra.Command{
 }
 
 func init() {
+	addLatestFlag(checkpointListCmd)
 	checkpointCmd.AddCommand(checkpointListCmd)
 }
 
@@ -237,11 +247,7 @@ func runCheckpointList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}
@@ -265,11 +271,12 @@ var checkpointRestoreCmd = &cobra.Command{
 	Use:     "restore <name|--latest> <ref>",
 	Aliases: []string{"revert"},
 	Short:   "Restore a working tree snapshot",
-	Args:    cobra.ExactArgs(2),
+	Args:    cobra.RangeArgs(1, 2),
 	RunE:    runCheckpointRevert,
 }
 
 func init() {
+	addLatestFlag(checkpointRestoreCmd)
 	checkpointCmd.AddCommand(checkpointRestoreCmd)
 }
 
@@ -279,15 +286,21 @@ func runCheckpointRevert(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := args[0]
-	ref := args[1]
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return fmt.Errorf("provide a stash ref (stash@{N} or a numeric index)")
+	}
+	ref := rest[0]
 
 	// Validate ref to prevent shell injection — only allow stash@{N} or plain integers.
 	if !validStashRef.MatchString(ref) {
 		return fmt.Errorf("invalid stash ref %q: must be stash@{N} or a numeric index", ref)
 	}
 
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -308,8 +321,9 @@ type todoItem struct {
 }
 
 var todoCmd = &cobra.Command{
-	Use:   "todo",
-	Short: "Manage merge requirement todos",
+	Use:     "todo",
+	Short:   "Track merge-requirement todos on an agent",
+	GroupID: groupWorkflow,
 }
 
 func init() {
@@ -351,11 +365,12 @@ func writeTodos(ctx context.Context, exec vmexec.Executor, containerName string,
 var todoAddCmd = &cobra.Command{
 	Use:   "add <name|--latest> <text>",
 	Short: "Add a merge requirement todo",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runTodoAdd,
 }
 
 func init() {
+	addLatestFlag(todoAddCmd)
 	todoCmd.AddCommand(todoAddCmd)
 }
 
@@ -363,10 +378,16 @@ func runTodoAdd(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := args[0]
-	text := args[1]
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return fmt.Errorf("provide the todo text")
+	}
+	text := rest[0]
 
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -396,6 +417,7 @@ var todoListCmd = &cobra.Command{
 }
 
 func init() {
+	addLatestFlag(todoListCmd)
 	todoCmd.AddCommand(todoListCmd)
 }
 
@@ -403,11 +425,7 @@ func runTodoList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}
@@ -437,16 +455,17 @@ func runTodoList(cmd *cobra.Command, args []string) error {
 var todoCheckCmd = &cobra.Command{
 	Use:   "check <name|--latest> <index>",
 	Short: "Mark a todo as done (1-based index)",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runTodoCheck,
 }
 
 func init() {
+	addLatestFlag(todoCheckCmd)
 	todoCmd.AddCommand(todoCheckCmd)
 }
 
 func runTodoCheck(cmd *cobra.Command, args []string) error {
-	return setTodoDone(args, true)
+	return setTodoDone(cmd, args, true)
 }
 
 // todo uncheck
@@ -454,29 +473,36 @@ func runTodoCheck(cmd *cobra.Command, args []string) error {
 var todoUncheckCmd = &cobra.Command{
 	Use:   "uncheck <name|--latest> <index>",
 	Short: "Mark a todo as not done (1-based index)",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runTodoUncheck,
 }
 
 func init() {
+	addLatestFlag(todoUncheckCmd)
 	todoCmd.AddCommand(todoUncheckCmd)
 }
 
 func runTodoUncheck(cmd *cobra.Command, args []string) error {
-	return setTodoDone(args, false)
+	return setTodoDone(cmd, args, false)
 }
 
-func setTodoDone(args []string, done bool) error {
+func setTodoDone(cmd *cobra.Command, args []string, done bool) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := args[0]
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return fmt.Errorf("provide a 1-based todo index")
+	}
 	var idx int
-	if _, err := fmt.Sscanf(args[1], "%d", &idx); err != nil || idx < 1 {
+	if _, err := fmt.Sscanf(rest[0], "%d", &idx); err != nil || idx < 1 {
 		return fmt.Errorf("index must be a positive integer")
 	}
 
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -513,14 +539,19 @@ var (
 
 var prCmd = &cobra.Command{
 	Use:   "pr [name|--latest]",
-	Short: "Create GitHub PR from agent changes",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runPR,
+	Short: "Push the agent's branch and open a GitHub PR",
+	Long: `Push the agent's current branch (git push -u origin HEAD) and open a pull
+request with 'gh pr create --fill'. Requires GitHub CLI auth in the container
+(spawn with --reuse-gh-auth).`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupWorkflow,
+	RunE:    runPR,
 }
 
 func init() {
-	prCmd.Flags().StringVar(&prTitle, "title", "", "PR title")
-	prCmd.Flags().StringVar(&prBase, "base", "main", "Base branch for PR")
+	prCmd.Flags().StringVar(&prTitle, "title", "", "PR title (default: gh --fill derives it from the commits)")
+	prCmd.Flags().StringVar(&prBase, "base", "main", "Base branch to open the PR against")
+	addLatestFlag(prCmd)
 	rootCmd.AddCommand(prCmd)
 }
 
@@ -530,11 +561,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}
@@ -571,14 +598,16 @@ func runPR(cmd *cobra.Command, args []string) error {
 var reviewBase string
 
 var reviewCmd = &cobra.Command{
-	Use:   "review [name|--latest]",
-	Short: "Run AI code review on agent changes",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runReview,
+	Use:     "review [name|--latest]",
+	Short:   "AI-review the agent's changes against a base branch",
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupWorkflow,
+	RunE:    runReview,
 }
 
 func init() {
-	reviewCmd.Flags().StringVar(&reviewBase, "base", "main", "Base branch for review diff")
+	reviewCmd.Flags().StringVar(&reviewBase, "base", "main", "Base branch to diff the agent's changes against for review")
+	addLatestFlag(reviewCmd)
 	rootCmd.AddCommand(reviewCmd)
 }
 
@@ -593,11 +622,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}

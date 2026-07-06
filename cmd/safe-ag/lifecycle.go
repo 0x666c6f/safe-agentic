@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,13 +44,14 @@ func authVolumePersists(authType string) bool {
 var listJSON bool
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all agent containers",
-	RunE:  runList,
+	Use:     "list",
+	Short:   "List agent containers (running and stopped)",
+	GroupID: groupManage,
+	RunE:    runList,
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
+	listCmd.Flags().BoolVar(&listJSON, "json", false, "Emit the container list as JSON for scripting")
 	rootCmd.AddCommand(listCmd)
 }
 
@@ -173,15 +175,16 @@ func injectStateField(line, state string) string {
 var attachResume bool
 
 var attachCmd = &cobra.Command{
-	Use:   "attach <name|--latest>",
-	Short: "Attach to an agent's tmux session",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runAttach,
+	Use:     "attach <name|--latest>",
+	Short:   "Attach to an agent's tmux session (restarts it if stopped)",
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupManage,
+	RunE:    runAttach,
 }
 
 func init() {
 	addLatestFlag(attachCmd)
-	attachCmd.Flags().BoolVar(&attachResume, "resume", false, "Continue the agent's previous conversation instead of a fresh session")
+	attachCmd.Flags().BoolVar(&attachResume, "resume", false, "On a stopped agent, continue its previous conversation instead of a fresh session")
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -190,7 +193,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	exec := newExecutor()
 
 	target := targetFromArgs(cmd, args)
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -319,16 +322,19 @@ func containerExitCode(ctx context.Context, exec vmexec.Executor, name string) (
 // ─── stop ──────────────────────────────────────────────────────────────────
 
 var stopAll bool
+var stopYes bool
 
 var stopCmd = &cobra.Command{
-	Use:   "stop <name|--latest|--all>",
-	Short: "Stop agent containers",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runStop,
+	Use:     "stop <name|--latest|--all>",
+	Short:   "Stop and remove agent containers (auth volumes are kept)",
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupManage,
+	RunE:    runStop,
 }
 
 func init() {
-	stopCmd.Flags().BoolVar(&stopAll, "all", false, "Stop and remove all agent containers")
+	stopCmd.Flags().BoolVar(&stopAll, "all", false, "Stop and remove every agent container instead of a named one")
+	stopCmd.Flags().BoolVar(&stopYes, "yes", false, "Skip the confirmation prompt (for scripts/automation)")
 	addLatestFlag(stopCmd)
 	rootCmd.AddCommand(stopCmd)
 }
@@ -338,11 +344,16 @@ func runStop(cmd *cobra.Command, args []string) error {
 	exec := newExecutor()
 
 	if stopAll {
+		if ok, err := confirmDestructive("Stop and remove ALL agent containers", stopYes); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("aborted")
+		}
 		return stopAllContainers(ctx, exec)
 	}
 
 	target := targetFromArgs(cmd, args)
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, target)
 	if err != nil {
 		return err
 	}
@@ -398,21 +409,34 @@ func stopAllContainers(ctx context.Context, exec vmexec.Executor) error {
 // ─── cleanup ───────────────────────────────────────────────────────────────
 
 var cleanupAuth bool
+var cleanupYes bool
 
 var cleanupCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "Remove all containers, networks, and optionally auth volumes",
-	RunE:  runCleanup,
+	Use:     "cleanup",
+	Short:   "Remove all agent containers and managed networks (keeps auth by default)",
+	GroupID: groupManage,
+	RunE:    runCleanup,
 }
 
 func init() {
-	cleanupCmd.Flags().BoolVar(&cleanupAuth, "auth", false, "Also remove shared auth volumes")
+	cleanupCmd.Flags().BoolVar(&cleanupAuth, "auth", false, "Also delete shared auth volumes (you'll have to sign agents in again)")
+	cleanupCmd.Flags().BoolVar(&cleanupYes, "yes", false, "Skip the confirmation prompt (for scripts/automation)")
 	rootCmd.AddCommand(cleanupCmd)
 }
 
 func runCleanup(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
+
+	action := "Remove all agent containers and managed networks"
+	if cleanupAuth {
+		action = "Remove all agent containers, managed networks, AND shared auth volumes (deletes stored agent credentials)"
+	}
+	if ok, err := confirmDestructive(action, cleanupYes); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("aborted")
+	}
 
 	// 1. Stop all running agent containers
 	runningOut, _ := exec.Run(ctx, "docker", "ps",
@@ -479,14 +503,18 @@ var retryResume bool
 
 var retryCmd = &cobra.Command{
 	Use:   "retry <name|--latest>",
-	Short: "Retry a failed agent with optional feedback",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runRetry,
+	Short: "Re-run a finished agent with the same config",
+	Long: `Spawn a fresh agent reusing a finished one's repo, flags, and prompt — handy
+after a failure. Add --feedback to steer the new attempt.`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupManage,
+	RunE:    runRetry,
 }
 
 func init() {
-	retryCmd.Flags().StringVar(&retryFeedback, "feedback", "", "Feedback for the next attempt")
-	retryCmd.Flags().BoolVar(&retryResume, "resume", false, "Reuse the source auth volume and continue the previous conversation instead of re-running the prompt")
+	retryCmd.Flags().StringVar(&retryFeedback, "feedback", "", "Extra guidance for the new attempt, appended to the original prompt")
+	retryCmd.Flags().BoolVar(&retryResume, "resume", false, "Reuse the source auth volume and continue its conversation instead of re-running the prompt")
+	addLatestFlag(retryCmd)
 	rootCmd.AddCommand(retryCmd)
 }
 
@@ -494,11 +522,7 @@ func runRetry(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
 
-	target := ""
-	if len(args) > 0 {
-		target = args[0]
-	}
-	name, err := docker.ResolveTarget(ctx, exec, target)
+	name, err := resolveTargetCoded(ctx, exec, targetFromArgs(cmd, args))
 	if err != nil {
 		return err
 	}
@@ -709,6 +733,48 @@ func containerEnvVar(ctx context.Context, exec vmexec.Executor, name, envName st
 		}
 	}
 	return "", nil
+}
+
+// confirmDestructive gates a destructive action behind an explicit typed
+// confirmation, mirroring the workspace-revert pattern. With yes=true it
+// approves silently. When stdin is not a terminal it refuses with a clear
+// message so non-interactive callers must pass --yes rather than hang on a
+// prompt that can never be answered.
+func confirmDestructive(action string, yes bool) (bool, error) {
+	if yes {
+		return true, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, fmt.Errorf("%s requires --yes when stdin is not a terminal", action)
+	}
+	fmt.Printf("%s. Type yes to continue: ", action)
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(answer) == "yes", nil
+}
+
+// confirmProceed gates a risky (but not destructive) action behind a short
+// [y/N] prompt. Same non-interactive contract as confirmDestructive.
+func confirmProceed(action string, yes bool) (bool, error) {
+	if yes {
+		return true, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false, fmt.Errorf("%s requires --yes when stdin is not a terminal", action)
+	}
+	fmt.Printf("%s. Continue? [y/N]: ", action)
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // splitLines splits a newline-delimited string, filtering empty lines.

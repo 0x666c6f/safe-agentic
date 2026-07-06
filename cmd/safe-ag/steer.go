@@ -12,10 +12,11 @@ import (
 )
 
 var steerCmd = &cobra.Command{
-	Use:   "steer <name|--latest> <message>",
-	Short: "Send a follow-up message into an agent tmux session",
-	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runSteer,
+	Use:     "steer <name|--latest> <message>",
+	Short:   "Send a follow-up message into an agent tmux session",
+	GroupID: groupManage,
+	Args:    cobra.RangeArgs(1, 2),
+	RunE:    runSteer,
 }
 
 func init() {

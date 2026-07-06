@@ -16,8 +16,9 @@ import (
 var workspaceYes bool
 
 var workspaceCmd = &cobra.Command{
-	Use:   "workspace",
-	Short: "Stage, unstage, or revert files in an agent workspace",
+	Use:     "workspace",
+	Short:   "Stage, unstage, or revert files in an agent workspace",
+	GroupID: groupWorkflow,
 }
 
 var workspaceStageCmd = &cobra.Command{

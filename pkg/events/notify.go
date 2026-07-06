@@ -1,10 +1,16 @@
 package events
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Notify target kinds. A target is written by the user as "kind" or
@@ -144,4 +150,82 @@ func NotifySystem(n SystemNotification) error {
 func appleScriptString(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return `"` + replacer.Replace(s) + `"`
+}
+
+// slackPoster posts text to a Slack incoming-webhook URL. Indirected so tests
+// exercise Dispatch without making a real HTTP request.
+var slackPoster = func(webhookURL, text string) error {
+	payload, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("slack webhook returned %s", resp.Status)
+	}
+	return nil
+}
+
+// commandRunner runs a "command:" notify target. Indirected for tests.
+var commandRunner = func(command string, env []string) error {
+	c := exec.Command("bash", "-lc", command)
+	c.Env = env
+	return c.Run()
+}
+
+// Dispatch delivers note to every target. It attempts every target and returns
+// the first error encountered (so one broken target does not suppress the rest).
+// note.Sound drives the macOS system sound; callers set it via SoundForStatus.
+// out receives "terminal" target lines; pass nil to drop them.
+func Dispatch(targets []NotifyTarget, note SystemNotification, out io.Writer) error {
+	var firstErr error
+	record := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, t := range targets {
+		switch t.Kind {
+		case TargetTerminal:
+			if out != nil {
+				_, err := fmt.Fprintf(out, "🔔 %s — %s\n", note.Container, note.Message)
+				record(err)
+			}
+		case TargetSystem:
+			record(NotifySystem(note))
+		case TargetSlack:
+			if t.Value == "" {
+				record(fmt.Errorf("notify slack target missing webhook url"))
+				continue
+			}
+			record(slackPoster(t.Value, note.Title()+" — "+note.Message))
+		case TargetCommand:
+			if t.Value == "" {
+				record(fmt.Errorf("notify command target missing command"))
+				continue
+			}
+			record(commandRunner(t.Value, notifyCommandEnv(note)))
+		default:
+			// Unknown kind: KnownTargetKind gates configuration; skip here.
+		}
+	}
+	return firstErr
+}
+
+// notifyCommandEnv exposes the notification to a "command:" target as env vars
+// so the script can react without argument parsing.
+func notifyCommandEnv(note SystemNotification) []string {
+	return append(os.Environ(),
+		"SAFE_AG_CONTAINER="+note.Container,
+		"SAFE_AG_MESSAGE="+note.Message,
+	)
 }

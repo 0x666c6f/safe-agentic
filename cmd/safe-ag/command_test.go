@@ -1010,7 +1010,8 @@ func TestStopCommand_All(t *testing.T) {
 	defer cleanup()
 
 	stopAll = true
-	defer func() { stopAll = false }()
+	stopYes = true
+	defer func() { stopAll = false; stopYes = false }()
 
 	// List returns two containers
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", "agent-claude-a\nagent-claude-b\n")
@@ -1040,7 +1041,8 @@ func TestStopCommand_All_NoContainers(t *testing.T) {
 	defer cleanup()
 
 	stopAll = true
-	defer func() { stopAll = false }()
+	stopYes = true
+	defer func() { stopAll = false; stopYes = false }()
 
 	fake.SetResponse("docker ps -a --filter name=^agent-", "")
 
@@ -1118,6 +1120,9 @@ func TestCleanupCommand(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
 
+	cleanupYes = true
+	defer func() { cleanupYes = false }()
+
 	// Running containers
 	fake.SetResponse("docker ps --filter name=^agent- --format {{.Names}}", "agent-claude-test\n")
 	// All containers (incl stopped)
@@ -1146,7 +1151,8 @@ func TestCleanupAuthRemovesSharedAndIsolatedAuthVolumes(t *testing.T) {
 
 	origCleanupAuth := cleanupAuth
 	cleanupAuth = true
-	defer func() { cleanupAuth = origCleanupAuth }()
+	cleanupYes = true
+	defer func() { cleanupAuth = origCleanupAuth; cleanupYes = false }()
 
 	fake.SetResponse("docker volume ls --filter name=safe-agentic- --format {{.Name}}", "safe-agentic-claude-auth\nsafe-agentic-codex-gh-auth\n")
 	fake.SetResponse("docker volume ls --filter label=safe-agentic.type=auth --format {{.Name}}", "agent-claude-worker-auth\n")
@@ -2544,7 +2550,7 @@ func TestSetTodoDone(t *testing.T) {
 	fake.SetResponse("docker exec "+containerName+" bash -c cat", items+"\n")
 
 	output := captureOutput(func() {
-		if err := setTodoDone([]string{containerName, "1"}, true); err != nil {
+		if err := setTodoDone(todoCheckCmd, []string{containerName, "1"}, true); err != nil {
 			t.Fatalf("setTodoDone() error = %v", err)
 		}
 	})
@@ -2566,7 +2572,7 @@ func TestSetTodoDone_OutOfRange(t *testing.T) {
 	items := `[{"text":"Fix bug","done":false}]`
 	fake.SetResponse("docker exec "+containerName+" bash -c cat", items+"\n")
 
-	err := setTodoDone([]string{containerName, "5"}, true)
+	err := setTodoDone(todoCheckCmd, []string{containerName, "5"}, true)
 	if err == nil {
 		t.Fatal("expected error for out-of-range index")
 	}
@@ -2582,7 +2588,7 @@ func TestSetTodoDone_InvalidIndex(t *testing.T) {
 	containerName := "agent-claude-test"
 	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
 
-	err := setTodoDone([]string{containerName, "notanumber"}, true)
+	err := setTodoDone(todoCheckCmd, []string{containerName, "notanumber"}, true)
 	if err == nil {
 		t.Fatal("expected error for invalid index")
 	}
