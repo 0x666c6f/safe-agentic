@@ -842,7 +842,10 @@ func runDockerBuild(ctx context.Context, vmRunner vmexec.Executor) error {
 	switch {
 	case updateForensic:
 		image = "berth:forensic"
-		buildArgs = []string{"docker", "build", "-f", "Dockerfile.forensic", "-t", image, "/tmp/build-context"}
+		// -f must be absolute: buildkit resolves a relative Dockerfile path
+		// against the docker client's cwd (/ in the VM), not the build context,
+		// so a bare "Dockerfile.forensic" is looked up as /Dockerfile.forensic.
+		buildArgs = []string{"docker", "build", "-f", "/tmp/build-context/Dockerfile.forensic", "-t", image, "/tmp/build-context"}
 	case updateFull:
 		buildArgs = []string{"docker", "build", "--no-cache", "-t", image, "/tmp/build-context"}
 	case updateQuick:

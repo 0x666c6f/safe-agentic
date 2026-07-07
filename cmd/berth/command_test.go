@@ -2186,7 +2186,7 @@ func TestUpdateCommand_Forensic(t *testing.T) {
 		t.Fatalf("want 1 build, got %d", len(buildCmds))
 	}
 	joined := strings.Join(buildCmds[0], " ")
-	for _, want := range []string{"-f Dockerfile.forensic", "-t berth:forensic"} {
+	for _, want := range []string{"-f /tmp/build-context/Dockerfile.forensic", "-t berth:forensic"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("forensic build missing %q: %s", want, joined)
 		}
