@@ -4,161 +4,139 @@ hide:
   - toc
 ---
 
-<div class="landing-hero" markdown="1">
+<div class="bt-home" markdown="1">
 
-<p class="landing-eyebrow">berth</p>
+<div class="bt-hero" markdown="1">
 
-# Sandbox coding agents without handing them your host
+<div class="bt-hero-left" markdown="1">
 
-Launch Claude Code and Codex inside a hardened Apple container machine, with one isolated container per agent and risky capabilities kept opt-in.
+# berth
 
-<div class="landing-terminal" markdown="1">
+<p class="bt-tagline">Every coding agent gets its own <strong>berth</strong>: an isolated container inside a <strong>hardened VM</strong> on macOS. Claude Code and Codex work free inside — <strong>SSH, credentials, and Docker stay ashore</strong> until you opt in.</p>
+
+[Get started](install.md){ .md-button .md-button--primary }
+[Quickstart](quickstart.md){ .md-button }
+[GitHub](https://github.com/0x666c6f/berth){ .md-button }
+
+<div class="bt-install-line" markdown="1">
 
 ```bash
-open https://github.com/apple/container/releases
-brew tap 0x666c6f/tap
-brew install berth
-berth setup
+brew tap 0x666c6f/tap && brew install berth && berth setup
 ```
 
 </div>
 
-[Get Started](quickstart.md){ .md-button .md-button--primary }
-[Command Map](usage.md){ .md-button }
-[GitHub](https://github.com/0x666c6f/berth){ .md-button }
+</div>
 
-<div class="landing-meta">
-  <span>macOS host</span>
-  <span>hardened Apple container machine</span>
-  <span>one container per agent</span>
+<div class="bt-dock">
+<div class="bt-dock-label"><span>macOS host</span><span>berth CLI · TUI · app</span></div>
+<div class="bt-dock-vm">
+<div class="bt-dock-label"><span>apple container VM</span><span>hardened · home-mount=none</span></div>
+<div class="bt-slot bt-slot-active"><span class="bt-dot"></span>claude · fix-ci<span class="bt-slot-state">working</span></div>
+<div class="bt-slot"><span class="bt-dot"></span>codex · review-pr<span class="bt-slot-state">needs you</span></div>
+<div class="bt-slot"><span class="bt-dot"></span>claude · audit<span class="bt-slot-state">done</span></div>
+<div class="bt-slot bt-slot-empty">berth free — <code>berth spawn</code></div>
+</div>
+<div class="bt-dock-foot"><span>read-only rootfs</span><span>cap-drop ALL</span><span>own network</span></div>
 </div>
 
 </div>
 
-<div class="landing-callout" markdown="1">
-
-`berth` is a sandbox runner for autonomous coding agents. It is not an editor policy layer pretending to be isolation.
-
-</div>
-
-## Start with the page that matches the job
-
-<div class="grid cards" markdown>
-
--   :material-rocket-launch-outline: __First successful run__
-
-    Install the toolchain, harden the VM, spawn an agent, inspect the session.
-
-    [Open Quickstart](quickstart.md)
-
--   :material-console-network-outline: __Daily command map__
-
-    Jump straight to the command you need for setup, attach, diff, retry, or PR flow.
-
-    [Open Command Map](usage.md)
-
--   :material-source-fork: __Parallel and staged workflows__
-
-    Use fleet manifests, pipelines, retries, and TUI tooling for multi-agent work.
-
-    [Open Fleet Guide](guide/fleet.md)
-
--   :material-shield-lock-outline: __Architecture and security__
-
-    Understand trust boundaries, default isolation, and every flag that widens access.
-
-    [Open Security Model](security.md)
-
-</div>
-
-## What you can do with it
-
-<div class="landing-panel-grid">
-  <a class="landing-panel" href="guide/spawning/">
-    <span class="landing-panel-kicker">Spawn</span>
-    <strong>Launch Claude Code, Codex, or a shell in an isolated container.</strong>
-    <code>berth spawn codex --repo ...</code>
+<div class="bt-grid">
+  <a class="bt-card" href="security/">
+    <h3>Isolated by default</h3>
+    <p>Read-only rootfs, <code>cap-drop ALL</code>, per-agent networks, three boundaries deep. Risky capabilities are explicit flags, never ambient.</p>
+    <span class="bt-more">Security model →</span>
   </a>
-  <a class="landing-panel" href="guide/workflow/">
-    <span class="landing-panel-kicker">Review</span>
-    <strong>Peek at output, diff the workspace, review changes, then open a PR.</strong>
-    <code>berth peek --latest</code>
+  <a class="bt-card" href="guide/workflow/">
+    <h3>Built for the daily loop</h3>
+    <p>Peek, steer, diff, checkpoint, review, and open PRs — without ever attaching a debugger to your own laptop.</p>
+    <span class="bt-more">Review &amp; ship →</span>
   </a>
-  <a class="landing-panel" href="guide/fleet/">
-    <span class="landing-panel-kicker">Orchestrate</span>
-    <strong>Run fleets and pipelines for fan-out review, staged fixes, and consolidation.</strong>
-    <code>berth fleet manifest.yaml</code>
+  <a class="bt-card" href="guide/app/">
+    <h3>Three interfaces</h3>
+    <p>A scriptable CLI, a k9s-style TUI, and a native macOS app with embedded terminals and notifications.</p>
+    <span class="bt-more">Desktop app →</span>
   </a>
-  <a class="landing-panel" href="guide/tui/">
-    <span class="landing-panel-kicker">Observe</span>
-    <strong>Use the TUI to monitor live sessions without dropping into Docker.</strong>
-    <code>berth tui</code>
+  <a class="bt-card" href="guide/fleet/">
+    <h3>Fleet-scale</h3>
+    <p>Parallel fleets, dependency-ordered pipelines, judge stages that pick the best of N, scheduled runs.</p>
+    <span class="bt-more">Fleets &amp; pipelines →</span>
   </a>
 </div>
 
-## Defaults that matter
+## <span class="bt-num">01</span> The loop
 
-<div class="landing-defaults">
-  <div class="landing-default">
-    <strong>SSH agent</strong>
-    <span>off until <code>--ssh</code></span>
-  </div>
-  <div class="landing-default">
-    <strong>Shared auth</strong>
-    <span>off until reuse flags</span>
-  </div>
-  <div class="landing-default">
-    <strong>Container rootfs</strong>
-    <span>read-only by default</span>
-  </div>
-  <div class="landing-default">
-    <strong>Linux caps</strong>
-    <span><code>cap-drop ALL</code></span>
-  </div>
-  <div class="landing-default">
-    <strong>Network</strong>
-    <span>dedicated managed bridge</span>
-  </div>
-  <div class="landing-default">
-    <strong>Docker access</strong>
-    <span>off until explicitly requested</span>
-  </div>
+<div class="bt-steps" markdown="1">
+
+<div class="bt-step" markdown="1">
+
+**Spawn an agent.** Public repos need no flags; add `--ssh` for private ones.
+
+```bash
+berth spawn claude --ssh \
+  --repo git@github.com:org/api.git \
+  --prompt "Fix the failing CI tests"
+```
+
 </div>
 
-## Common flows
+<div class="bt-step" markdown="1">
 
-=== "Single agent"
+**Watch it work — steer when needed.** Agents run in tmux inside their container; you never have to babysit a window.
 
-    ```bash
-    berth spawn claude \
-      --ssh \
-      --repo git@github.com:org/repo.git \
-      --prompt "Fix the failing CI tests"
+```bash
+berth status --latest     # blocked / working / done / idle
+berth peek --latest       # snapshot the live terminal
+berth steer --latest "Keep the fix narrow, add one regression test"
+```
 
-    berth peek --latest
-    berth diff --latest
-    berth review --latest
-    ```
+</div>
 
-=== "Parallel review"
+<div class="bt-step" markdown="1">
 
-    ```bash
-    berth fleet examples/fleet-review-and-fix.yaml
-    berth tui
-    ```
+**Review and ship.** Inspect the diff, run a review pass, open the PR.
 
-=== "Staged pipeline"
+```bash
+berth diff --latest
+berth review --latest
+berth pr --latest --title "fix: stabilize CI"
+```
 
-    ```bash
-    berth pipeline examples/pipeline-consolidate-and-fix.yaml
-    ```
+</div>
 
-## Read in this order
+</div>
 
-1. [Quickstart](quickstart.md): install, setup, first successful run
-2. [Command Map](usage.md): shortest path to the right command
-3. [Workflow](guide/workflow.md): diff, retry, review, PR flow
-4. [Fleet and Pipelines](guide/fleet.md): orchestration and manifests
-5. [Codex App Parity Roadmap](roadmap/codex-app-parity.md): UX roadmap and implementation tracks
-6. [Architecture](architecture.md): how the boundary layers fit together
-7. [Security](security.md): defaults, wideners, and threat model
+## <span class="bt-num">02</span> The desktop app
+
+Berth ships a native macOS app for orchestrating agents: a live sidebar with agent states (working / needs-you / review / failed), embedded terminals attached to each container's tmux session, diff review, a spawn form, timeline and cost views, a ⌘K command palette, and native notifications.
+
+<div class="bt-shot">
+  <img src="assets/screenshots/berth-app.png" alt="Berth desktop app — sidebar with running agents and an embedded terminal attached to a sandboxed container">
+  <div class="bt-shot-caption">Berth.app — two sandboxed agents; embedded terminal attached to the container's tmux session</div>
+</div>
+
+Everything the app does shells out to the same `berth` CLI, so the app, the [TUI](guide/tui.md), and your terminal can drive the same agents interchangeably. [Desktop app guide →](guide/app.md)
+
+## <span class="bt-num">03</span> Explore
+
+<div class="bt-grid">
+  <a class="bt-card" href="install/">
+    <h3>Installation</h3>
+    <p>Toolchain, VM setup, migration from safe-agentic.</p>
+  </a>
+  <a class="bt-card" href="guide/spawning/">
+    <h3>Guides</h3>
+    <p>Spawning, managing, worktrees, automation, configuration.</p>
+  </a>
+  <a class="bt-card" href="reference/cli/">
+    <h3>Reference</h3>
+    <p>Every command and flag; TUI keys; manifest schema.</p>
+  </a>
+  <a class="bt-card" href="architecture/">
+    <h3>Concepts</h3>
+    <p>The three isolation boundaries and the threat model.</p>
+  </a>
+</div>
+
+</div>

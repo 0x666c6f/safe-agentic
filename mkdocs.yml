@@ -1,23 +1,36 @@
 site_name: berth
-site_description: Run AI coding agents inside a hardened VM and per-agent containers
+site_description: Run AI coding agents inside a hardened VM with one isolated container per agent
 site_url: https://0x666c6f.github.io/berth/
 repo_url: https://github.com/0x666c6f/berth
 repo_name: 0x666c6f/berth
 
 theme:
   name: material
-  logo: assets/dashboard-logo.png
-  favicon: assets/dashboard-favicon.png
+  custom_dir: docs/overrides
+  logo: assets/brand/berth-mark-b2-dark.svg
+  favicon: assets/brand/favicon-b2.ico
   palette:
-    - scheme: slate
-      primary: blue
-      accent: blue
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.instant
-    - navigation.tabs
     - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.footer
+    - navigation.tracking
     - toc.follow
     - search.suggest
     - search.highlight
@@ -27,29 +40,34 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started:
+  - Introduction:
+    - Installation: install.md
     - Quickstart: quickstart.md
-    - Command Map: usage.md
   - Guides:
     - Spawning Agents: guide/spawning.md
-    - Managing Agents: guide/managing.md
-    - Workflow: guide/workflow.md
-    - Fleet and Pipelines: guide/fleet.md
-    - Terminal UI: guide/tui.md
-    - Analytics: guide/analytics.md
+    - Monitor & Manage: guide/managing.md
+    - Review & Ship: guide/workflow.md
+    - Worktrees: guide/worktrees.md
+    - Fleets & Pipelines: guide/fleet.md
+    - Automation: guide/automation.md
     - Configuration: guide/configuration.md
+  - Interfaces:
+    - Desktop App: guide/app.md
+    - Terminal UI: guide/tui.md
   - Reference:
-    - CLI Reference: reference/cli.md
-    - TUI Reference: reference/tui.md
+    - CLI: reference/cli.md
+    - TUI: reference/tui.md
+    - Manifests: reference/manifests.md
+  - Concepts:
     - Architecture: architecture.md
     - Security: security.md
-    - Isolation Boundaries: architecture/isolation.md
-    - Networking: architecture/networking.md
-    - Container Internals: architecture/container.md
-    - Security Defaults: security/defaults.md
-    - Threat Surface: security/threat-surface.md
-    - Supply Chain: security/supply-chain.md
-    - Threat Model: security/threat-model.md
+
+not_in_nav: |
+  roadmap/
+  superpowers/
+
+plugins:
+  - search
 
 markdown_extensions:
   - admonition
@@ -62,6 +80,7 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
+  - pymdownx.keys
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:

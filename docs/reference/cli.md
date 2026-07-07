@@ -33,6 +33,7 @@ Top-level commands:
 | `checkpoint` | manage workspace snapshots |
 | `cleanup` | remove containers, networks, and optional auth volumes |
 | `config` | manage persistent defaults |
+| `config-sync` | push host Claude settings into an agent |
 | `cost` | estimate API cost from session data |
 | `cron` | manage scheduled jobs |
 | `diagnose` | run environment health checks |
@@ -127,7 +128,7 @@ Flags:
 | `--identity` | string | git identity in `Name <email>` form |
 | `--instructions` | string | task instructions |
 | `--instructions-file` | string | read instructions from a file |
-| `--max-cost` | string | kill if estimated cost exceeds this budget |
+| `--max-cost` | string | USD budget recorded on the container (advisory; surfaced by `summary`/`cost`, not enforced) |
 | `--memory` | string | memory limit, e.g. `8g` |
 | `--name` | string | explicit container name suffix |
 | `--no-docker` | bool | disable default Docker-in-Docker |
@@ -137,10 +138,10 @@ Flags:
 | `--no-seed-auth` | bool | disable default host auth seeding |
 | `--no-ssh` | bool | disable default SSH agent forwarding |
 | `--network` | string | custom Docker network |
-| `--notify` | string | notification targets, comma-separated (see [Notify targets](#notify-targets)) |
-| `--on-complete` | string | command to run on success |
-| `--on-exit` | string | command to run on exit |
-| `--on-fail` | string | command to run on failure |
+| `--notify` | string | notification targets, comma-separated, delivered host-side (see [Notify targets](#notify-targets)) |
+| `--on-complete` | string | command run inside the container on success |
+| `--on-exit` | string | command run inside the container on exit |
+| `--on-fail` | string | command run inside the container on failure |
 | `--pids-limit` | int | PIDs limit, minimum 64 |
 | `--prompt` | string | initial prompt |
 | `--repo` | strings | repository URL to clone; repeatable |
@@ -154,6 +155,7 @@ Flags:
 | `--worktree-branch` | string | branch name for `--worktree` |
 | `--worktree-include` | string | include file for ignored local files; default `.berthinclude` |
 | `--worktree-path` | string | destination path for `--worktree` |
+| `--yes` | bool | skip the host-side risk confirmation prompt |
 
 Worktree mode:
 
@@ -161,19 +163,9 @@ Worktree mode:
 berth spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
 ```
 
-`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `berth/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.berthinclude`.
+`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `berth/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.berthinclude`. A `--worktree-path` outside the worktrees root is rejected before launch.
 
-**`--worktree` is opt-in and off by default.** Apple's `container` cannot mount an arbitrary host directory into a machine — the only host share is `--home-mount ro|rw|none`, and berth defaults to `none` (nothing shared, strongest isolation). To use `--worktree` you must enable the worktree mount:
-
-```bash
-berth setup --enable-worktrees      # or: berth config set defaults.worktrees_mount true && berth setup
-```
-
-This switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds *only* the worktrees root — `~/.berth/worktrees` by default, or `defaults.worktrees_dir` (must be under your home) — to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`. On spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the Docker bind. A `--worktree-path` outside the worktrees root is rejected before launch.
-
-Disable again with `berth setup --disable-worktrees` (restores `home-mount=none`). `berth setup` and `berth vm start` reconcile the machine to match the config in either direction; `berth diagnose` reports the current posture.
-
-**Security trade-off:** enabling the worktree mount **weakens the VM boundary**. `home-mount=rw` shares your whole home with the machine at the virtiofs level; berth detaches and masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home — the default `home-mount=none` shares nothing and cannot. Keep secrets and unrelated projects out of the worktrees root. See [Threat model](../security/threat-model.md).
+**`--worktree` is opt-in and off by default** — it requires `berth setup --enable-worktrees`, which deliberately weakens the VM boundary. How the mount works: [Worktrees guide](../guide/worktrees.md). Why it's a trade-off: [Security — threat model](../security.md#the-worktree-mount-trade-off).
 
 Spawn policy:
 
@@ -236,6 +228,7 @@ Flags:
 | `--background` | bool | run detached |
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
+| `--ephemeral-auth` | bool | use a per-container throwaway auth volume |
 | `--instructions` | string | task instructions |
 | `--max-cost` | string | cost budget |
 | `--no-docker` | bool | disable default Docker-in-Docker |
@@ -250,6 +243,10 @@ Flags:
 | `--seed-auth` | bool | copy host Claude/Codex auth into this session |
 | `--template` | string | prompt template |
 | `--var` | strings | template variable assignment `key=value`; repeatable |
+| `--worktree` | bool | create and mount a managed git worktree from the current checkout |
+| `--worktree-branch` | string | branch name for `--worktree` |
+| `--worktree-path` | string | destination path for `--worktree` |
+| `--yes` | bool | skip the host-side risk confirmation prompt |
 
 ## `list`
 
@@ -415,6 +412,23 @@ container stops — on a stopped ephemeral container `attach --resume` **refuses
 plain `berth attach <name>` or `berth retry` for a fresh run. Use
 `--reuse-auth` (a persistent named volume) if you want conversations to survive
 stops. `--resume` supports claude and codex agents only.
+
+## `config-sync`
+
+Usage:
+
+```bash
+berth config-sync <name|--latest> [--restart]
+```
+
+Pushes your current host Claude settings into an agent container. With `--restart`, the container restarts so the agent relaunches with the synced settings.
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--latest` | bool | target the latest container |
+| `--restart` | bool | restart the container to apply the synced settings now |
 
 ## `steer`
 
@@ -597,14 +611,14 @@ berth handoff <agent|--latest> --to-worktree
 Usage:
 
 ```bash
-berth workspace stage <agent|--latest> <path...>
-berth workspace unstage <agent|--latest> <path...>
-berth workspace revert <agent|--latest> <path...> --yes
-berth workspace stage-patch <agent|--latest> selected.patch
-berth workspace revert-patch <agent|--latest> selected.patch --yes
+berth workspace stage <agent> <path...>
+berth workspace unstage <agent> <path...>
+berth workspace revert <agent> <path...> --yes
+berth workspace stage-patch <agent> selected.patch
+berth workspace revert-patch <agent> selected.patch --yes
 ```
 
-Paths must stay relative to the workspace. `revert` and `revert-patch` discard changes and require `--yes` when stdin is not interactive. Patch commands accept selected hunks from a normal unified diff and reject workspace-escaping paths.
+Unlike most commands, `workspace` subcommands take an explicit agent name — the `--latest` flag is not supported here. Paths must stay relative to the workspace. `revert` and `revert-patch` discard changes and require `--yes` when stdin is not interactive. Patch commands accept selected hunks from a normal unified diff and reject workspace-escaping paths.
 
 ## `worktree`
 
@@ -956,6 +970,14 @@ See `examples/pipeline-judge-fanout.yaml` for a complete runnable manifest.
 ## `config`
 
 Subcommands:
+
+### `config keys`
+
+```bash
+berth config keys
+```
+
+Lists every config key with its current and default value. Legacy env-style keys (`BERTH_*`) work as aliases for the canonical dotted form in `get`, `set`, and `reset`.
 
 ### `config show`
 

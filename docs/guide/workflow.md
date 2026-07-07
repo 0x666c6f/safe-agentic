@@ -1,42 +1,35 @@
-# Workflow
+# Review & Ship
 
-This page covers the "agent did work, now what?" loop.
+The "agent did work — now what?" loop: inspect, correct, review, and get it merged.
 
-## Status and output
+## Inspect the result
 
 ```bash
-berth summary --latest
-berth output --latest
-berth diff --latest
-berth review --latest
+berth summary --latest    # quick state: repo, status, cost, last message
+berth output --latest     # last meaningful message
+berth diff --latest       # the code change (add --stat or -s for side-by-side)
+berth review --latest     # AI review pass against a base branch
 ```
 
-Typical order:
+## Steer or retry
 
-1. `summary` for quick state
-2. `output` for the last meaningful message
-3. `diff` for the code change
-4. `review` for an extra review pass
+Course-correct a live agent without attaching:
 
-## Retry with feedback
+```bash
+berth steer --latest "Focus only on the failing test and avoid unrelated refactors"
+```
+
+Start over with the same session shape:
 
 ```bash
 berth retry --latest
 berth retry --latest --feedback "Focus only on src/ and add tests"
+berth retry --latest --resume     # continue the conversation instead of re-running
 ```
-
-`retry` reconstructs the original spawn options and starts a fresh container with the same session shape.
-
-## Steer a running agent
-
-```bash
-berth steer --latest "Focus only on the failing test and avoid unrelated refactors"
-berth steer api-refactor "Run the narrower test first"
-```
-
-Use `steer` when the agent is active and you want to add guidance without attaching to the tmux session. If the container is stopped, `steer` starts it and waits for tmux.
 
 ## Review comments
+
+File/line notes that survive between `review`, `diff`, `steer`, and PR handoff (stored on the host under `~/.berth/state/`):
 
 ```bash
 berth review-comments add --latest cmd/main.go 42 "Handle empty input before parsing"
@@ -45,40 +38,69 @@ berth steer --latest "Address the open review comments, then run tests"
 berth review-comments resolve rc-123
 ```
 
-Use review comments for local file/line notes that should survive between `review`, `diff`, `steer`, and PR handoff. They are stored on the host under `~/.berth/state/`.
-
 ## Checkpoints
+
+Reversible snapshots before risky changes:
 
 ```bash
 berth checkpoint create --latest "before big refactor"
 berth checkpoint list --latest
-berth checkpoint restore --latest <ref>
+berth checkpoint restore --latest stash@{0}
 ```
 
-Use checkpoints when you want a reversible snapshot before the agent makes a risky change.
+## Stage or revert selectively
+
+Take only part of what the agent did:
+
+```bash
+berth workspace stage api-fix src/api.go src/api_test.go
+berth workspace unstage api-fix src/api.go
+berth workspace revert api-fix scratch.txt --yes
+berth workspace stage-patch api-fix ./picked-hunks.patch
+```
+
+Unlike most commands, `workspace` takes an explicit agent name — it does not support `--latest`.
 
 ## Todos
 
+The built-in merge checklist:
+
 ```bash
 berth todo add --latest "Run integration tests"
-berth todo add --latest "Update changelog"
 berth todo list --latest
 berth todo check --latest 1
 ```
 
-This is the built-in merge checklist.
-
-## PR creation
+## Open a PR
 
 ```bash
-berth pr --latest --title "fix: stabilize flaky tests"
-berth pr --latest --base main
+berth pr --latest --title "fix: stabilize flaky tests" --base main
 ```
 
-Before `berth pr`, you usually want:
-- SSH enabled at spawn time
-- GitHub auth available
-- todos completed
+Before `berth pr` you usually want SSH enabled at spawn time, GitHub auth in the container (`--reuse-gh-auth`), and todos completed.
+
+### One-shot PR review workflows
+
+Run a whole review pipeline against a PR without hand-building a manifest:
+
+```bash
+berth pr-review               # dual Claude+Codex review of the current PR
+berth pr-review codex 128     # single-reviewer mode, explicit PR number
+berth pr-fix 128              # spawn the fix workflow for a PR
+```
+
+Both infer the repo from the current checkout; pass `--repo` to override.
+
+## Hand the work off
+
+Get the workspace out of the container:
+
+```bash
+berth handoff --latest --to-local ./workspace-copy   # copy /workspace to a host path
+berth handoff --latest --to-worktree                 # print the managed worktree path
+```
+
+`--to-worktree` only applies to agents spawned with `--worktree` — see [Worktrees](worktrees.md).
 
 ## Typical end-to-end loop
 
@@ -89,29 +111,15 @@ berth spawn claude --ssh --reuse-auth \
 
 berth peek --latest
 berth steer --latest "Keep the fix narrow and add one regression test"
-berth summary --latest
 berth diff --latest
 berth review --latest
-berth review-comments add --latest src/api.go 37 "Add a regression test for this branch"
 berth todo add --latest "Verify locally"
 berth todo check --latest 1
 berth pr --latest --title "fix: resolve CI failures"
 ```
 
-## Hooks and post-run automation
+## Related
 
-You can use lifecycle hooks to automate follow-up work:
-
-```bash
-berth spawn claude \
-  --background \
-  --repo https://github.com/org/repo.git \
-  --prompt "Write a migration plan" \
-  --on-exit "berth output --latest > /tmp/plan.txt"
-```
-
-## What belongs here vs elsewhere
-
-- this page: review, retry, checkpoint, todo, PR
-- [Managing Agents](managing.md): attach/logs/cleanup/session export
-- [Fleet and Pipelines](fleet.md): multi-agent orchestration
+- [Monitor & Manage](managing.md) — attach, logs, cost, cleanup
+- [Automation](automation.md) — hooks, notifications, scheduled runs
+- [Fleets & Pipelines](fleet.md) — multi-agent orchestration

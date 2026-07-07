@@ -1,6 +1,6 @@
 # Terminal UI
 
-`berth tui` is the fastest way to see all agents at once.
+`berth tui` is the fastest way to see every agent at once — a k9s-style dashboard for keyboard-first control.
 
 ```bash
 berth tui
@@ -8,69 +8,36 @@ berth tui
 
 ## What it shows
 
-- header: VM context and running/total agents
-- table: agent list, state, resource usage, network/auth metadata
-- footer: key hints, filter bar, command bar, status messages
-- optional preview pane for the selected agent
+- **header** — VM context and running/total agents
+- **table** — every agent (stopped ones included) with live state, resource usage, and network/auth metadata
+- **preview pane** — the selected agent's recent output (`p` to toggle)
+- **footer** — key hints, filter bar, command bar, status messages
 
-## What you can do from the TUI
+## The core loop
 
-| Key | Action |
-|---|---|
-| `Enter` / `a` | attach |
-| `r` | resume |
-| `s` | stop |
-| `l` | logs |
-| `d` | inspect |
-| `f` | diff |
-| `R` | review |
-| `t` | todos |
-| `x` | checkpoint |
-| `g` | create PR |
-| `e` | export sessions |
-| `c` | transfer files |
-| `n` | spawn new agent |
-| `p` | toggle preview |
-| `/` | filter |
-| `:` | command bar |
-| `?` | help |
-| `q` | quit |
+From the table, everything is one key away: `Enter` attaches, `s` stops, `f` shows the diff, `R` runs a review, `g` opens a PR, `n` opens the spawn form. `/` filters, `:` opens the command bar (`:profile`, `:action`, `:comments`, `:timeline`, `:inbox`), `?` shows help.
 
-## Important behaviors
+The full keybinding and command table lives in the [TUI reference](../reference/tui.md).
 
-- stopped containers still appear
-- `attach` will restart a stopped container when needed
-- on macOS, `attach` and `resume` open iTerm2 by default and fall back to Terminal.app when iTerm2 is not installed
-- preview uses session/log fallbacks depending on what is available
-- `:profile <name> [prompt]` runs a saved agent profile
-- `:action <name>` runs a configured action in the selected agent
-- `:comments` opens saved review comments for the selected agent
-- `:timeline` and `:inbox` open event views
-- filtering is case-insensitive
-- narrow terminals automatically hide lower-priority columns
+## Behaviors worth knowing
 
-Use the TUI when you want keyboard-first local control.
+- attaching to a stopped container restarts it first
+- on macOS, attach/resume open iTerm2 when installed, Terminal.app otherwise
+- narrow terminals hide lower-priority columns automatically
+- spawned agents launch in background mode; reconnect from the table when ready
 
 ## Spawn form
 
-Press `n` to open the spawn form. It lets you set:
-- type
-- repo URL
-- name
-- prompt
-- SSH
-- auth reuse
-- GitHub auth reuse
-- host auth seeding
-- AWS profile
-- Docker access
-- Docker socket access
-- git identity
-
-The spawn form starts from `~/.berth/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. If the final spawn would enable SSH, shared auth, host auth seeding, AWS credentials, Docker, or Docker socket access, the footer asks for `y/n` confirmation before launch. The spawned agent is launched in background mode; reconnect from the table when ready.
+`n` opens a form covering type, repo, name, prompt, and the auth/runtime toggles (SSH, auth reuse, gh auth, seeded auth, AWS, Docker, Docker socket, identity). It starts from your `config.toml` defaults; unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. If the final spawn widens anything risky, the footer asks for `y/n` confirmation before launch.
 
 ## File transfer
 
-Press `c` to transfer files between the selected agent and the Apple container VM.
+`c` transfers files between the selected agent and the VM. Agent paths must stay under `/workspace`; VM paths must be absolute. This keeps transfers focused on repo artifacts, not agent auth/config directories.
 
-Agent paths are normalized and must stay under `/workspace`. This keeps the TUI transfer flow focused on repo artifacts instead of agent auth/config directories. VM paths must be absolute paths in the VM, for example `/tmp/report.txt`; relative paths and Docker `container:path` syntax are rejected.
+## When to use what
+
+| Situation | Surface |
+|---|---|
+| scripting, one-off commands, CI | [CLI](../reference/cli.md) |
+| several live agents, terminal-native | TUI |
+| embedded terminals, native notifications | [Desktop app](app.md) |

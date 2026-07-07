@@ -1,128 +1,83 @@
 # Quickstart
 
-Get from zero to a live agent session with the fewest moving parts.
+From zero to a reviewed change in a few commands. This assumes you finished [Installation](install.md) (`berth setup` succeeded and `berth diagnose` is green).
 
-If you want the shortest working path, this is it:
-
-```bash
-open https://github.com/apple/container/releases
-brew tap 0x666c6f/tap
-brew install berth
-berth setup
-berth spawn claude --repo https://github.com/myorg/myrepo.git
-berth peek --latest
-```
-
-Use `--ssh` instead of a public HTTPS repo when the repository is private.
-
-## 1. Install the prerequisites
-
-Install Apple container from the signed pkg on GitHub Releases, then install berth:
+## The shortest path
 
 ```bash
-open https://github.com/apple/container/releases
-brew tap 0x666c6f/tap
-brew install berth
+berth run https://github.com/myorg/myrepo.git "Fix the failing CI tests"
 ```
 
-From source:
+`berth run` is the quick-start form: it spawns a Claude agent with smart defaults and auto-enables `--ssh` when you pass a `git@` URL. For explicit control over agent type, auth, and isolation, use [`berth spawn`](guide/spawning.md).
+
+## 1. Spawn an agent
+
+=== "Public repo"
+
+    ```bash
+    berth spawn claude --repo https://github.com/myorg/myrepo.git
+    ```
+
+=== "Private repo"
+
+    ```bash
+    berth spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+    ```
+
+=== "With a task"
+
+    ```bash
+    berth spawn claude \
+      --ssh \
+      --repo git@github.com:myorg/myrepo.git \
+      --prompt "Fix the failing CI tests"
+    ```
+
+The first auth flow may open a browser or print a device-code login. Agents run inside tmux in the container — `Ctrl-b d` detaches without stopping anything.
+
+## 2. Watch it work
 
 ```bash
-open https://github.com/apple/container/releases
-git clone git@github.com:0x666c6f/berth.git
-cd berth
-make build-all
-export PATH="$PWD/bin:$PATH"
+berth list                # all agents, running and stopped
+berth status --latest     # blocked / working / done / idle / exited
+berth peek --latest       # snapshot of the live terminal
+berth attach --latest     # jump into the session (restarts stopped containers)
 ```
 
-Canonical CLI: `berth`.
-
-Agent-facing shortcuts also ship in `bin/`:
-- `berth-claude`
-- `berth-codex`
-
-## 2. Build the sandbox once
+Need to correct course without attaching?
 
 ```bash
-berth setup
-berth diagnose
+berth steer --latest "Keep the fix narrow and add one regression test"
 ```
 
-`berth setup` will:
-
-- create the Apple container machine if needed
-- configure Apple vmnet host NAT for VM and nested Docker egress
-- reapply VM hardening
-- build the local Docker image
-
-If setup fails, keep `berth diagnose` output. It is the fastest next debugging step.
-
-## 3. Spawn the first agent
-
-Public repo:
+## 3. Review what changed
 
 ```bash
-berth spawn claude --repo https://github.com/myorg/myrepo.git
+berth output --latest     # the agent's last message
+berth diff --latest       # git diff of the workspace
+berth review --latest     # AI review pass over the changes
 ```
 
-Private repo:
+Happy with it? Push a branch and open a PR (needs `--ssh` and GitHub auth in the container):
 
 ```bash
-berth spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+berth pr --latest --title "fix: stabilize CI"
 ```
 
-Immediate task:
+## 4. Clean up
 
 ```bash
-berth spawn claude \
-  --ssh \
-  --repo git@github.com:myorg/myrepo.git \
-  --prompt "Fix the failing CI tests"
+berth stop --latest       # stop + remove this agent
+berth cleanup             # remove all agents + managed networks (keeps auth)
+berth cleanup --auth      # full reset including auth volumes
 ```
 
-## 4. Check that the session is alive
+Containers persist until you stop them — you can walk away and `berth attach` later.
 
-```bash
-berth list
-berth peek --latest
-berth attach --latest
-```
+## Where to go next
 
-Expect:
-
-- first auth flow may open a browser or print a device-code login
-- agents run inside tmux in the container
-- `Ctrl-b d` detaches from the session
-- stopped containers can be reattached later
-
-## 5. Review what changed
-
-```bash
-berth diff --latest
-berth output --latest
-berth review --latest
-```
-
-Typical loop:
-
-1. `peek` to see current activity
-2. `diff` to inspect filesystem changes
-3. `review` before you ship anything
-
-## 6. Clean up when you are done
-
-```bash
-berth stop --latest
-berth cleanup
-berth cleanup --auth
-```
-
-Use `cleanup --auth` only when you want to remove shared and isolated auth volumes too.
-
-## Next pages
-
-- [Command Map](usage.md)
-- [Spawning Agents](guide/spawning.md)
-- [Managing Agents](guide/managing.md)
-- [Workflow](guide/workflow.md)
-- [Security](security.md)
+- [Spawning Agents](guide/spawning.md) — every repo/auth/runtime option
+- [Monitor & Manage](guide/managing.md) — status, logs, search, inbox, cost
+- [Review & Ship](guide/workflow.md) — steer, checkpoints, review comments, PRs
+- [Terminal UI](guide/tui.md) — all of the above from one dashboard
+- [Security](security.md) — what the sandbox does and doesn't protect

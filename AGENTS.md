@@ -171,10 +171,11 @@ When changing auth, network, mounts, isolation, or host-sharing behavior:
 ## Documentation
 
 - `README.md`: operational overview
-- `docs/architecture.md`: diagrams, isolation boundaries, flow sequences
-- `docs/quickstart.md`: getting started
-- `docs/usage.md`: command reference
-- `docs/security.md`: threat model, supply chain, filesystem layout
+- `docs/install.md` + `docs/quickstart.md`: getting started
+- `docs/guide/*.md`: task-oriented guides (spawning, managing, workflow, worktrees, fleet, automation, tui, app, configuration)
+- `docs/reference/cli.md`: exhaustive command reference
+- `docs/architecture.md`: isolation boundaries, networking, container internals
+- `docs/security.md`: defaults, wideners, threat model, supply chain
 
 ## Skills
 
@@ -193,7 +194,7 @@ Repo-local skills currently cover:
 
 ## Known Limitations
 
-- Default posture is `home-mount=none` — the host home is never shared with the VM. Apple `container` cannot mount a single host directory into a machine, so `--worktree` is opt-in: `berth setup --enable-worktrees` switches the machine to `home-mount=rw`, and `vm/setup.sh` binds only the worktrees root to `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Enabling this weakens the VM boundary (rw home share); keep secrets out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile in either direction. Worktree paths outside the root are rejected. See `docs/security/threat-model.md`.
+- Default posture is `home-mount=none` — the host home is never shared with the VM. Apple `container` cannot mount a single host directory into a machine, so `--worktree` is opt-in: `berth setup --enable-worktrees` switches the machine to `home-mount=rw`, and `vm/setup.sh` binds only the worktrees root to `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Enabling this weakens the VM boundary (rw home share); keep secrets out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile in either direction. Worktree paths outside the root are rejected. See the threat model in `docs/security.md`.
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 

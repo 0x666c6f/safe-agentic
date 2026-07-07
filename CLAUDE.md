@@ -77,7 +77,7 @@ berth spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name m
 berth spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
 berth spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
 berth spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
-berth spawn claude --background --auto-trust --on-exit 'berth output --latest --json > out.json' --repo ...
+berth spawn claude --background --auto-trust --notify 'command:berth output $BERTH_CONTAINER --json > out.json' --repo ...
 
 # Quick start with smart defaults (auto-enables `--ssh` for SSH URLs)
 berth run git@github.com:org/repo.git "Fix the CI tests"
@@ -131,11 +131,11 @@ berth spawn claude --repo https://... --network agent-isolated
 
 ```bash
 # Spawn flags (new in v2)
-#   --on-complete "cmd"     Run command on agent success
-#   --on-fail "cmd"         Run command on agent failure
-#   --notify targets        Notifications (terminal,slack,command:script)
+#   --on-complete "cmd"     Run command inside the container on agent success
+#   --on-fail "cmd"         Run command inside the container on agent failure
+#   --notify targets        Host-side notifications (terminal,system,slack:...,command:script)
 #   --ephemeral-auth        One-off session, don't reuse auth volume
-#   --max-cost N.NN         Kill agent if estimated cost exceeds budget
+#   --max-cost N.NN         Advisory cost budget recorded on the container (not enforced)
 
 # Workflow
 berth diff <name>|--latest [--stat]       # show git diff from agent working tree
@@ -241,10 +241,12 @@ Shell runtime verification lives in focused smoke or integration tests rather th
 
 ## Documentation
 
-- `docs/architecture.md` — Mermaid diagrams: system overview, isolation boundaries, component map, sequence flows (setup, spawn, SSH auth, OAuth, lifecycle, build)
-- `docs/quickstart.md` — 5-step getting started
-- `docs/usage.md` — full command reference with workflows
-- `docs/security.md` — threat model, supply chain, filesystem layout
+- `docs/install.md` — installation, VM setup, safe-agentic migration
+- `docs/quickstart.md` — first agent in five minutes
+- `docs/guide/` — task-oriented guides: spawning, managing, workflow, worktrees, fleet, automation, tui, app, configuration
+- `docs/reference/cli.md` — exhaustive command reference; `docs/reference/tui.md`, `docs/reference/manifests.md`
+- `docs/architecture.md` — isolation boundaries, networking, container internals
+- `docs/security.md` — defaults, wideners, threat model, supply chain
 
 ## Skills
 
@@ -282,7 +284,7 @@ Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
 ## Known Limitations
 
 - **Default posture: `--home-mount none`** — the host home is never shared with the VM (strongest isolation). Apple's `container` has no way to mount a single host directory into a machine (only `--home-mount ro|rw|none`), so `--worktree` (which needs a host directory bind-mounted into the agent) is **opt-in**: `berth setup --enable-worktrees` (or `berth config set defaults.worktrees_mount true`) switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds only the worktrees root (`~/.berth/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Agent containers only bind-mount a per-agent subdir of `/worktrees`, so the only host path reachable is the worktrees root.
-- **Enabling worktrees is a deliberate weakening of the VM boundary.** `home-mount=rw` shares the whole home with the machine at the virtiofs level; berth detaches/masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home (default `home-mount=none` shares nothing, so it can't). Keep secrets and unrelated projects out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile the machine in either direction and re-assert the masks. A `--worktree-path` outside the worktrees root is rejected before launch. See `docs/security/threat-model.md`.
+- **Enabling worktrees is a deliberate weakening of the VM boundary.** `home-mount=rw` shares the whole home with the machine at the virtiofs level; berth detaches/masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home (default `home-mount=none` shares nothing, so it can't). Keep secrets and unrelated projects out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile the machine in either direction and re-assert the masks. A `--worktree-path` outside the worktrees root is rejected before launch. See the threat model in `docs/security.md`.
 - VM internet egress relies on host pf NAT plus `net.inet.ip.forwarding=1`, applied during `berth setup`. A macOS reboot resets forwarding and flushes the pf anchor, so the VM loses egress (clones time out, agents die on startup). `berth vm start` now re-applies NAT, and `berth diagnose` flags the missing egress.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
 - Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
