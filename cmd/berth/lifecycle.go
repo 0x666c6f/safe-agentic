@@ -464,10 +464,11 @@ func stopOneContainer(ctx context.Context, exec vmexec.Executor, name string) er
 		fmt.Fprintf(os.Stderr, "warning: rm %s: %v\n", name, err)
 	}
 
-	// Clean up DinD sidecar and managed network (best-effort)
+	// Clean up DinD sidecar, managed network, and evidence volume (best-effort)
 	docker.RemoveDinDRuntime(ctx, exec, name)
 	netName := docker.ManagedNetworkName(name)
 	docker.RemoveManagedNetwork(ctx, exec, netName)
+	exec.Run(ctx, "docker", "volume", "rm", name+"-evidence")
 
 	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
 	auditLogger.Log("stop", name, nil)
@@ -495,6 +496,7 @@ func stopAllContainers(ctx context.Context, exec vmexec.Executor) error {
 		exec.Run(ctx, "docker", "rm", name)
 		docker.RemoveDinDRuntime(ctx, exec, name)
 		docker.RemoveManagedNetwork(ctx, exec, docker.ManagedNetworkName(name))
+		exec.Run(ctx, "docker", "volume", "rm", name+"-evidence")
 	}
 
 	fmt.Printf("Done. Stopped %d container(s).\n", total)

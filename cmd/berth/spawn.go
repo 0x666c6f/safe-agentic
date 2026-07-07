@@ -73,6 +73,7 @@ type SpawnOpts struct {
 	DryRun            bool
 	Yes               bool
 	Forensic          bool
+	Evidence          string
 	// Interactive marks a spawn launched from the `spawn`/`run` CLI commands
 	// (as opposed to fleet/pipeline/retry, which drive executeSpawn directly).
 	// Only interactive spawns get the risk confirmation prompt.
@@ -158,6 +159,7 @@ func init() {
 	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	f.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
 	f.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
+	f.StringVar(&spawnOpts.Evidence, "evidence", "", "Mount a host file/dir read-only at /evidence for analysis; records a sha256 manifest and defaults --network to api-only")
 
 	rf := runCmd.Flags()
 	rf.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
@@ -184,6 +186,7 @@ func init() {
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	rf.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
 	rf.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
+	rf.StringVar(&spawnOpts.Evidence, "evidence", "", "Mount a host file/dir read-only at /evidence for analysis; records a sha256 manifest and defaults --network to api-only")
 
 	rootCmd.AddCommand(spawnCmd, runCmd, notifyWaitCmd)
 }
@@ -278,6 +281,9 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := prepareSpawnResourceLimits(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
+	if err := prepareSpawnEvidence(ctx, exec, opts, &resolved); err != nil {
+		return err
+	}
 
 	cmd := buildSpawnRunCmd(opts, resolved)
 	if err := appendSpawnSSH(ctx, exec, cmd, opts); err != nil {
@@ -327,6 +333,7 @@ type spawnResolved struct {
 	WorktreePath   string
 	WorktreeVMPath string
 	WorktreeBranch string
+	EvidenceVolume string
 }
 
 func prepareSpawnWorktree(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
@@ -592,13 +599,13 @@ func applySpawnConfigDefaults(opts SpawnOpts, cfg config.Config) SpawnOpts {
 	} else if cfg.Defaults.SeedAuth {
 		opts.SeedAuth = true
 	}
-	// berth is safe-by-default: a forensic spawn handles untrusted artifacts, so
-	// absent an explicit --network (flag or config default) it gets api-only
-	// egress rather than the normal full-internet bridge. This is the single
-	// chokepoint opts.Network is normalized at, before policy enforcement, host
-	// egress checks, and network creation all read it — so image selection, the
-	// risk summary, and the api-only preflight stay in agreement.
-	if opts.Forensic && opts.Network == "" && cfg.Defaults.Network == "" {
+	// berth is safe-by-default: a forensic spawn or one mounting external evidence
+	// handles untrusted artifacts, so absent an explicit --network (flag or config
+	// default) it gets api-only egress rather than the normal full-internet bridge.
+	// This is the single chokepoint opts.Network is normalized at, before policy
+	// enforcement, host egress checks, and network creation all read it — so image
+	// selection, the risk summary, and the api-only preflight stay in agreement.
+	if (opts.Forensic || opts.Evidence != "") && opts.Network == "" && cfg.Defaults.Network == "" {
 		opts.Network = policy.NetworkAPIOnly
 	}
 	return opts
@@ -656,6 +663,21 @@ func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts 
 	fmt.Fprintln(os.Stderr, "warning: VM Docker cgroup is threaded; omitting default --memory/--cpus limits because Docker rejects them here")
 	resolved.Memory = ""
 	resolved.CPUs = ""
+	return nil
+}
+
+// prepareSpawnEvidence ingests --evidence (validate, audit, populate a labeled
+// volume) and records the resulting volume name so buildSpawnRunCmd can mount
+// it read-only. No-op when --evidence is unset.
+func prepareSpawnEvidence(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
+	if opts.Evidence == "" {
+		return nil
+	}
+	volName, err := ingestEvidence(ctx, exec, configuredVMName(), resolved.ContainerName, opts.Evidence, resolved.ImageName, opts.DryRun)
+	if err != nil {
+		return fmt.Errorf("ingest evidence: %w", err)
+	}
+	resolved.EvidenceVolume = volName
 	return nil
 }
 
@@ -718,6 +740,10 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	}
 	if opts.AllowSetupScripts {
 		cmd.AddEnv("BERTH_ALLOW_SETUP_SCRIPTS", "1")
+	}
+	if resolved.EvidenceVolume != "" {
+		cmd.AddNamedVolumeRO(resolved.EvidenceVolume, "/evidence")
+		cmd.AddEnv("BERTH_EVIDENCE", "1")
 	}
 	return cmd
 }

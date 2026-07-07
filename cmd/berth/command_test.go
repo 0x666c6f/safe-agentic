@@ -1049,6 +1049,10 @@ func TestStopCommand_Single(t *testing.T) {
 	if len(rmCmds) == 0 {
 		t.Fatal("expected docker rm command")
 	}
+	volCmds := fake.CommandsMatching("docker volume rm " + containerName + "-evidence")
+	if len(volCmds) == 0 {
+		t.Fatal("expected best-effort docker volume rm for the evidence volume")
+	}
 }
 
 func TestStopCommand_All(t *testing.T) {

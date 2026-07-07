@@ -684,6 +684,77 @@ func TestApplySpawnConfigDefaults_NonForensicLeavesNetworkEmpty(t *testing.T) {
 	}
 }
 
+// ─── --evidence (mount host evidence RO, safe-default api-only network) ───────
+
+func TestApplySpawnConfigDefaults_EvidenceDefaultsNetworkAPIOnly(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Evidence: "/x"}, config.Config{})
+	if opts.Network != policy.NetworkAPIOnly {
+		t.Errorf("Network = %q, want %q", opts.Network, policy.NetworkAPIOnly)
+	}
+}
+
+func TestApplySpawnConfigDefaults_EvidenceRespectsExplicitNetwork(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Evidence: "/x", Network: "managed"}, config.Config{})
+	if opts.Network != "managed" {
+		t.Errorf("Network = %q, want explicit managed to win", opts.Network)
+	}
+}
+
+func TestSpawnEvidenceMountsReadOnly(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{AgentType: "claude"}, spawnResolved{
+		ContainerName:  "agent-x",
+		NetworkMode:    "api-only",
+		EvidenceVolume: "agent-x-evidence",
+	})
+	s := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(s, "type=volume,src=agent-x-evidence,dst=/evidence,readonly") {
+		t.Errorf("run cmd missing evidence RO mount, got: %s", s)
+	}
+	if !strings.Contains(s, "BERTH_EVIDENCE=1") {
+		t.Errorf("run cmd missing BERTH_EVIDENCE=1, got: %s", s)
+	}
+}
+
+func TestSpawnCmdAndRunCmdRegisterEvidenceFlag(t *testing.T) {
+	if spawnCmd.Flags().Lookup("evidence") == nil {
+		t.Error("spawn: --evidence flag is not registered")
+	}
+	if runCmd.Flags().Lookup("evidence") == nil {
+		t.Error("run: --evidence flag is not registered")
+	}
+}
+
+func TestPrepareSpawnEvidence_PopulatesResolvedVolume(t *testing.T) {
+	setTempAuditPath(t)
+	fake := vmexec.NewFake()
+	origPopulate := populateEvidenceVolume
+	defer func() { populateEvidenceVolume = origPopulate }()
+	populateEvidenceVolume = func(vmName, volName, imageName, hostPath string) error { return nil }
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved := spawnResolved{ContainerName: "agent-x", ImageName: "berth:latest"}
+	err := prepareSpawnEvidence(context.Background(), fake, SpawnOpts{Evidence: root}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnEvidence() error = %v", err)
+	}
+	if resolved.EvidenceVolume != "agent-x-evidence" {
+		t.Errorf("EvidenceVolume = %q, want agent-x-evidence", resolved.EvidenceVolume)
+	}
+}
+
+func TestPrepareSpawnEvidence_NoOpWhenUnset(t *testing.T) {
+	resolved := spawnResolved{ContainerName: "agent-x"}
+	if err := prepareSpawnEvidence(context.Background(), vmexec.NewFake(), SpawnOpts{}, &resolved); err != nil {
+		t.Fatalf("prepareSpawnEvidence() error = %v", err)
+	}
+	if resolved.EvidenceVolume != "" {
+		t.Errorf("EvidenceVolume = %q, want empty when --evidence unset", resolved.EvidenceVolume)
+	}
+}
+
 // ─── requireForensicImage (fail-closed berth:forensic image preflight) ────────
 
 func TestRequireForensicImage_MissingImageFailsClosed(t *testing.T) {
