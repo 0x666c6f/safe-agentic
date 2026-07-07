@@ -1,6 +1,6 @@
 # Supply Chain
 
-safe-agentic treats the image build as part of the security story.
+berth treats the image build as part of the security story.
 
 ## Controls in place
 

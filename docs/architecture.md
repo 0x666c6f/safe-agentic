@@ -1,6 +1,6 @@
 # Architecture
 
-safe-agentic is a host-side sandbox runner.
+berth is a host-side sandbox runner.
 
 At a high level:
 
@@ -15,11 +15,11 @@ macOS host
 
 | Component | Role |
 |---|---|
-| `safe-ag` | CLI entrypoint |
-| `safe-ag-tui` | TUI entrypoint |
+| `berth` | CLI entrypoint |
+| `berth-tui` | TUI entrypoint |
 | `vm/setup.sh` | VM bootstrap and hardening |
 | `entrypoint.sh` | container boot and repo clone flow |
-| `cmd/safe-ag` | command implementations |
+| `cmd/berth` | command implementations |
 | `pkg/docker` | Docker runtime, network, volume, SSH helpers |
 | `pkg/fleet` | fleet and pipeline manifest parsing |
 | `pkg/vmexec` | Apple container machine execution wrapper |

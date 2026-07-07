@@ -161,7 +161,7 @@ func TestDefaultRulePathsIncludesNearestProjectRules(t *testing.T) {
 	t.Setenv("HOME", home)
 	repo := filepath.Join(t.TempDir(), "repo")
 	nested := filepath.Join(repo, "a", "b")
-	rulesDir := filepath.Join(repo, ".safe-ag")
+	rulesDir := filepath.Join(repo, ".berth")
 	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 		t.Fatalf("mkdir rules dir: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDefaultRulePathsIncludesNearestProjectRules(t *testing.T) {
 	if len(paths) != 2 {
 		t.Fatalf("DefaultRulePaths() = %v, want user + project paths", paths)
 	}
-	if got, want := paths[0], filepath.Join(home, ".safe-ag", "rules.toml"); !sameFilePath(got, want) {
+	if got, want := paths[0], filepath.Join(home, ".berth", "rules.toml"); !sameFilePath(got, want) {
 		t.Fatalf("user path = %q, want %q", got, want)
 	}
 	if got, want := paths[1], filepath.Join(rulesDir, "rules.toml"); !sameFilePath(got, want) {
@@ -192,12 +192,12 @@ func TestDefaultRulePathsIncludesNearestProjectRules(t *testing.T) {
 	}
 }
 
-func TestUserRulesPathUsesSafeAgConfigHome(t *testing.T) {
+func TestUserRulesPathUsesBerthConfigHome(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("HOME", filepath.Join(t.TempDir(), "host-home"))
-	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
+	t.Setenv("BERTH_CONFIG_HOME", configHome)
 
-	if got, want := UserRulesPath(), filepath.Join(configHome, ".safe-ag", "rules.toml"); got != want {
+	if got, want := UserRulesPath(), filepath.Join(configHome, ".berth", "rules.toml"); got != want {
 		t.Fatalf("UserRulesPath() = %q, want %q", got, want)
 	}
 }

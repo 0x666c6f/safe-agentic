@@ -37,17 +37,17 @@ jobs:
           container system status
 
       - name: Set up VM and image
-        run: ./bin/safe-ag setup
+        run: ./bin/berth setup
 
       - name: Diagnose environment
-        run: ./bin/safe-ag diagnose
+        run: ./bin/berth diagnose
 
       - name: Dry-run spawn smoke
-        run: ./bin/safe-ag spawn claude --dry-run --repo https://github.com/octocat/Hello-World
+        run: ./bin/berth spawn claude --dry-run --repo https://github.com/octocat/Hello-World
 
       - name: Dry-run nested pipeline smoke
-        run: ./bin/safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
+        run: ./bin/berth pipeline examples/pipeline-display-nested.yaml --dry-run
 
       - name: Cleanup containers and auth
         if: always()
-        run: ./bin/safe-ag cleanup --auth
+        run: ./bin/berth cleanup --auth

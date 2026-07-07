@@ -1,6 +1,6 @@
 package svc
 
-import "github.com/0x666c6f/safe-agentic/app/internal/term"
+import "github.com/0x666c6f/berth/app/internal/term"
 
 type TerminalService struct {
 	Manager *term.Manager

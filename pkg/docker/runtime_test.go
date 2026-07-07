@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewRunCmd_Basics(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
 	if !strings.Contains(cmdStr, "docker run") {
@@ -21,14 +21,14 @@ func TestNewRunCmd_Basics(t *testing.T) {
 	if !strings.Contains(cmdStr, "--pull never") {
 		t.Errorf("missing --pull never: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "safe-agentic:latest") {
+	if !strings.Contains(cmdStr, "berth:latest") {
 		t.Errorf("missing image: %s", cmdStr)
 	}
 }
 
 func TestNewRunCmd_TruncatesLongHostname(t *testing.T) {
 	name := "agent-shell-integ-shell-pipeline-root-step-root-step-20260623-161038"
-	cmd := NewRunCmd(name, "safe-agentic:latest")
+	cmd := NewRunCmd(name, "berth:latest")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
 	if !strings.Contains(cmdStr, "--name "+name) {
@@ -40,7 +40,7 @@ func TestNewRunCmd_TruncatesLongHostname(t *testing.T) {
 }
 
 func TestNewRunCmd_Interactive(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	args := cmd.Build()
 	if args[2] != "-it" {
 		t.Errorf("expected -it for interactive, got %s", args[2])
@@ -48,7 +48,7 @@ func TestNewRunCmd_Interactive(t *testing.T) {
 }
 
 func TestNewRunCmd_Detached(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.Detached = true
 	args := cmd.Build()
 	if args[2] != "-d" {
@@ -57,7 +57,7 @@ func TestNewRunCmd_Detached(t *testing.T) {
 }
 
 func TestAddLabel(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddLabel("mykey", "myvalue")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -67,7 +67,7 @@ func TestAddLabel(t *testing.T) {
 }
 
 func TestAddLabel_Sorted(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddLabel("z-key", "z-value")
 	cmd.AddLabel("a-key", "a-value")
 	args := cmd.Build()
@@ -80,7 +80,7 @@ func TestAddLabel_Sorted(t *testing.T) {
 }
 
 func TestAddEnv(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddEnv("MY_VAR", "myvalue")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -90,7 +90,7 @@ func TestAddEnv(t *testing.T) {
 }
 
 func TestAddNamedVolume(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddNamedVolume("myvol", "/mnt/data")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -100,7 +100,7 @@ func TestAddNamedVolume(t *testing.T) {
 }
 
 func TestAddBindMount(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddBindMount("/tmp/worktree", "/workspace", false)
 	cmdStr := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(cmdStr, "type=bind,src=/tmp/worktree,dst=/workspace") {
@@ -109,7 +109,7 @@ func TestAddBindMount(t *testing.T) {
 }
 
 func TestAddBindMountRejectsMountOptionCharacters(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected panic for comma in bind source")
@@ -119,7 +119,7 @@ func TestAddBindMountRejectsMountOptionCharacters(t *testing.T) {
 }
 
 func TestAddEphemeralVolume(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddEphemeralVolume("/workspace")
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -129,7 +129,7 @@ func TestAddEphemeralVolume(t *testing.T) {
 }
 
 func TestAddTmpfs(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddTmpfs("/tmp", "512m", true, true)
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -139,7 +139,7 @@ func TestAddTmpfs(t *testing.T) {
 }
 
 func TestAddTmpfs_NoSize(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddTmpfs("/run", "", false, false)
 	args := cmd.Build()
 	cmdStr := strings.Join(args, " ")
@@ -152,7 +152,7 @@ func TestAddTmpfs_NoSize(t *testing.T) {
 }
 
 func TestAddFlag_RejectsUnsafeFlags(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected panic for unsafe flag")
@@ -162,7 +162,7 @@ func TestAddFlag_RejectsUnsafeFlags(t *testing.T) {
 }
 
 func TestAddFlag_RejectsUnsafeNetworkSplitArgs(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected panic for split --network host")
@@ -172,7 +172,7 @@ func TestAddFlag_RejectsUnsafeNetworkSplitArgs(t *testing.T) {
 }
 
 func TestAppendRuntimeHardening(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{
 		Network:   "agent-claude-abc-net",
 		Memory:    "8g",
@@ -185,7 +185,7 @@ func TestAppendRuntimeHardening(t *testing.T) {
 	checks := []string{
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
-		"--security-opt=seccomp=/etc/safe-agentic/seccomp.json",
+		"--security-opt=seccomp=/etc/berth/seccomp.json",
 		"--read-only",
 		"--network agent-claude-abc-net",
 		"--memory 8g",
@@ -212,7 +212,7 @@ func TestAppendRuntimeHardening(t *testing.T) {
 }
 
 func TestAppendRuntimeHardening_CustomSeccomp(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{SeccompPath: "/custom/seccomp.json"})
 	cmdStr := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(cmdStr, "seccomp=/custom/seccomp.json") {
@@ -221,7 +221,7 @@ func TestAppendRuntimeHardening_CustomSeccomp(t *testing.T) {
 }
 
 func TestAppendRuntimeHardening_NoOptional(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{})
 	cmdStr := strings.Join(cmd.Build(), " ")
 	// Should not have network/memory/cpus/pids when not set
@@ -240,7 +240,7 @@ func TestAppendRuntimeHardening_NoOptional(t *testing.T) {
 }
 
 func TestAppendRuntimeHardening_WorktreeWorkspace(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendRuntimeHardening(cmd, HardeningOpts{WorkspaceSource: "/tmp/worktree"})
 	cmdStr := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(cmdStr, "type=bind,src=/tmp/worktree,dst=/workspace") {
@@ -252,7 +252,7 @@ func TestAppendRuntimeHardening_WorktreeWorkspace(t *testing.T) {
 }
 
 func TestAppendCacheMounts(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendCacheMounts(cmd)
 	cmdStr := strings.Join(cmd.Build(), " ")
 	caches := []string{
@@ -269,7 +269,7 @@ func TestAppendCacheMounts(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddEnv("MY_VAR", "value with spaces")
 	rendered := cmd.Render()
 	// The entire env arg "MY_VAR=value with spaces" contains spaces, so it gets quoted
@@ -279,14 +279,14 @@ func TestRender(t *testing.T) {
 }
 
 func TestRenderRedactsSensitiveEnvAndLabels(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
-	cmd.AddEnv("SAFE_AGENTIC_CLAUDE_AUTH_B64", "secret-auth")
-	cmd.AddEnv("SAFE_AGENTIC_INSTRUCTIONS_B64", "private-task")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
+	cmd.AddEnv("BERTH_CLAUDE_AUTH_B64", "secret-auth")
+	cmd.AddEnv("BERTH_INSTRUCTIONS_B64", "private-task")
 	cmd.AddEnv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
 	cmd.AddEnv("AWS_PROFILE", "dev")
 	cmd.AddEnv("GIT_AUTHOR_NAME", "Agent Bot")
-	cmd.AddLabel("safe-agentic.on-complete-b64", "secret-callback")
-	cmd.AddLabel("safe-agentic.prompt", "Review code")
+	cmd.AddLabel("berth.on-complete-b64", "secret-callback")
+	cmd.AddLabel("berth.prompt", "Review code")
 
 	rendered := cmd.Render()
 	for _, secret := range []string{"secret-auth", "private-task", "host-token", "secret-callback"} {
@@ -295,13 +295,13 @@ func TestRenderRedactsSensitiveEnvAndLabels(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"SAFE_AGENTIC_CLAUDE_AUTH_B64=<redacted>",
-		"SAFE_AGENTIC_INSTRUCTIONS_B64=<redacted>",
+		"BERTH_CLAUDE_AUTH_B64=<redacted>",
+		"BERTH_INSTRUCTIONS_B64=<redacted>",
 		"CLAUDE_CODE_OAUTH_TOKEN=<redacted>",
 		"AWS_PROFILE=dev",
 		"GIT_AUTHOR_NAME=Agent Bot",
-		"safe-agentic.on-complete-b64=<redacted>",
-		"safe-agentic.prompt=Review code",
+		"berth.on-complete-b64=<redacted>",
+		"berth.prompt=Review code",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered command missing %q:\n%s", want, rendered)
@@ -310,10 +310,10 @@ func TestRenderRedactsSensitiveEnvAndLabels(t *testing.T) {
 }
 
 func TestBuild_ImageIsLast(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddFlag("--rm")
 	args := cmd.Build()
-	if args[len(args)-1] != "safe-agentic:latest" {
+	if args[len(args)-1] != "berth:latest" {
 		t.Errorf("image should be last arg, got %s", args[len(args)-1])
 	}
 }

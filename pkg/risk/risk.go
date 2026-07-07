@@ -43,7 +43,7 @@ func SpawnNotices(input SpawnInput) []Notice {
 		notices = append(notices, Notice{"--docker-socket", "mounts the VM Docker daemon socket"})
 	}
 	if input.AllowSetupScripts {
-		notices = append(notices, Notice{"--allow-setup-scripts", "runs repo-controlled safe-agentic.json hooks before the agent starts"})
+		notices = append(notices, Notice{"--allow-setup-scripts", "runs repo-controlled berth.json hooks before the agent starts"})
 	}
 	if input.AutoTrust {
 		notices = append(notices, Notice{"--auto-trust", "skips Claude/Codex project trust prompts"})

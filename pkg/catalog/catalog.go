@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
-	"github.com/0x666c6f/safe-agentic/pkg/fleet"
-	"github.com/0x666c6f/safe-agentic/pkg/validate"
+	"github.com/0x666c6f/berth/pkg/config"
+	"github.com/0x666c6f/berth/pkg/fleet"
+	"github.com/0x666c6f/berth/pkg/validate"
 	"gopkg.in/yaml.v3"
 )
 

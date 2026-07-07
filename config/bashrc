@@ -1,4 +1,4 @@
-# safe-agentic container shell configuration
+# berth container shell configuration
 
 # Zoxide
 eval "$(zoxide init bash)"
@@ -21,7 +21,7 @@ cd /workspace 2>/dev/null || true
 
 # Show context on shell start
 if [ -n "${AGENT_TYPE:-}" ]; then
-  echo "╭─ safe-agentic container"
+  echo "╭─ berth container"
   echo "│  Agent: ${AGENT_TYPE:-shell}"
   echo "│  Workspace: /workspace"
   echo "╰─ Ready."

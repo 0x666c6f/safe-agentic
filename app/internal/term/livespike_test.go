@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
+	"github.com/0x666c6f/berth/app/internal/emit"
 )
 
 func spikeTarget() string {
@@ -44,7 +44,7 @@ func waitOutput(t *testing.T, rec *emit.Recorder, id string, within time.Duratio
 func TestLiveAttachSpike(t *testing.T) {
 	target := spikeTarget()
 	rec := &emit.Recorder{}
-	m := NewManager(rec, DefaultFactory("safe-agentic"))
+	m := NewManager(rec, DefaultFactory("berth"))
 	id, err := m.Open(target, 137, 41)
 	if err != nil {
 		t.Fatalf("Open: %v", err)

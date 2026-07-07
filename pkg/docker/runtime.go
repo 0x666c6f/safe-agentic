@@ -202,7 +202,7 @@ func redactKeyValue(value string, sensitive func(string) bool) string {
 
 func sensitiveEnvKey(key string) bool {
 	upper := strings.ToUpper(key)
-	if strings.HasPrefix(upper, "SAFE_AGENTIC_") && strings.HasSuffix(upper, "_B64") {
+	if strings.HasPrefix(upper, "BERTH_") && strings.HasSuffix(upper, "_B64") {
 		return true
 	}
 	return strings.Contains(upper, "TOKEN") ||
@@ -231,7 +231,7 @@ type HardeningOpts struct {
 func AppendRuntimeHardening(cmd *DockerRunCmd, opts HardeningOpts) {
 	seccomp := opts.SeccompPath
 	if seccomp == "" {
-		seccomp = "/etc/safe-agentic/seccomp.json"
+		seccomp = "/etc/berth/seccomp.json"
 	}
 	cmd.AddFlag("--cap-drop=ALL")
 	cmd.AddFlag("--security-opt=no-new-privileges:true")

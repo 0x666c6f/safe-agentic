@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/inject"
+	"github.com/0x666c6f/berth/pkg/inject"
 )
 
 // claudeTTL bounds how often the Claude usage endpoint is called — it
@@ -100,7 +100,7 @@ func (q *QuotaService) claude() Quota {
 }
 
 func (q *QuotaService) claudeCachePath() string {
-	return filepath.Join(q.home(), ".safe-ag", "claude-usage-cache.json")
+	return filepath.Join(q.home(), ".berth", "claude-usage-cache.json")
 }
 
 type claudeDiskCache struct {

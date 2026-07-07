@@ -8,21 +8,21 @@
 # The judge writes a strict-JSON verdict:
 #   {"winner":"<container>","reason":"...","summary":"<PR-style summary>"}
 # which is printed at the end of the run and saved under
-#   ~/.safe-ag/state/judge/<pipeline>-<stage>-<timestamp>.json
+#   ~/.berth/state/judge/<pipeline>-<stage>-<timestamp>.json
 #
 # Usage:
-#   safe-ag pipeline examples/pipeline-judge-fanout.yaml \
+#   berth pipeline examples/pipeline-judge-fanout.yaml \
 #     --repo git@github.com:org/repo.git \
 #     --var task="Add exponential backoff retry to the HTTP client, with tests"
 #
 # Preview the plan without running anything:
-#   safe-ag pipeline examples/pipeline-judge-fanout.yaml --dry-run
+#   berth pipeline examples/pipeline-judge-fanout.yaml --dry-run
 
 name: judge-fanout
 inputs:
   - name: repo
     description: Repository each candidate works on.
-    default: git@github.com:0x666c6f/safe-agentic.git
+    default: git@github.com:0x666c6f/berth.git
     infer: repo
   - name: task
     description: The task every candidate should implement.

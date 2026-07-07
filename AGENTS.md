@@ -9,8 +9,8 @@ An isolated environment for running AI coding agents (Claude Code, Codex) inside
 ## Architecture
 
 ```text
-macOS Host (safe-ag CLI)
-  -> Apple container machine "safe-agentic" (Alpine 3.22, hardened)
+macOS Host (berth CLI)
+  -> Apple container machine "berth" (Alpine 3.22, hardened)
     -> Docker containers (ephemeral, per-agent)
        - read-only rootfs + tmpfs scratch
        - cap-drop ALL + no-new-privileges
@@ -29,11 +29,11 @@ See `docs/architecture.md`.
 
 ## Key Files
 
-- `bin/safe-ag`: compiled Go CLI.
-- `bin/safe-ag-tui`: compiled Go TUI.
+- `bin/berth`: compiled Go CLI.
+- `bin/berth-tui`: compiled Go TUI.
 - `bin/agent-session.sh`: tmux session wrapper inside the container.
 - `bin/repo-url.sh`: repo URL parsing and clone-path validation.
-- `vm/setup.sh`: idempotent VM bootstrap + hardening; re-run on `safe-ag vm start`.
+- `vm/setup.sh`: idempotent VM bootstrap + hardening; re-run on `berth vm start`.
 - `Dockerfile`: pinned downloads, checksum verification, non-root `agent` user, no sudo.
 - `entrypoint.sh`: container init, git config injection, optional auth/config seeding, repo clone validation, agent launch.
 - `config/bashrc`: shell defaults inside containers.
@@ -54,43 +54,43 @@ See `docs/architecture.md`.
 
 ```bash
 # First-time setup
-safe-ag setup
+berth setup
 
 # Rebuild image
-safe-ag update
+berth update
 
 # Spawn agents
-safe-ag spawn claude --ssh --repo git@github.com:org/repo.git
-safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
-safe-ag spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
+berth spawn claude --ssh --repo git@github.com:org/repo.git
+berth spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
+berth spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
 
 # Management
-safe-ag list
-safe-ag attach <name>
-safe-ag stop <name|--all>
-safe-ag cleanup
-safe-ag tui
+berth list
+berth attach <name>
+berth stop <name|--all>
+berth cleanup
+berth tui
 
 # VM
-safe-ag vm start
-safe-ag vm stop
-safe-ag vm ssh
+berth vm start
+berth vm stop
+berth vm ssh
 ```
 
 ```bash
 # Sessions, output, workflows
-safe-ag peek <container>
-safe-ag output <name>|--latest
-safe-ag summary <name>|--latest
-safe-ag diff <name>|--latest [--stat]
-safe-ag checkpoint create <name> [label]
-safe-ag checkpoint list <name>
-safe-ag checkpoint revert <name> <ref>
-safe-ag todo add <name> "text"
-safe-ag todo list <name>
-safe-ag retry <name>|--latest [--feedback "text"]
-safe-ag pr <name> [--title T --base B]
-safe-ag review <name> [--base B]
+berth peek <container>
+berth output <name>|--latest
+berth summary <name>|--latest
+berth diff <name>|--latest [--stat]
+berth checkpoint create <name> [label]
+berth checkpoint list <name>
+berth checkpoint revert <name> <ref>
+berth todo add <name> "text"
+berth todo list <name>
+berth retry <name>|--latest [--feedback "text"]
+berth pr <name> [--title T --base B]
+berth review <name> [--base B]
 ```
 
 ## Build And Verify
@@ -101,9 +101,9 @@ Minimum bar for changes:
 - `make build-all`
 - `go test ./...`
 - if touching live integration harness, prefer:
-  - `SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag`
-  - `SAFE_AGENTIC_DEEP_INTEGRATION=1 SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag -run <focused-case>`
-- prefer smoke tests for touched flows: `safe-ag setup`, `safe-ag spawn shell`, cleanup path
+  - `BERTH_INTEGRATION=1 go test -tags integration ./cmd/berth`
+  - `BERTH_DEEP_INTEGRATION=1 BERTH_INTEGRATION=1 go test -tags integration ./cmd/berth -run <focused-case>`
+- prefer smoke tests for touched flows: `berth setup`, `berth spawn shell`, cleanup path
 - validate touched repo-local skills
 - update docs when behavior/flags/security posture changes
 
@@ -115,10 +115,10 @@ make build-all
 go test ./...
 
 # Live integration
-SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag
+BERTH_INTEGRATION=1 go test -tags integration ./cmd/berth
 
 # Heavier live cases
-SAFE_AGENTIC_DEEP_INTEGRATION=1 SAFE_AGENTIC_INTEGRATION=1 go test -tags integration ./cmd/safe-ag -run <focused-case>
+BERTH_DEEP_INTEGRATION=1 BERTH_INTEGRATION=1 go test -tags integration ./cmd/berth -run <focused-case>
 
 # Skill validation
 codex skills validate .codex/skills/<skill-name>
@@ -133,7 +133,7 @@ If fixing a bug, add the smallest regression check that fits.
 - quote expansions unless word splitting required
 - prefer small helpers over long inline blocks
 - use kebab-case filenames
-- CLI subcommands live under `cmd/safe-ag`
+- CLI subcommands live under `cmd/berth`
 - comment non-obvious trust boundaries, mounts, auth, isolation details
 
 Implementation patterns:
@@ -142,8 +142,8 @@ Implementation patterns:
 - keep read-only rootfs pattern intact: baked configs copied into tmpfs at runtime
 - validate repo clone paths via `repo_clone_path()`
 - build context from tracked files only
-- `SAFE_AGENTIC_VM_NAME` overrides the target VM; use it for isolated test VMs
-- `safe-ag setup` configures Apple vmnet egress via host IP forwarding and PF anchor `com.apple/safe-agentic`; macOS admin approval may be required.
+- `BERTH_VM_NAME` overrides the target VM; use it for isolated test VMs
+- `berth setup` configures Apple vmnet egress via host IP forwarding and PF anchor `com.apple/berth`; macOS admin approval may be required.
 
 ## Security Model
 
@@ -193,7 +193,7 @@ Repo-local skills currently cover:
 
 ## Known Limitations
 
-- Default posture is `home-mount=none` — the host home is never shared with the VM. Apple `container` cannot mount a single host directory into a machine, so `--worktree` is opt-in: `safe-ag setup --enable-worktrees` switches the machine to `home-mount=rw`, and `vm/setup.sh` binds only the worktrees root to `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Enabling this weakens the VM boundary (rw home share); keep secrets out of the worktrees root. `safe-ag diagnose` reports the posture; `safe-ag setup`/`safe-ag vm start` reconcile in either direction. Worktree paths outside the root are rejected. See `docs/security/threat-model.md`.
+- Default posture is `home-mount=none` — the host home is never shared with the VM. Apple `container` cannot mount a single host directory into a machine, so `--worktree` is opt-in: `berth setup --enable-worktrees` switches the machine to `home-mount=rw`, and `vm/setup.sh` binds only the worktrees root to `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Enabling this weakens the VM boundary (rw home share); keep secrets out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile in either direction. Worktree paths outside the root are rejected. See `docs/security/threat-model.md`.
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 
@@ -210,8 +210,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/). Commit prefixe
 
 Scopes optional: `feat(tui):`, `fix(ci):`, etc.
 
-Every push to `main` triggers `.github/workflows/release.yml` which runs CI, computes version, builds universal macOS `safe-ag` and `safe-ag-tui` binaries, creates a GitHub Release with changelog, and updates the Homebrew tap (`0x666c6f/homebrew-tap`).
+Every push to `main` triggers `.github/workflows/release.yml` which runs CI, computes version, builds universal macOS `berth` and `berth-tui` binaries, creates a GitHub Release with changelog, and updates the Homebrew tap (`0x666c6f/homebrew-tap`).
 
-`safe-ag --version` prints `safe-agentic vX.Y.Z`. The release workflow injects the version with Go ldflags.
+`berth --version` prints `berth vX.Y.Z`. The release workflow injects the version with Go ldflags.
 
 Keep commits focused. Before handoff, prefer full gate over partial checks.

@@ -41,8 +41,8 @@ func TestLabelKeysUniqueAndNonEmpty(t *testing.T) {
 		seen[key] = struct{}{}
 	}
 
-	if AppValue != "safe-agentic" {
-		t.Fatalf("AppValue = %q, want %q", AppValue, "safe-agentic")
+	if AppValue != "berth" {
+		t.Fatalf("AppValue = %q, want %q", AppValue, "berth")
 	}
 	if ContainerFilter() != "name=^agent-" {
 		t.Fatalf("ContainerFilter() = %q", ContainerFilter())

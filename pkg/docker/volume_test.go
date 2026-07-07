@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -42,13 +42,13 @@ func TestCreateLabeledVolume_VerifyLabels(t *testing.T) {
 		t.Fatal("expected docker volume create command")
 	}
 	cmdStr := strings.Join(cmds[0], " ")
-	if !strings.Contains(cmdStr, "app=safe-agentic") {
+	if !strings.Contains(cmdStr, "app=berth") {
 		t.Errorf("missing app label in: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "safe-agentic.type=auth") {
+	if !strings.Contains(cmdStr, "berth.type=auth") {
 		t.Errorf("missing type label in: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "safe-agentic.parent=agent-claude-abc") {
+	if !strings.Contains(cmdStr, "berth.parent=agent-claude-abc") {
 		t.Errorf("missing parent label in: %s", cmdStr)
 	}
 	if !strings.Contains(cmdStr, "myvol") {
@@ -70,8 +70,8 @@ func TestCreateLabeledVolume_Error(t *testing.T) {
 
 func TestAuthVolumeName_Shared(t *testing.T) {
 	name := AuthVolumeName("claude", false, "agent-claude-abc")
-	if name != "safe-agentic-claude-auth" {
-		t.Errorf("expected safe-agentic-claude-auth, got %s", name)
+	if name != "berth-claude-auth" {
+		t.Errorf("expected berth-claude-auth, got %s", name)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestAuthVolumeName_Ephemeral(t *testing.T) {
 
 func TestGHAuthVolumeName(t *testing.T) {
 	name := GHAuthVolumeName("claude")
-	if name != "safe-agentic-claude-gh-auth" {
-		t.Errorf("expected safe-agentic-claude-gh-auth, got %s", name)
+	if name != "berth-claude-gh-auth" {
+		t.Errorf("expected berth-claude-gh-auth, got %s", name)
 	}
 }

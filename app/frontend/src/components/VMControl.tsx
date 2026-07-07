@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 
 type VMAction = { key: string; label: string; confirm: boolean; danger?: boolean; exec: () => Promise<string> };
 
@@ -34,7 +34,7 @@ export function VMControl() {
     finally { setBusy(null); }
   };
 
-  // Diagnose runs the environment checklist (safe-ag diagnose) and shows the
+  // Diagnose runs the environment checklist (berth diagnose) and shows the
   // raw output in a dismissable panel — no toast, since it's multi-line.
   const diagnose = async () => {
     const fn = (AgentService as any).Diagnose;
@@ -61,7 +61,7 @@ export function VMControl() {
     <div className={`flex items-center justify-end gap-1.5 border-t px-3 py-1 text-xs ${vmOk ? "border-neutral-800 bg-neutral-900" : "border-red-900 bg-red-950/80"}`}>
       {!vmOk && <span className="min-w-0 flex-1 truncate text-red-300">VM unreachable: {vmError}</span>}
       {!vmOk && (
-        <button disabled={diagBusy} title="Run safe-ag diagnose (environment checklist)"
+        <button disabled={diagBusy} title="Run berth diagnose (environment checklist)"
           className="rounded bg-neutral-800 px-2 py-0.5 text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
           onClick={diagnose}>
           {diagBusy ? "diagnosing…" : "Diagnose"}
@@ -69,7 +69,7 @@ export function VMControl() {
       )}
       {open && ACTIONS.map((a) => (
         <button key={a.key} disabled={!!busy}
-          title={a.key === "repair" ? "Re-run safe-ag setup (re-harden, reconcile Docker/NAT)" : `safe-ag vm ${a.key}`}
+          title={a.key === "repair" ? "Re-run berth setup (re-harden, reconcile Docker/NAT)" : `berth vm ${a.key}`}
           className={`rounded px-2 py-0.5 disabled:opacity-40 ${armed === a.key ? "bg-red-800 text-red-100" : a.danger ? "bg-neutral-800 text-neutral-300 hover:bg-red-900/60" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}`}
           onClick={() => (a.confirm && armed !== a.key ? setArmed(a.key) : fire(a))}>
           {armed === a.key ? "sure?" : a.label}

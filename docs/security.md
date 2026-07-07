@@ -1,6 +1,6 @@
 # Security
 
-safe-agentic is designed around one rule:
+berth is designed around one rule:
 
 > dangerous capabilities should be explicit, not ambient
 
@@ -28,7 +28,7 @@ It does get:
 
 ## Important framing
 
-safe-agentic does not try to constrain what the agent does inside the sandbox.
+berth does not try to constrain what the agent does inside the sandbox.
 
 It constrains:
 - what the sandbox can reach

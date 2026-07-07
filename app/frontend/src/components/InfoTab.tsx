@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
-import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
+import { Service } from "../../bindings/github.com/0x666c6f/berth/app/internal/state";
 import { useStore } from "../store";
 import { errText } from "../types";
 

@@ -11,7 +11,7 @@ func TestHeaderLoadingAndUpdate(t *testing.T) {
 
 	h.ShowLoading()
 	loading := h.view.GetText(true)
-	if !strings.Contains(loading, "safe-agentic") || !strings.Contains(loading, "Loading...") || !strings.Contains(loading, vmName) {
+	if !strings.Contains(loading, "berth") || !strings.Contains(loading, "Loading...") || !strings.Contains(loading, vmName) {
 		t.Fatalf("loading header = %q", loading)
 	}
 

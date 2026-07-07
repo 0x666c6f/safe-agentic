@@ -249,11 +249,11 @@ func TestDefaultEventsPath(t *testing.T) {
 	}
 }
 
-func TestDefaultEventsPath_UsesSafeAgStateHome(t *testing.T) {
+func TestDefaultEventsPath_UsesBerthStateHome(t *testing.T) {
 	t.Setenv("HOME", "/custom/home")
 	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg/config")
 	path := DefaultEventsPath()
-	expected := "/custom/home/.safe-ag/state/events.jsonl"
+	expected := "/custom/home/.berth/state/events.jsonl"
 	if path != expected {
 		t.Errorf("DefaultEventsPath = %q, want %q", path, expected)
 	}

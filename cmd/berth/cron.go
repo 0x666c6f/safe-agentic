@@ -1,0 +1,422 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/0x666c6f/berth/pkg/config"
+	"github.com/0x666c6f/berth/pkg/events"
+	"github.com/spf13/cobra"
+)
+
+// CronJob represents a scheduled pipeline/fleet/agent run.
+type CronJob struct {
+	Name     string   `json:"name"`
+	Schedule string   `json:"schedule"` // cron expression: "0 */6 * * *" or shorthand "every 6h"
+	Command  string   `json:"command"`  // "pipeline pipeline.yaml" or "fleet agents.yaml" or "spawn claude ..."
+	Args     []string `json:"args,omitempty"`
+	Enabled  bool     `json:"enabled"`
+	LastRun  string   `json:"last_run,omitempty"`
+	LastErr  string   `json:"last_error,omitempty"`
+}
+
+// CronConfig holds all scheduled jobs.
+type CronConfig struct {
+	Jobs []CronJob `json:"jobs"`
+}
+
+var cronCmd = &cobra.Command{
+	Use:     "cron",
+	Short:   "Manage scheduled agent/pipeline runs",
+	GroupID: groupSetup,
+}
+
+var cronAddCmd = &cobra.Command{
+	Use:   "add <name> <schedule> <command...>",
+	Short: "Add a scheduled job",
+	Long: `Add a cron job that runs a berth command on a schedule.
+
+Schedule formats:
+  "every 1h"           Run every hour
+  "every 6h"           Run every 6 hours
+  "every 30m"          Run every 30 minutes
+  "daily 09:00"        Run daily at 09:00
+  "0 */6 * * *"        Standard cron expression
+
+Command is any berth command (without the 'berth' prefix):
+  pipeline pipeline.yaml
+  fleet agents.yaml
+  spawn claude --ssh --repo git@github.com:org/repo.git --prompt "Run tests"
+
+Examples:
+  berth cron add nightly-review "daily 02:00" pipeline pipeline.yaml
+  berth cron add hourly-check "every 1h" spawn claude --repo ... --prompt "Check status"`,
+	Args: cobra.MinimumNArgs(3),
+	RunE: runCronAdd,
+}
+
+var cronListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List scheduled jobs",
+	RunE:  runCronList,
+}
+
+var cronRemoveCmd = &cobra.Command{
+	Use:   "remove <name>",
+	Short: "Remove a scheduled job",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCronRemove,
+}
+
+var cronEnableCmd = &cobra.Command{
+	Use:   "enable <name>",
+	Short: "Enable a disabled job",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCronEnable,
+}
+
+var cronDisableCmd = &cobra.Command{
+	Use:   "disable <name>",
+	Short: "Disable a job without removing it",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCronDisable,
+}
+
+var cronRunCmd = &cobra.Command{
+	Use:   "run <name>",
+	Short: "Manually trigger a scheduled job now",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCronRun,
+}
+
+var cronDaemonCmd = &cobra.Command{
+	Use:   "daemon",
+	Short: "Start the cron scheduler daemon (foreground)",
+	RunE:  runCronDaemon,
+}
+
+func init() {
+	cronCmd.AddCommand(cronAddCmd, cronListCmd, cronRemoveCmd, cronEnableCmd, cronDisableCmd, cronRunCmd, cronDaemonCmd)
+	rootCmd.AddCommand(cronCmd)
+}
+
+func cronConfigPath() string {
+	return config.CronPath()
+}
+
+func loadCronConfig() (*CronConfig, error) {
+	path := cronConfigPath()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return &CronConfig{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cfg CronConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func saveCronConfig(cfg *CronConfig) error {
+	path := cronConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+func runCronAdd(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	schedule := args[1]
+	command := strings.Join(args[2:], " ")
+
+	cfg, err := loadCronConfig()
+	if err != nil {
+		return err
+	}
+
+	// Check for duplicate name
+	for _, j := range cfg.Jobs {
+		if j.Name == name {
+			return fmt.Errorf("job %q already exists. Remove it first with: berth cron remove %s", name, name)
+		}
+	}
+
+	// Validate schedule
+	if _, err := parseSchedule(schedule); err != nil {
+		return fmt.Errorf("invalid schedule %q: %w", schedule, err)
+	}
+
+	cfg.Jobs = append(cfg.Jobs, CronJob{
+		Name:     name,
+		Schedule: schedule,
+		Command:  command,
+		Args:     append([]string{}, args[2:]...),
+		Enabled:  true,
+	})
+
+	if err := saveCronConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Added cron job %q: %s → berth %s\n", name, schedule, command)
+	return nil
+}
+
+func runCronList(cmd *cobra.Command, args []string) error {
+	cfg, err := loadCronConfig()
+	if err != nil {
+		return err
+	}
+	if len(cfg.Jobs) == 0 {
+		fmt.Println("No cron jobs configured. Add one with: berth cron add <name> <schedule> <command>")
+		return nil
+	}
+
+	fmt.Printf("%-20s %-15s %-8s %-20s %s\n", "NAME", "SCHEDULE", "ENABLED", "LAST RUN", "COMMAND")
+	for _, j := range cfg.Jobs {
+		enabled := "yes"
+		if !j.Enabled {
+			enabled = "no"
+		}
+		lastRun := "-"
+		if j.LastRun != "" {
+			lastRun = j.LastRun
+		}
+		fmt.Printf("%-20s %-15s %-8s %-20s %s\n", j.Name, j.Schedule, enabled, lastRun, cronJobCommand(j))
+	}
+	return nil
+}
+
+func runCronRemove(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	cfg, err := loadCronConfig()
+	if err != nil {
+		return err
+	}
+	var kept []CronJob
+	found := false
+	for _, j := range cfg.Jobs {
+		if j.Name == name {
+			found = true
+			continue
+		}
+		kept = append(kept, j)
+	}
+	if !found {
+		return fmt.Errorf("job %q not found", name)
+	}
+	cfg.Jobs = kept
+	if err := saveCronConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Removed cron job %q\n", name)
+	return nil
+}
+
+func runCronEnable(cmd *cobra.Command, args []string) error {
+	return setCronEnabled(args[0], true)
+}
+
+func runCronDisable(cmd *cobra.Command, args []string) error {
+	return setCronEnabled(args[0], false)
+}
+
+func setCronEnabled(name string, enabled bool) error {
+	cfg, err := loadCronConfig()
+	if err != nil {
+		return err
+	}
+	for i, j := range cfg.Jobs {
+		if j.Name == name {
+			cfg.Jobs[i].Enabled = enabled
+			if err := saveCronConfig(cfg); err != nil {
+				return err
+			}
+			state := "enabled"
+			if !enabled {
+				state = "disabled"
+			}
+			fmt.Printf("Job %q %s\n", name, state)
+			return nil
+		}
+	}
+	return fmt.Errorf("job %q not found", name)
+}
+
+func runCronRun(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	cfg, err := loadCronConfig()
+	if err != nil {
+		return err
+	}
+	for i, j := range cfg.Jobs {
+		if j.Name == name {
+			fmt.Printf("Running job %q: berth %s\n", name, cronJobCommand(j))
+			runErr := executeCronJob(j)
+			cfg.Jobs[i].LastRun = time.Now().Format(time.RFC3339)
+			if runErr != nil {
+				cfg.Jobs[i].LastErr = runErr.Error()
+				events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": name, "error": runErr.Error()})
+			} else {
+				cfg.Jobs[i].LastErr = ""
+				events.Emit(events.DefaultEventsPath(), "cron.completed", map[string]string{"job": name})
+			}
+			saveCronConfig(cfg)
+			return runErr
+		}
+	}
+	return fmt.Errorf("job %q not found", name)
+}
+
+func runCronDaemon(cmd *cobra.Command, args []string) error {
+	fmt.Println("berth cron daemon started. Press Ctrl+C to stop.")
+	fmt.Println("Checking jobs every 60 seconds...")
+
+	for {
+		cfg, err := loadCronConfig()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+			time.Sleep(60 * time.Second)
+			continue
+		}
+
+		now := time.Now()
+		for i, j := range cfg.Jobs {
+			if !j.Enabled {
+				continue
+			}
+			if shouldRun(j, now) {
+				fmt.Printf("[%s] Running job %q: berth %s\n", now.Format("15:04:05"), j.Name, cronJobCommand(j))
+				runErr := executeCronJob(j)
+				cfg.Jobs[i].LastRun = now.Format(time.RFC3339)
+				if runErr != nil {
+					cfg.Jobs[i].LastErr = runErr.Error()
+					events.Emit(events.DefaultEventsPath(), "cron.failed", map[string]string{"job": j.Name, "error": runErr.Error()})
+					fmt.Fprintf(os.Stderr, "[%s] Job %q failed: %v\n", now.Format("15:04:05"), j.Name, runErr)
+				} else {
+					cfg.Jobs[i].LastErr = ""
+					events.Emit(events.DefaultEventsPath(), "cron.completed", map[string]string{"job": j.Name})
+					fmt.Printf("[%s] Job %q completed\n", now.Format("15:04:05"), j.Name)
+				}
+				saveCronConfig(cfg)
+			}
+		}
+
+		time.Sleep(60 * time.Second)
+	}
+}
+
+func executeCronJob(job CronJob) error {
+	parts := cronJobArgs(job)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty command")
+	}
+
+	// Execute as subprocess: berth <command parts>
+	berthBin, err := os.Executable()
+	if err != nil {
+		berthBin = "berth"
+	}
+
+	c := exec.Command(berthBin, parts...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+func cronJobArgs(job CronJob) []string {
+	if len(job.Args) > 0 {
+		return append([]string{}, job.Args...)
+	}
+	return strings.Fields(job.Command)
+}
+
+func cronJobCommand(job CronJob) string {
+	if job.Command != "" {
+		return job.Command
+	}
+	return strings.Join(job.Args, " ")
+}
+
+// shouldRun determines if a job should run based on its schedule and last run time.
+func shouldRun(job CronJob, now time.Time) bool {
+	interval, err := parseSchedule(job.Schedule)
+	if err != nil {
+		return false
+	}
+
+	if job.LastRun == "" {
+		return true // never run before
+	}
+
+	lastRun, err := time.Parse(time.RFC3339, job.LastRun)
+	if err != nil {
+		return true // can't parse last run, run now
+	}
+
+	return now.Sub(lastRun) >= interval
+}
+
+// parseSchedule parses schedule strings into a duration.
+// Supports: "every Xh", "every Xm", "daily HH:MM", basic intervals.
+func parseSchedule(schedule string) (time.Duration, error) {
+	schedule = strings.TrimSpace(schedule)
+
+	// "every Xh" / "every Xm" / "every Xs"
+	if strings.HasPrefix(schedule, "every ") {
+		durStr := strings.TrimPrefix(schedule, "every ")
+		d, err := time.ParseDuration(durStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q", durStr)
+		}
+		if d < time.Minute {
+			return 0, fmt.Errorf("minimum interval is 1 minute")
+		}
+		return d, nil
+	}
+
+	// "daily HH:MM" → 24h interval
+	if strings.HasPrefix(schedule, "daily") {
+		return 24 * time.Hour, nil
+	}
+
+	// Standard cron expressions → approximate with intervals
+	// "*/5 * * * *" → every 5 minutes
+	// "0 */6 * * *" → every 6 hours
+	// "0 0 * * *" → daily
+	parts := strings.Fields(schedule)
+	if len(parts) == 5 {
+		// Minute field
+		if strings.HasPrefix(parts[0], "*/") {
+			var mins int
+			fmt.Sscanf(parts[0], "*/%d", &mins)
+			if mins > 0 {
+				return time.Duration(mins) * time.Minute, nil
+			}
+		}
+		// Hour field
+		if strings.HasPrefix(parts[1], "*/") {
+			var hrs int
+			fmt.Sscanf(parts[1], "*/%d", &hrs)
+			if hrs > 0 {
+				return time.Duration(hrs) * time.Hour, nil
+			}
+		}
+		// Any fixed-time daily cron expression → daily
+		return 24 * time.Hour, nil
+	}
+
+	return 0, fmt.Errorf("unrecognized schedule format: %q (use 'every Xh', 'daily HH:MM', or cron expression)", schedule)
+}

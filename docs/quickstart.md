@@ -7,74 +7,74 @@ If you want the shortest working path, this is it:
 ```bash
 open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
-brew install safe-agentic
-safe-ag setup
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
-safe-ag peek --latest
+brew install berth
+berth setup
+berth spawn claude --repo https://github.com/myorg/myrepo.git
+berth peek --latest
 ```
 
 Use `--ssh` instead of a public HTTPS repo when the repository is private.
 
 ## 1. Install the prerequisites
 
-Install Apple container from the signed pkg on GitHub Releases, then install safe-agentic:
+Install Apple container from the signed pkg on GitHub Releases, then install berth:
 
 ```bash
 open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
-brew install safe-agentic
+brew install berth
 ```
 
 From source:
 
 ```bash
 open https://github.com/apple/container/releases
-git clone git@github.com:0x666c6f/safe-agentic.git
-cd safe-agentic
+git clone git@github.com:0x666c6f/berth.git
+cd berth
 make build-all
 export PATH="$PWD/bin:$PATH"
 ```
 
-Canonical CLI: `safe-ag`.
+Canonical CLI: `berth`.
 
 Agent-facing shortcuts also ship in `bin/`:
-- `safe-ag-claude`
-- `safe-ag-codex`
+- `berth-claude`
+- `berth-codex`
 
 ## 2. Build the sandbox once
 
 ```bash
-safe-ag setup
-safe-ag diagnose
+berth setup
+berth diagnose
 ```
 
-`safe-ag setup` will:
+`berth setup` will:
 
 - create the Apple container machine if needed
 - configure Apple vmnet host NAT for VM and nested Docker egress
 - reapply VM hardening
 - build the local Docker image
 
-If setup fails, keep `safe-ag diagnose` output. It is the fastest next debugging step.
+If setup fails, keep `berth diagnose` output. It is the fastest next debugging step.
 
 ## 3. Spawn the first agent
 
 Public repo:
 
 ```bash
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
+berth spawn claude --repo https://github.com/myorg/myrepo.git
 ```
 
 Private repo:
 
 ```bash
-safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+berth spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 ```
 
 Immediate task:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --ssh \
   --repo git@github.com:myorg/myrepo.git \
   --prompt "Fix the failing CI tests"
@@ -83,9 +83,9 @@ safe-ag spawn claude \
 ## 4. Check that the session is alive
 
 ```bash
-safe-ag list
-safe-ag peek --latest
-safe-ag attach --latest
+berth list
+berth peek --latest
+berth attach --latest
 ```
 
 Expect:
@@ -98,9 +98,9 @@ Expect:
 ## 5. Review what changed
 
 ```bash
-safe-ag diff --latest
-safe-ag output --latest
-safe-ag review --latest
+berth diff --latest
+berth output --latest
+berth review --latest
 ```
 
 Typical loop:
@@ -112,9 +112,9 @@ Typical loop:
 ## 6. Clean up when you are done
 
 ```bash
-safe-ag stop --latest
-safe-ag cleanup
-safe-ag cleanup --auth
+berth stop --latest
+berth cleanup
+berth cleanup --auth
 ```
 
 Use `cleanup --auth` only when you want to remove shared and isolated auth volumes too.

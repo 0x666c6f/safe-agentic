@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { QuotaService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { QuotaService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 
 type Win = { label: string; percent: number; resetsAt: number };
 type Quota = { agent: string; ok: boolean; error: string; windows: Win[] };

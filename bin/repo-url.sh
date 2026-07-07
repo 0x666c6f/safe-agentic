@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-safe_agentic_repo_path_from_url() {
+berth_repo_path_from_url() {
   local repo_url="$1"
   local clone_path owner repo
 
@@ -28,9 +28,9 @@ safe_agentic_repo_path_from_url() {
 }
 
 repo_path_from_url() {
-  safe_agentic_repo_path_from_url "$@"
+  berth_repo_path_from_url "$@"
 }
 
 repo_clone_path() {
-  safe_agentic_repo_path_from_url "$@"
+  berth_repo_path_from_url "$@"
 }

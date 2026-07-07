@@ -13,8 +13,8 @@ WORKTREES_MOUNT=/worktrees
 # after defaults.worktrees_dir changes); this sentinel stores the exact host
 # path so a re-run can detect a changed root and rebind. /run is tmpfs, so it
 # resets on reboot — exactly when the bind is recreated. Keep this path in sync
-# with worktreesSentinelPath in cmd/safe-ag/setup.go.
-WORKTREES_SENTINEL=/run/safe-ag-worktrees-source
+# with worktreesSentinelPath in cmd/berth/setup.go.
+WORKTREES_SENTINEL=/run/berth-worktrees-source
 
 TOTAL_STEPS=5
 step() {
@@ -36,11 +36,11 @@ as_root() {
 
 install_exec_helper() {
   as_root mkdir -p /usr/local/bin
-  as_root tee /usr/local/bin/safe-ag-exec >/dev/null <<'EOF'
+  as_root tee /usr/local/bin/berth-exec >/dev/null <<'EOF'
 #!/bin/sh
 set -eu
 if [ "$#" -lt 1 ]; then
-  echo "usage: safe-ag-exec <command> [base64-arg...]" >&2
+  echo "usage: berth-exec <command> [base64-arg...]" >&2
   exit 64
 fi
 cmd="$1"
@@ -56,7 +56,7 @@ while [ "$encoded_count" -gt 0 ]; do
 done
 exec "$cmd" "$@"
 EOF
-  as_root chmod 0755 /usr/local/bin/safe-ag-exec
+  as_root chmod 0755 /usr/local/bin/berth-exec
 }
 
 wait_for_docker_process_exit() {
@@ -80,7 +80,7 @@ start_dockerd_once() {
   as_root sh -c 'nohup dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &'
 }
 
-echo "==> Setting up safe-agentic VM..."
+echo "==> Setting up berth VM..."
 
 # =============================================================================
 # Harden VM host access
@@ -129,7 +129,7 @@ if [ -n "$WORKTREES_HOST" ]; then
         echo "    WARNING: could not bind $WORKTREES_HOST -> $WORKTREES_MOUNT"
       fi
     else
-      echo "    WARNING: worktrees dir $WORKTREES_HOST not visible in VM; needs home-mount=rw and a fresh VM boot after changing worktrees_dir. Enable with: safe-ag setup --enable-worktrees"
+      echo "    WARNING: worktrees dir $WORKTREES_HOST not visible in VM; needs home-mount=rw and a fresh VM boot after changing worktrees_dir. Enable with: berth setup --enable-worktrees"
     fi
   fi
 fi
@@ -280,15 +280,19 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # =============================================================================
-# Egress guardrails for safe-agentic managed bridges
+# Egress guardrails for berth managed bridges
 # =============================================================================
 step 5 "Configuring egress guardrails..."
 as_root iptables -nL DOCKER-USER >/dev/null 2>&1 || as_root iptables -N DOCKER-USER
-as_root iptables -N SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
-as_root iptables -F SAFE_AGENTIC_EGRESS
-as_root iptables -C DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 \
-  || as_root iptables -I DOCKER-USER 1 -j SAFE_AGENTIC_EGRESS
-as_root iptables -A SAFE_AGENTIC_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+# Drop the pre-rename chain if this VM was set up as safe-agentic
+as_root iptables -D DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -F SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -X SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -N BERTH_EGRESS >/dev/null 2>&1 || true
+as_root iptables -F BERTH_EGRESS
+as_root iptables -C DOCKER-USER -j BERTH_EGRESS >/dev/null 2>&1 \
+  || as_root iptables -I DOCKER-USER 1 -j BERTH_EGRESS
+as_root iptables -A BERTH_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 for cidr in \
   0.0.0.0/8 \
   10.0.0.0/8 \
@@ -300,13 +304,13 @@ for cidr in \
   224.0.0.0/4 \
   240.0.0.0/4 \
 ; do
-  as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -d "$cidr" -j REJECT
+  as_root iptables -A BERTH_EGRESS -i 'bt+' -d "$cidr" -j REJECT
 done
 for port in 22 80 443; do
-  as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -p tcp --dport "$port" -j RETURN
+  as_root iptables -A BERTH_EGRESS -i 'bt+' -p tcp --dport "$port" -j RETURN
 done
-as_root iptables -A SAFE_AGENTIC_EGRESS -i 'sa+' -j REJECT
-as_root iptables -A SAFE_AGENTIC_EGRESS -j RETURN
+as_root iptables -A BERTH_EGRESS -i 'bt+' -j REJECT
+as_root iptables -A BERTH_EGRESS -j RETURN
 
 echo "==> Docker $(docker version --format '{{.Server.Version}}') is ready."
 echo "==> VM setup complete."

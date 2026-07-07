@@ -3,12 +3,12 @@
 set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
-REPO_URL_LIB="/usr/local/lib/safe-agentic/repo-url.sh"
-AGENT_SESSION_LIB="/usr/local/lib/safe-agentic/agent-session.sh"
-TMUX_SESSION_NAME="${SAFE_AGENTIC_TMUX_SESSION_NAME:-safe-agentic}"
-TMUX_HISTORY_LIMIT="${SAFE_AGENTIC_TMUX_HISTORY_LIMIT:-500000}"
+REPO_URL_LIB="/usr/local/lib/berth/repo-url.sh"
+AGENT_SESSION_LIB="/usr/local/lib/berth/agent-session.sh"
+TMUX_SESSION_NAME="${BERTH_TMUX_SESSION_NAME:-berth}"
+TMUX_HISTORY_LIMIT="${BERTH_TMUX_HISTORY_LIMIT:-500000}"
 # shellcheck disable=SC2034  # used by agent-session.sh via env
-SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
+SESSION_STATE_DIR="${BERTH_SESSION_STATE_DIR:-/workspace/.berth}"
 
 if [ -f "$REPO_URL_LIB" ]; then
   # shellcheck disable=SC1090,SC1091
@@ -18,9 +18,9 @@ else
   source "$ENTRYPOINT_DIR/bin/repo-url.sh"
 fi
 
-if [ "${SAFE_AGENTIC_INTERNAL_DOCKERD:-}" = "1" ]; then
-  SOCKET_PATH="${SAFE_AGENTIC_DOCKER_SOCKET:-/run/safe-agentic-docker/docker.sock}"
-  DATA_ROOT="${SAFE_AGENTIC_DOCKER_DATA_ROOT:-/var/lib/docker}"
+if [ "${BERTH_INTERNAL_DOCKERD:-}" = "1" ]; then
+  SOCKET_PATH="${BERTH_DOCKER_SOCKET:-/run/berth-docker/docker.sock}"
+  DATA_ROOT="${BERTH_DOCKER_DATA_ROOT:-/var/lib/docker}"
 
   echo "[entrypoint] Launching internal Docker daemon..."
   mkdir -p "$(dirname "$SOCKET_PATH")" "$DATA_ROOT"
@@ -33,8 +33,8 @@ ensure_codex_config() {
 
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
-  if [ -n "${SAFE_AGENTIC_CODEX_CONFIG_B64:-}" ]; then
-    echo "$SAFE_AGENTIC_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
+  if [ -n "${BERTH_CODEX_CONFIG_B64:-}" ]; then
+    echo "$BERTH_CODEX_CONFIG_B64" | base64 -d > "$codex_config" 2>/dev/null || true
     return 0
   fi
   [ -f "$codex_config" ] && return 0
@@ -52,21 +52,21 @@ ensure_codex_auth() {
   local codex_dir="${CODEX_HOME:-$HOME/.codex}"
   local auth_path="$codex_dir/auth.json"
 
-  [ -n "${SAFE_AGENTIC_CODEX_AUTH_B64:-}" ] || return 0
+  [ -n "${BERTH_CODEX_AUTH_B64:-}" ] || return 0
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
   [ -f "$auth_path" ] && return 0
-  echo "$SAFE_AGENTIC_CODEX_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
+  echo "$BERTH_CODEX_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
   chmod 600 "$auth_path" 2>/dev/null || true
 }
 
 ensure_codex_support_files() {
   local codex_dir="${CODEX_HOME:-$HOME/.codex}"
 
-  [ -n "${SAFE_AGENTIC_CODEX_SUPPORT_B64:-}" ] || return 0
+  [ -n "${BERTH_CODEX_SUPPORT_B64:-}" ] || return 0
   mkdir -p "$codex_dir" 2>/dev/null || return 0
   [ -w "$codex_dir" ] || return 0
-  echo "$SAFE_AGENTIC_CODEX_SUPPORT_B64" | base64 -d | tar -xzf - -C "$codex_dir" 2>/dev/null || return 0
+  echo "$BERTH_CODEX_SUPPORT_B64" | base64 -d | tar -xzf - -C "$codex_dir" 2>/dev/null || return 0
 }
 
 ensure_claude_config() {
@@ -86,7 +86,7 @@ ensure_claude_config() {
     fi
   fi
 
-  # One-shot staged settings from `safe-ag config-sync --restart`: newer than
+  # One-shot staged settings from `berth config-sync --restart`: newer than
   # the spawn-time env, consumed once so fresh spawns never inherit it.
   local staged="$claude_dir/settings.host.json"
   if [ -f "$staged" ]; then
@@ -95,11 +95,11 @@ ensure_claude_config() {
     return 0
   fi
 
-  if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
+  if [ -n "${BERTH_CLAUDE_CONFIG_B64:-}" ]; then
     # Host settings.json is the source of truth: refresh on EVERY start so
     # reused auth volumes pick up current preferences (output style, hooks,
     # statusline). Auth (.claude.json / credentials) stays seed-only above.
-    echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
+    echo "$BERTH_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
   [ -f "$claude_config" ] && return 0
@@ -121,21 +121,21 @@ ensure_claude_auth() {
   mkdir -p "$claude_dir" 2>/dev/null || true
   # Live OAuth credentials: refresh on EVERY start so a re-logged-in host
   # replaces an expired token in a reused-auth volume. This IS the login.
-  if [ -n "${SAFE_AGENTIC_CLAUDE_CREDS_B64:-}" ] && [ -w "$claude_dir" ]; then
-    if echo "$SAFE_AGENTIC_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null; then
+  if [ -n "${BERTH_CLAUDE_CREDS_B64:-}" ] && [ -w "$claude_dir" ]; then
+    if echo "$BERTH_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null; then
       chmod 600 "$claude_dir/.credentials.json" 2>/dev/null || true
     fi
   fi
 
-  [ -n "${SAFE_AGENTIC_CLAUDE_AUTH_B64:-}" ] || return 0
+  [ -n "${BERTH_CLAUDE_AUTH_B64:-}" ] || return 0
   [ -w "$claude_dir" ] || return 0
   [ -f "$auth_path" ] && return 0
   tmp_auth=$(mktemp) || return 0
-  if echo "$SAFE_AGENTIC_CLAUDE_AUTH_B64" | base64 -d | gzip -d > "$tmp_auth" 2>/dev/null; then
+  if echo "$BERTH_CLAUDE_AUTH_B64" | base64 -d | gzip -d > "$tmp_auth" 2>/dev/null; then
     mv "$tmp_auth" "$auth_path"
   else
     rm -f "$tmp_auth"
-    echo "$SAFE_AGENTIC_CLAUDE_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
+    echo "$BERTH_CLAUDE_AUTH_B64" | base64 -d > "$auth_path" 2>/dev/null || true
   fi
   chmod 600 "$auth_path" 2>/dev/null || true
 }
@@ -143,9 +143,9 @@ ensure_claude_auth() {
 ensure_claude_support_files() {
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-  [ -n "${SAFE_AGENTIC_CLAUDE_SUPPORT_B64:-}" ] || return 0
+  [ -n "${BERTH_CLAUDE_SUPPORT_B64:-}" ] || return 0
   mkdir -p "$claude_dir" 2>/dev/null || return 0
-  echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
+  echo "$BERTH_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
   # The support tar loses the executable bit; Claude runs statusline/hooks
   # scripts directly, so restore +x or the custom status line never shows.
   chmod +x "$claude_dir/statusline-command.sh" 2>/dev/null || true
@@ -176,33 +176,33 @@ PY
 
 inject_security_preamble() {
   local agent_type="${AGENT_TYPE:-}"
-  local template="${SAFE_AGENTIC_PREAMBLE_TEMPLATE:-/usr/local/lib/safe-agentic/security-preamble.md}"
-  local marker="safe-agentic:security-preamble"
+  local template="${BERTH_PREAMBLE_TEMPLATE:-/usr/local/lib/berth/security-preamble.md}"
+  local marker="berth:security-preamble"
 
   [ -f "$template" ] || return 0
 
   # Build dynamic values from env vars set by bin/agent
   local ssh_status="disabled"
-  [ "${SAFE_AGENTIC_SSH_ENABLED:-}" = "1" ] && ssh_status="enabled (forwarded from host)"
+  [ "${BERTH_SSH_ENABLED:-}" = "1" ] && ssh_status="enabled (forwarded from host)"
 
   local aws_status="not injected"
-  [ -n "${SAFE_AGENTIC_AWS_CREDS_B64:-}" ] && aws_status="injected (profile: ${AWS_PROFILE:-default})"
+  [ -n "${BERTH_AWS_CREDS_B64:-}" ] && aws_status="injected (profile: ${AWS_PROFILE:-default})"
 
-  local network_status="${SAFE_AGENTIC_NETWORK_MODE:-managed}"
+  local network_status="${BERTH_NETWORK_MODE:-managed}"
   case "$network_status" in
     managed) network_status="managed (dedicated bridge, internet access)" ;;
     none)    network_status="none (no network access)" ;;
     custom)  network_status="custom network" ;;
   esac
 
-  local docker_status="${SAFE_AGENTIC_DOCKER_MODE:-off}"
+  local docker_status="${BERTH_DOCKER_MODE:-off}"
   case "$docker_status" in
     off)          docker_status="not available" ;;
     dind)         docker_status="internal daemon (DinD)" ;;
     host-socket)  docker_status="host daemon socket (dangerous)" ;;
   esac
 
-  local resources="${SAFE_AGENTIC_RESOURCES:-memory=8g,cpus=4,pids=512}"
+  local resources="${BERTH_RESOURCES:-memory=8g,cpus=4,pids=512}"
 
   local preamble
   preamble=$(cat "$template")
@@ -337,9 +337,9 @@ fi
 inject_security_preamble
 
 # AWS credentials (written to tmpfs-backed ~/.aws)
-if [ -n "${SAFE_AGENTIC_AWS_CREDS_B64:-}" ]; then
+if [ -n "${BERTH_AWS_CREDS_B64:-}" ]; then
   mkdir -p /home/agent/.aws 2>/dev/null || true
-  echo "$SAFE_AGENTIC_AWS_CREDS_B64" | base64 -d > /home/agent/.aws/credentials 2>/dev/null || true
+  echo "$BERTH_AWS_CREDS_B64" | base64 -d > /home/agent/.aws/credentials 2>/dev/null || true
   chmod 600 /home/agent/.aws/credentials 2>/dev/null || true
 fi
 
@@ -375,18 +375,18 @@ if [ -n "${REPOS:-}" ]; then
     }
     cd "/workspace/$clone_path"
   fi
-elif [ "${SAFE_AGENTIC_WORKTREE:-}" = "1" ]; then
+elif [ "${BERTH_WORKTREE:-}" = "1" ]; then
   cd /workspace
 fi
 
 # ---------------------------------------------------------------------------
-# Run setup script from safe-agentic.json (if present)
+# Run setup script from berth.json (if present)
 # ---------------------------------------------------------------------------
 run_lifecycle_script() {
   local script_name="$1"
   local config_file=""
 
-  [ "${SAFE_AGENTIC_ALLOW_SETUP_SCRIPTS:-}" = "1" ] || return 0
+  [ "${BERTH_ALLOW_SETUP_SCRIPTS:-}" = "1" ] || return 0
 
   while IFS= read -r config_file; do
     [ -n "$config_file" ] || continue
@@ -408,7 +408,7 @@ except Exception:
     (cd "$(dirname "$config_file")" && bash -c "$script_cmd") || {
       echo "[entrypoint] WARNING: $script_name script failed (exit $?)" >&2
     }
-  done < <(find /workspace -mindepth 1 -maxdepth 3 -type f -name safe-agentic.json 2>/dev/null | sort)
+  done < <(find /workspace -mindepth 1 -maxdepth 3 -type f -name berth.json 2>/dev/null | sort)
 }
 
 run_lifecycle_script "setup"
@@ -416,11 +416,11 @@ run_lifecycle_script "setup"
 # ---------------------------------------------------------------------------
 # Inject agent instructions (AGENT-INSTRUCTIONS.md)
 # ---------------------------------------------------------------------------
-if [ -n "${SAFE_AGENTIC_INSTRUCTIONS_B64:-}" ]; then
+if [ -n "${BERTH_INSTRUCTIONS_B64:-}" ]; then
   echo "[entrypoint] Writing AGENT-INSTRUCTIONS.md to /workspace..."
   mkdir -p /workspace 2>/dev/null || true
   if [ -w /workspace ]; then
-    printf '%s' "$SAFE_AGENTIC_INSTRUCTIONS_B64" | base64 -d > /workspace/AGENT-INSTRUCTIONS.md 2>/dev/null || true
+    printf '%s' "$BERTH_INSTRUCTIONS_B64" | base64 -d > /workspace/AGENT-INSTRUCTIONS.md 2>/dev/null || true
     echo "[entrypoint] AGENT-INSTRUCTIONS.md written."
   else
     echo "[entrypoint] WARNING: /workspace not writable, cannot write AGENT-INSTRUCTIONS.md" >&2
@@ -429,7 +429,7 @@ fi
 
 # shellcheck disable=SC2317,SC2329 # Invoked indirectly by EXIT trap.
 run_on_exit_callback() {
-  run_callback "on-exit" "${SAFE_AGENTIC_ON_EXIT_B64:-}"
+  run_callback "on-exit" "${BERTH_ON_EXIT_B64:-}"
 }
 
 run_callback() {
@@ -451,9 +451,9 @@ run_completion_callback() {
   local exit_code="${1:-1}"
 
   if [ "$exit_code" = "0" ]; then
-    run_callback "on-complete" "${SAFE_AGENTIC_ON_COMPLETE_B64:-}"
+    run_callback "on-complete" "${BERTH_ON_COMPLETE_B64:-}"
   else
-    run_callback "on-fail" "${SAFE_AGENTIC_ON_FAIL_B64:-}"
+    run_callback "on-fail" "${BERTH_ON_FAIL_B64:-}"
   fi
 }
 
@@ -512,8 +512,8 @@ case "$AGENT_TYPE" in
     echo "[entrypoint] Launching Claude Code..."
     echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
     # Background mode runs inside tmux too: keeps the session attachable
-    # (safe-ag attach, desktop app terminals) and steer/peek functional,
-    # and makes the safe-agentic.terminal=tmux label truthful. Headless
+    # (berth attach, desktop app terminals) and steer/peek functional,
+    # and makes the berth.terminal=tmux label truthful. Headless
     # prompt runs behave identically — the session exits when the CLI does.
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
@@ -525,15 +525,15 @@ case "$AGENT_TYPE" in
       exit 1
     }
     # Decode base64 prompt from Go CLI if present
-    if [ -n "${SAFE_AGENTIC_PROMPT_B64:-}" ] && [ "${#launch_args[@]}" -eq 0 ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+    if [ -n "${BERTH_PROMPT_B64:-}" ] && [ "${#launch_args[@]}" -eq 0 ] && [ ! -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       mkdir -p "$SESSION_STATE_DIR"
-      echo "$SAFE_AGENTIC_PROMPT_B64" | base64 -d > "$SESSION_STATE_DIR/pending-prompt"
+      echo "$BERTH_PROMPT_B64" | base64 -d > "$SESSION_STATE_DIR/pending-prompt"
     fi
 
     # Auto-accept trust prompt and/or send pending prompt via tmux keystrokes.
-    if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
+    if [ "${BERTH_AUTO_TRUST:-}" = "1" ] || [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
       (
-        if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ]; then
+        if [ "${BERTH_AUTO_TRUST:-}" = "1" ]; then
           # Wait for Claude to show the trust prompt, then press Enter to accept
           sleep 4
           tmux send-keys -t "$TMUX_SESSION_NAME" Enter
@@ -541,7 +541,7 @@ case "$AGENT_TYPE" in
         fi
         if [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
           # Wait for Claude to be ready, then type the prompt
-          [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || sleep 5
+          [ "${BERTH_AUTO_TRUST:-}" = "1" ] || sleep 5
           prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
           rm -f "$SESSION_STATE_DIR/pending-prompt"
           tmux send-keys -t "$TMUX_SESSION_NAME" -l "$prompt"
@@ -567,7 +567,7 @@ case "$AGENT_TYPE" in
       echo "[entrypoint] tmux session failed to start" >&2
       exit 1
     }
-    if [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ]; then
+    if [ "${BERTH_AUTO_TRUST:-}" = "1" ]; then
       (
         # Codex trust prompt is interactive-only; accept it in tmux so
         # fleet/pipeline runs can progress without manual input.
@@ -584,7 +584,7 @@ case "$AGENT_TYPE" in
     echo "[entrypoint] Starting shell session in tmux."
     echo "[entrypoint] All tools available. Repos in /workspace/."
     # Shell sessions live in tmux like the AI agents: survives background
-    # spawns (bash keeps a pty), attachable from safe-ag attach and the
+    # spawns (bash keeps a pty), attachable from berth attach and the
     # desktop app, steer/peek work.
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"

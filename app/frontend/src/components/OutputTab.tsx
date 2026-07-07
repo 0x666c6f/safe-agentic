@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
-import type { PRInfo } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc/models";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
+import type { PRInfo } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc/models";
 import { useStore } from "../store";
 import { errText } from "../types";
 

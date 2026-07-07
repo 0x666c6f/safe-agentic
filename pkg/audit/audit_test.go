@@ -152,11 +152,11 @@ func TestLogDetailsWithSpecialCharacters(t *testing.T) {
 	}
 }
 
-func TestDefaultPath_UsesSafeAgStateHome(t *testing.T) {
+func TestDefaultPath_UsesBerthStateHome(t *testing.T) {
 	t.Setenv("HOME", "/custom/home")
 	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	path := DefaultPath()
-	expected := "/custom/home/.safe-ag/state/audit.jsonl"
+	expected := "/custom/home/.berth/state/audit.jsonl"
 	if path != expected {
 		t.Errorf("DefaultPath = %q, want %q", path, expected)
 	}

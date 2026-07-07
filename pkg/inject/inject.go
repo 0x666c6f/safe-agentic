@@ -44,7 +44,7 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read claude settings: %w", err)
 	}
-	envs["SAFE_AGENTIC_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
+	envs["BERTH_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 
@@ -66,7 +66,7 @@ func ReadClaudeAuth(homeDir string) (map[string]string, error) {
 	if err := gw.Close(); err != nil {
 		return nil, fmt.Errorf("gzip claude auth close: %w", err)
 	}
-	envs["SAFE_AGENTIC_CLAUDE_AUTH_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	envs["BERTH_CLAUDE_AUTH_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
 	return envs, nil
 }
 
@@ -94,7 +94,7 @@ func ReadGHToken() (map[string]string, error) {
 }
 
 // ReadClaudeCredentialsFile reads ~/.claude/.credentials.json (the live OAuth
-// credential store) and returns it as SAFE_AGENTIC_CLAUDE_CREDS_B64. This is
+// credential store) and returns it as BERTH_CLAUDE_CREDS_B64. This is
 // the authoritative login for modern Claude Code; the keychain token below is
 // a fallback for hosts that store credentials only in the macOS keychain.
 func ReadClaudeCredentialsFile(configDir string) (map[string]string, error) {
@@ -103,7 +103,7 @@ func ReadClaudeCredentialsFile(configDir string) (map[string]string, error) {
 	if err != nil {
 		return envs, nil
 	}
-	envs["SAFE_AGENTIC_CLAUDE_CREDS_B64"] = base64.StdEncoding.EncodeToString(data)
+	envs["BERTH_CLAUDE_CREDS_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 
@@ -164,7 +164,7 @@ func extractClaudeAccessToken(secret string) string {
 }
 
 // ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
-// from configDir and returns them as SAFE_AGENTIC_CLAUDE_SUPPORT_B64.
+// from configDir and returns them as BERTH_CLAUDE_SUPPORT_B64.
 // The entrypoint extracts this into ~/.claude/ inside the container.
 func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 	envs := make(map[string]string)
@@ -215,7 +215,7 @@ func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 
 	tw.Close()
 	gw.Close()
-	envs["SAFE_AGENTIC_CLAUDE_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	envs["BERTH_CLAUDE_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
 	return envs, nil
 }
 
@@ -294,7 +294,7 @@ func ReadCodexConfig(codexHome string) (map[string]string, error) {
 	_, agentsErr := os.Stat(filepath.Join(codexHome, "agents"))
 	hasAgentsDir := agentsErr == nil
 	sanitized := sanitizeCodexConfig(string(data), codexHome, hasAgentsDir)
-	envs["SAFE_AGENTIC_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString([]byte(sanitized))
+	envs["BERTH_CODEX_CONFIG_B64"] = base64.StdEncoding.EncodeToString([]byte(sanitized))
 	return envs, nil
 }
 
@@ -398,7 +398,7 @@ func ReadCodexSupportFiles(codexHome string) (map[string]string, error) {
 	if err := gw.Close(); err != nil {
 		return nil, fmt.Errorf("gzip codex agents close: %w", err)
 	}
-	envs["SAFE_AGENTIC_CODEX_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
+	envs["BERTH_CODEX_SUPPORT_B64"] = base64.StdEncoding.EncodeToString(buf.Bytes())
 	return envs, nil
 }
 
@@ -412,7 +412,7 @@ func ReadCodexAuth(codexHome string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read codex auth: %w", err)
 	}
-	envs["SAFE_AGENTIC_CODEX_AUTH_B64"] = base64.StdEncoding.EncodeToString(data)
+	envs["BERTH_CODEX_AUTH_B64"] = base64.StdEncoding.EncodeToString(data)
 	return envs, nil
 }
 
@@ -426,7 +426,7 @@ func ReadAWSCredentials(credPath, profile string) (map[string]string, error) {
 		return nil, fmt.Errorf("AWS profile %q not found in %s", profile, credPath)
 	}
 	envs := map[string]string{
-		"SAFE_AGENTIC_AWS_CREDS_B64": base64.StdEncoding.EncodeToString([]byte(content)),
+		"BERTH_AWS_CREDS_B64": base64.StdEncoding.EncodeToString([]byte(content)),
 		"AWS_PROFILE":                profile,
 	}
 	if r := os.Getenv("AWS_DEFAULT_REGION"); r != "" {

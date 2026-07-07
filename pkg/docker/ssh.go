@@ -3,15 +3,15 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/repourl"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/repourl"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"regexp"
 	"strings"
 	"time"
 )
 
 const sshSocketPath = "/run/ssh-agent.sock"
-const sshRelayDir = "/tmp/safe-agentic-ssh-relay"
+const sshRelayDir = "/tmp/berth-ssh-relay"
 const sshRelaySocket = sshRelayDir + "/agent.sock"
 const sshRelayLock = sshRelayDir + "/relay.lock"
 const sshRelayPIDFile = sshRelayDir + "/relay.pid"
@@ -36,7 +36,7 @@ func AppendSSHMount(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd
 		return fmt.Errorf("SSH_AUTH_SOCK has unsafe value %q", vmSocket)
 	}
 	if err := checkSSHAgent(ctx, exec, vmSocket); err != nil {
-		return fmt.Errorf("VM SSH agent has no identities; ensure 1Password SSH agent is enabled, run `launchctl setenv SSH_AUTH_SOCK \"$SSH_AUTH_SOCK\"`, restart Apple container services, then run `safe-ag vm start`: %w", err)
+		return fmt.Errorf("VM SSH agent has no identities; ensure 1Password SSH agent is enabled, run `launchctl setenv SSH_AUTH_SOCK \"$SSH_AUTH_SOCK\"`, restart Apple container services, then run `berth vm start`: %w", err)
 	}
 
 	// Set up a locked relay for userns-remap compatibility.

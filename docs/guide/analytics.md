@@ -1,12 +1,12 @@
 # Analytics
 
-safe-agentic exposes lightweight operational data about each session.
+berth exposes lightweight operational data about each session.
 
 ## Summary
 
 ```bash
-safe-ag summary --latest
-safe-ag summary api-refactor
+berth summary --latest
+berth summary api-refactor
 ```
 
 `summary` is the quickest "what is going on?" command. It includes:
@@ -21,8 +21,8 @@ safe-ag summary api-refactor
 ## Cost
 
 ```bash
-safe-ag cost --latest
-safe-ag cost api-refactor
+berth cost --latest
+berth cost api-refactor
 ```
 
 `cost` parses token usage from session data and estimates spend by model.
@@ -35,8 +35,8 @@ Use it for:
 ## Audit log
 
 ```bash
-safe-ag audit
-safe-ag audit --lines 100
+berth audit
+berth audit --lines 100
 ```
 
 The audit log is append-only and records actions like:
@@ -48,8 +48,8 @@ The audit log is append-only and records actions like:
 ## Session export
 
 ```bash
-safe-ag sessions --latest
-safe-ag sessions api-refactor ~/tmp/sessions
+berth sessions --latest
+berth sessions api-refactor ~/tmp/sessions
 ```
 
 Use this when you want the full conversation trail, not just the latest output or summary.

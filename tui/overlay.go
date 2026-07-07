@@ -9,9 +9,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
-	"github.com/0x666c6f/safe-agentic/pkg/repourl"
-	"github.com/0x666c6f/safe-agentic/pkg/risk"
+	"github.com/0x666c6f/berth/pkg/config"
+	"github.com/0x666c6f/berth/pkg/repourl"
+	"github.com/0x666c6f/berth/pkg/risk"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -189,7 +189,7 @@ func cleanVMCopyPath(value string, field string) (string, error) {
 }
 
 // ShowSteerForm shows a small input overlay to send a follow-up message to an
-// agent's tmux session (via `safe-ag steer <name> <message>`).
+// agent's tmux session (via `berth steer <name> <message>`).
 func ShowSteerForm(app *App, containerName string) {
 	form := tview.NewForm().
 		AddInputField("Message:", "", 60, nil, nil)
@@ -515,20 +515,20 @@ func spawnedContainerName(outStr string) string {
 	return containerName
 }
 
-// newAgentCmd creates an exec.Cmd for the safe-ag CLI.
+// newAgentCmd creates an exec.Cmd for the berth CLI.
 func newAgentCmd(args ...string) *exec.Cmd {
-	return exec.Command("safe-ag", args...)
+	return exec.Command("berth", args...)
 }
 
-// execAgent replaces the current process with `safe-ag <args>`.
+// execAgent replaces the current process with `berth <args>`.
 // Used for spawn which needs a real TTY chain for nested TUI apps (claude/codex).
 func execAgent(args []string) {
-	agentPath, err := exec.LookPath("safe-ag")
+	agentPath, err := exec.LookPath("berth")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "safe-ag not found: %v\n", err)
+		fmt.Fprintf(os.Stderr, "berth not found: %v\n", err)
 		os.Exit(1)
 	}
-	fullArgs := append([]string{"safe-ag"}, args...)
+	fullArgs := append([]string{"berth"}, args...)
 	// Replace process — never returns on success
 	if err := syscall.Exec(agentPath, fullArgs, os.Environ()); err != nil {
 		fmt.Fprintf(os.Stderr, "exec failed: %v\n", err)

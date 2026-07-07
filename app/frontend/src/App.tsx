@@ -13,7 +13,7 @@ import { VMControl } from "./components/VMControl";
 import { Toasts } from "./components/Toasts";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { EmptyState } from "./components/EmptyState";
-import { AgentService } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import type { Agent } from "./types";
 
 // Wails v3.0.0-alpha2.112 EventManager.Emit sets Data = data[0] with NO array
@@ -53,7 +53,7 @@ export default function App() {
   // Window title: selected agent + needs-you count (helps ⌘Tab triage).
   useEffect(() => {
     const needs = agents.filter((a) => a.Running && (needsYou[a.Name] || a.State === "blocked")).length;
-    document.title = `Safe Agentic${selected ? " — " + selected.replace(/^agent-/, "") : ""}${needs ? ` (${needs} need you)` : ""}`;
+    document.title = `Berth${selected ? " — " + selected.replace(/^agent-/, "") : ""}${needs ? ` (${needs} need you)` : ""}`;
   }, [agents, needsYou, selected]);
 
   // Keyboard: j/k move selection, Enter/⌘1..9 jump, ⌘T/⌘D/⌘O/⌘I tabs.

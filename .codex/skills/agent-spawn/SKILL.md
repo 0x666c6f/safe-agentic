@@ -17,8 +17,8 @@ Launch Claude Code or Codex inside an isolated, hardened Docker container.
 
 ```bash
 # Most common — auto-detects SSH from URL
-safe-ag-claude <repo-url> [<repo-url>...]
-safe-ag-codex <repo-url> [<repo-url>...]
+berth-claude <repo-url> [<repo-url>...]
+berth-codex <repo-url> [<repo-url>...]
 ```
 
 These auto-enable `--ssh` when the URL starts with `git@` or `ssh://`.
@@ -26,16 +26,16 @@ These auto-enable `--ssh` when the URL starts with `git@` or `ssh://`.
 ## Saved profiles
 
 ```bash
-safe-ag profile list
-safe-ag profile show reviewer
-safe-ag profile run reviewer "focus on auth only"
+berth profile list
+berth profile show reviewer
+berth profile run reviewer "focus on auth only"
 ```
 
-Profiles live in `~/.safe-ag/agents/*.toml` and `.safe-ag/agents/*.toml`. Use them for repeatable roles before hand-writing a long `safe-ag spawn` command.
+Profiles live in `~/.berth/agents/*.toml` and `.berth/agents/*.toml`. Use them for repeatable roles before hand-writing a long `berth spawn` command.
 
 ## Policy guards
 
-Before suggesting a risky spawn mode, remember `~/.safe-ag/rules.toml` and nearest `.safe-ag/rules.toml` can deny it after defaults are applied:
+Before suggesting a risky spawn mode, remember `~/.berth/rules.toml` and nearest `.berth/rules.toml` can deny it after defaults are applied:
 
 ```toml
 [allow]
@@ -54,7 +54,7 @@ If a spawn fails with a policy denial, adjust the command to the allowed mode in
 ## Full command (when you need options)
 
 ```bash
-safe-ag spawn <claude|codex> [options]
+berth spawn <claude|codex> [options]
 ```
 
 ### Options
@@ -85,61 +85,61 @@ safe-ag spawn <claude|codex> [options]
 
 ```bash
 # Public repo
-safe-ag-claude https://github.com/myorg/myrepo.git
+berth-claude https://github.com/myorg/myrepo.git
 
 # Private repo (SSH auto-detected)
-safe-ag-claude git@github.com:myorg/myrepo.git
+berth-claude git@github.com:myorg/myrepo.git
 
 # Named session with persistent auth
-safe-ag spawn claude --ssh --reuse-auth --name api-work --repo git@github.com:myorg/api.git
+berth spawn claude --ssh --reuse-auth --name api-work --repo git@github.com:myorg/api.git
 
 # With an initial prompt (agent starts working immediately)
-safe-ag spawn codex --ssh --reuse-auth --name fix-ci --repo git@github.com:myorg/api.git \
+berth spawn codex --ssh --reuse-auth --name fix-ci --repo git@github.com:myorg/api.git \
   --prompt 'Fix the failing CI tests'
 
 # Multiple repos
-safe-ag-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
+berth-claude git@github.com:myorg/frontend.git git@github.com:myorg/backend.git
 
 # Big repo with more resources
-safe-ag spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monorepo.git
+berth spawn claude --memory 16g --cpus 8 --repo https://github.com/large/monorepo.git
 
 # With AWS credentials for infrastructure work
-safe-ag spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
+berth spawn claude --ssh --aws my-aws-profile --repo git@github.com:myorg/infra.git
 
 # Current checkout as isolated managed worktree
-safe-ag spawn claude --worktree --name auth-fix --prompt 'Fix the auth tests'
+berth spawn claude --worktree --name auth-fix --prompt 'Fix the auth tests'
 
 # Untrusted code (no SSH, no internet)
-safe-ag spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
+berth spawn claude --repo https://github.com/unknown/repo.git --network agent-isolated
 ```
 
 ## Worktree Mode
 
 `--worktree` must be run from inside a git checkout and cannot be combined with `--repo`.
-It creates `~/.safe-ag/worktrees/<container-name>` on branch `safe-ag/<container-name>`, bind-mounts it at `/workspace`, and copies ignored local files listed in `.safe-aginclude`.
+It creates `~/.berth/worktrees/<container-name>` on branch `berth/<container-name>`, bind-mounts it at `/workspace`, and copies ignored local files listed in `.berthinclude`.
 
 ```bash
-safe-ag handoff auth-fix --to-worktree
-safe-ag handoff auth-fix --to-local ./workspace-copy
-safe-ag worktree snapshot auth-fix "before review fixes"
-safe-ag worktree restore auth-fix stash@{0}
-safe-ag worktree cleanup --dry-run
+berth handoff auth-fix --to-worktree
+berth handoff auth-fix --to-local ./workspace-copy
+berth worktree snapshot auth-fix "before review fixes"
+berth worktree restore auth-fix stash@{0}
+berth worktree cleanup --dry-run
 ```
 
 ## Templates
 
 ```bash
 # List available templates
-safe-ag template list
+berth template list
 
 # Preview a template
-safe-ag template show security-audit
+berth template show security-audit
 
 # Use a template (no --prompt needed)
-safe-ag spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
+berth spawn claude --ssh --repo git@github.com:org/api.git --template security-audit
 
 # Combine template with extra instructions
-safe-ag spawn claude --ssh --repo git@github.com:org/api.git \
+berth spawn claude --ssh --repo git@github.com:org/api.git \
   --template code-review \
   --instructions "Focus on the auth module only."
 ```
@@ -150,10 +150,10 @@ Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependenc
 
 ```bash
 # Headless — spawn and return immediately
-safe-ag spawn claude --background --auto-trust --ssh \
+berth spawn claude --background --auto-trust --ssh \
   --repo git@github.com:org/api.git \
   --prompt "Fix the failing tests" \
-  --on-exit "safe-ag output --latest --json > /tmp/result.json"
+  --on-exit "berth output --latest --json > /tmp/result.json"
 ```
 
 For Codex, background mode only works after one interactive `--reuse-auth` run has created `/home/agent/.codex/auth.json` in `agent-codex-auth`.
@@ -173,8 +173,8 @@ If the agent needs MCP servers (Linear, Notion, etc.), authenticate first:
 
 ```bash
 # No container needed — uses default auth volume
-safe-ag mcp-login linear
-safe-ag mcp-login notion
+berth mcp-login linear
+berth mcp-login notion
 ```
 
 The token persists in the auth volume for all agents using `--reuse-auth`.
@@ -182,8 +182,8 @@ The token persists in the auth volume for all agents using `--reuse-auth`.
 ## Fleet — spawn multiple agents from manifest
 
 ```bash
-safe-ag fleet fleet.yaml
-safe-ag fleet fleet.yaml --dry-run
+berth fleet fleet.yaml
+berth fleet fleet.yaml --dry-run
 ```
 
 YAML manifest format:
@@ -205,8 +205,8 @@ Supported fields per agent: `name`, `type`, `repo`, `repos`, `ssh`, `reuse_auth`
 ## Pipeline — multi-step agent workflows
 
 ```bash
-safe-ag pipeline pipeline.yaml
-safe-ag pipeline pipeline.yaml --dry-run
+berth pipeline pipeline.yaml
+berth pipeline pipeline.yaml --dry-run
 ```
 
 Pipeline format:
@@ -231,9 +231,9 @@ steps:
 
 Steps run sequentially. `depends_on` waits until dependencies complete successfully. `retry`, `on_failure`, `when`, and `outputs` are not implemented and are rejected instead of silently ignored.
 
-## Lifecycle scripts (safe-agentic.json)
+## Lifecycle scripts (berth.json)
 
-Repos can include a `safe-agentic.json` at root for optional setup:
+Repos can include a `berth.json` at root for optional setup:
 
 ```json
 {
@@ -249,7 +249,7 @@ The `setup` script runs after clone only when the session was spawned with `--al
 
 The agent opens interactively. On first run, an OAuth URL appears — the user opens it in their browser. After auth, the agent is ready to use.
 
-Containers persist after exit (stopped state). Use `safe-ag attach <name>` to reattach, or `safe-ag stop <name>` to remove. Use `--reuse-auth` to keep auth tokens and config across spawns.
+Containers persist after exit (stopped state). Use `berth attach <name>` to reattach, or `berth stop <name>` to remove. Use `--reuse-auth` to keep auth tokens and config across spawns.
 
 ## Host config injection
 

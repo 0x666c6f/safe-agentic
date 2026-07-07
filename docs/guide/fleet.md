@@ -5,9 +5,9 @@ Use a fleet when you want parallel agents. Use a pipeline when you want staged e
 ## Fleet
 
 ```bash
-safe-ag fleet fleet.yaml
-safe-ag fleet fleet.yaml --dry-run
-safe-ag fleet status
+berth fleet fleet.yaml
+berth fleet fleet.yaml --dry-run
+berth fleet status
 ```
 
 Minimal fleet:
@@ -35,8 +35,8 @@ Fleet behavior:
 ## Pipeline
 
 ```bash
-safe-ag pipeline pipeline.yaml
-safe-ag pipeline pipeline.yaml --dry-run
+berth pipeline pipeline.yaml
+berth pipeline pipeline.yaml --dry-run
 ```
 
 Minimal pipeline:
@@ -67,7 +67,7 @@ Pipeline behavior:
 | Field | Meaning |
 |---|---|
 | `name` | human-readable agent/stage name |
-| `profile` | profile name from `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml` |
+| `profile` | profile name from `~/.berth/agents/*.toml` or `.berth/agents/*.toml` |
 | `type` | `claude` or `codex` |
 | `repo` / `repos` | one or many repos |
 | `prompt` | task |
@@ -80,7 +80,7 @@ Pipeline behavior:
 | `ephemeral_auth` | force per-session auth |
 | `docker` | DinD access |
 | `docker_socket` | direct VM Docker socket access |
-| `allow_setup_scripts` | allow repo-provided `safe-agentic.json` setup hooks |
+| `allow_setup_scripts` | allow repo-provided `berth.json` setup hooks |
 | `aws` | AWS profile |
 | `network` | custom Docker network |
 | `memory`, `cpus`, `pids_limit` | resource limits |
@@ -103,10 +103,10 @@ Unsupported control fields such as `retry`, `on_failure`, `when`, and `outputs` 
 ## Real examples
 
 ```bash
-safe-ag fleet examples/fleet-review-and-fix.yaml
-safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
-safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
-safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
+berth fleet examples/fleet-review-and-fix.yaml
+berth pipeline examples/pipeline-consolidate-and-fix.yaml
+berth pipeline examples/pipeline-double-review-reconcile.yaml
+berth pipeline examples/pipeline-display-nested.yaml --dry-run
 ```
 
 ## Choosing between them

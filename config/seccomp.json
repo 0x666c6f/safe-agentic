@@ -781,5 +781,5 @@
       }
     }
   ],
-  "_comment": "safe-agentic hardened profile: Docker default minus ptrace/process_vm_* in no-caps groups"
+  "_comment": "berth hardened profile: Docker default minus ptrace/process_vm_* in no-caps groups"
 }

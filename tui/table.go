@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
+	"github.com/0x666c6f/berth/pkg/agentstate"
 	"github.com/gdamore/tcell/v2"
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"

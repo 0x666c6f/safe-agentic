@@ -1,7 +1,7 @@
 {
-  "name": "safe-agentic-cli-bundle",
+  "name": "berth-cli-bundle",
   "private": true,
-  "description": "Pinned AI CLIs for safe-agentic",
+  "description": "Pinned AI CLIs for berth",
   "dependencies": {
     "@openai/codex": "0.142.5"
   }

@@ -64,7 +64,7 @@ func TestCaptureHTTPRejectsNonHTTPURL(t *testing.T) {
 }
 
 func TestDetectChromeUsesEnv(t *testing.T) {
-	t.Setenv("SAFE_AGENTIC_CHROME", "/tmp/chrome")
+	t.Setenv("BERTH_CHROME", "/tmp/chrome")
 	if got := DetectChrome(); got != "/tmp/chrome" {
 		t.Fatalf("DetectChrome() = %q, want env path", got)
 	}

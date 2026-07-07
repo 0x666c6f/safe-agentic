@@ -4,7 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Clipboard, Events } from "@wailsio/runtime";
-import { TerminalService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { TerminalService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import { orderedStream } from "../orderedStream";
 import { errText } from "../types";
 import "@xterm/xterm/css/xterm.css";

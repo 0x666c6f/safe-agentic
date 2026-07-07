@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
-	"github.com/0x666c6f/safe-agentic/pkg/tmux"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/agentstate"
+	"github.com/0x666c6f/berth/pkg/tmux"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 // statePaneLines is how much of the live tmux pane the state probe inspects

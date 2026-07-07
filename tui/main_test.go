@@ -34,12 +34,12 @@ if [ "$1 $2" = "machine list" ]; then exit 1; fi`)
 
 	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
 if [ "$1 $2" = "machine list" ]; then echo '[{"id":"other-vm"}]'; exit 0; fi`)
-	if err := preflight(); err == nil || !strings.Contains(err.Error(), "VM 'safe-agentic' not found") {
+	if err := preflight(); err == nil || !strings.Contains(err.Error(), "VM 'berth' not found") {
 		t.Fatalf("preflight missing vm err = %v", err)
 	}
 
 	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
-if [ "$1 $2" = "machine list" ]; then echo '[{"id":"safe-agentic"}]'; exit 0; fi`)
+if [ "$1 $2" = "machine list" ]; then echo '[{"id":"berth"}]'; exit 0; fi`)
 	if err := preflight(); err != nil {
 		t.Fatalf("preflight success err = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPreflight_ContainerSystemStopped(t *testing.T) {
 func TestPreflight_CustomVMName(t *testing.T) {
 	installFakeBinary(t, "container", `if [ "$1 $2" = "system status" ]; then exit 0; fi
 if [ "$1 $2" = "machine list" ]; then echo '[{"id":"custom-vm"}]'; exit 0; fi`)
-	t.Setenv("SAFE_AGENTIC_VM_NAME", "custom-vm")
+	t.Setenv("BERTH_VM_NAME", "custom-vm")
 	if err := preflight(); err != nil {
 		t.Fatalf("preflight custom vm err = %v", err)
 	}

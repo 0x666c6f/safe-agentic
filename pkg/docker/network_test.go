@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -16,8 +16,8 @@ func TestManagedNetworkName(t *testing.T) {
 
 func TestManagedBridgeName(t *testing.T) {
 	name := ManagedBridgeName("agent-claude-abc")
-	if !strings.HasPrefix(name, "sa") {
-		t.Fatalf("managed bridge name %q should match VM egress guardrail prefix sa+", name)
+	if !strings.HasPrefix(name, "bt") {
+		t.Fatalf("managed bridge name %q should match VM egress guardrail prefix bt+", name)
 	}
 	if len(name) > 15 {
 		t.Fatalf("managed bridge name %q exceeds Linux interface length", name)
@@ -47,7 +47,7 @@ func TestCreateManagedNetwork(t *testing.T) {
 	if !strings.Contains(cmdStr, "com.docker.network.bridge.name="+ManagedBridgeName("agent-claude-abc")) {
 		t.Errorf("missing managed bridge name in: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "app=safe-agentic") {
+	if !strings.Contains(cmdStr, "app=berth") {
 		t.Errorf("missing app label in: %s", cmdStr)
 	}
 	if !strings.Contains(cmdStr, "agent-claude-abc-net") {

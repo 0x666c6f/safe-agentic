@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -11,7 +11,7 @@ func TestAppendSSHMount_WithRelay(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetResponse("test -S", "") // relay socket exists
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -30,7 +30,7 @@ func TestAppendSSHMount_FallbackDirect(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetError("test -S", "not found") // relay socket doesn't exist
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -49,7 +49,7 @@ func TestAppendSSHMount_StartsRelayWithoutStartStopDaemon(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetError("test -S", "not found") // relay socket doesn't exist
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,13 +71,13 @@ func TestAppendSSHMount_StartsRelayWithoutStartStopDaemon(t *testing.T) {
 func TestAppendSSHMount_RestartsStaleRelay(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
-	fake.SetError("bash -lc SSH_AUTH_SOCK='/tmp/safe-agentic-ssh-relay/agent.sock' ssh-add -l", "The agent has no identities.")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	fake.SetError("bash -lc SSH_AUTH_SOCK='/tmp/berth-ssh-relay/agent.sock' ssh-add -l", "The agent has no identities.")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := fake.CommandsMatching("rm -f '/tmp/safe-agentic-ssh-relay/agent.sock' '/tmp/safe-agentic-ssh-relay/relay.pid'"); len(got) == 0 {
+	if got := fake.CommandsMatching("rm -f '/tmp/berth-ssh-relay/agent.sock' '/tmp/berth-ssh-relay/relay.pid'"); len(got) == 0 {
 		t.Fatalf("expected stale relay cleanup, log: %v", fake.Log)
 	}
 	if got := fake.CommandsMatching("nohup"); len(got) == 0 {
@@ -89,7 +89,7 @@ func TestAppendSSHMount_EmptyVMAgent(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
 	fake.SetError("bash -lc SSH_AUTH_SOCK='/var/host-services/ssh-auth.sock' ssh-add -l", "The agent has no identities.")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err == nil {
 		t.Fatal("expected error for empty VM SSH agent")
@@ -102,7 +102,7 @@ func TestAppendSSHMount_EmptyVMAgent(t *testing.T) {
 func TestAppendSSHMount_EmptySocket(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err == nil {
 		t.Fatal("expected error when SSH_AUTH_SOCK is empty")
@@ -115,7 +115,7 @@ func TestAppendSSHMount_EmptySocket(t *testing.T) {
 func TestAppendSSHMount_ExecError(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetError("bash -c echo $SSH_AUTH_SOCK", "permission denied")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err == nil {
 		t.Fatal("expected error when exec fails")
@@ -128,7 +128,7 @@ func TestAppendSSHMount_ExecError(t *testing.T) {
 func TestAppendSSHMount_UnsafeSocketValue(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/tmp/unsafe'sock")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendSSHMount(context.Background(), fake, cmd)
 	if err == nil {
 		t.Fatal("expected error for unsafe SSH_AUTH_SOCK")
@@ -139,7 +139,7 @@ func TestAppendSSHMount_UnsafeSocketValue(t *testing.T) {
 }
 
 func TestAppendSSHMountDryRun(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendSSHMountDryRun(cmd)
 	cmdStr := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(cmdStr, "SSH_AUTH_SOCK="+sshSocketPath) {

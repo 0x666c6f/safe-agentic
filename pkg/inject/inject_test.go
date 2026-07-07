@@ -35,7 +35,7 @@ func TestEncodeB64Roundtrip(t *testing.T) {
 }
 
 func TestDecodeB64Roundtrip(t *testing.T) {
-	original := "safe-agentic config data"
+	original := "berth config data"
 	encoded := base64.StdEncoding.EncodeToString([]byte(original))
 	decoded, err := DecodeB64(encoded)
 	if err != nil {
@@ -65,9 +65,9 @@ func TestReadClaudeConfigWithSettingsJSON(t *testing.T) {
 		t.Fatalf("ReadClaudeConfig error: %v", err)
 	}
 
-	val, ok := envs["SAFE_AGENTIC_CLAUDE_CONFIG_B64"]
+	val, ok := envs["BERTH_CLAUDE_CONFIG_B64"]
 	if !ok {
-		t.Fatal("expected SAFE_AGENTIC_CLAUDE_CONFIG_B64 key in result")
+		t.Fatal("expected BERTH_CLAUDE_CONFIG_B64 key in result")
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(val)
@@ -180,9 +180,9 @@ func TestReadCodexConfigWithConfigTOML(t *testing.T) {
 		t.Fatalf("ReadCodexConfig error: %v", err)
 	}
 
-	val, ok := envs["SAFE_AGENTIC_CODEX_CONFIG_B64"]
+	val, ok := envs["BERTH_CODEX_CONFIG_B64"]
 	if !ok {
-		t.Fatal("expected SAFE_AGENTIC_CODEX_CONFIG_B64 key")
+		t.Fatal("expected BERTH_CODEX_CONFIG_B64 key")
 	}
 	decoded, err := base64.StdEncoding.DecodeString(val)
 	if err != nil {
@@ -235,7 +235,7 @@ trust_level = "trusted"
 	if err != nil {
 		t.Fatalf("ReadCodexConfig error: %v", err)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(envs["SAFE_AGENTIC_CODEX_CONFIG_B64"])
+	decoded, err := base64.StdEncoding.DecodeString(envs["BERTH_CODEX_CONFIG_B64"])
 	if err != nil {
 		t.Fatalf("decode env var: %v", err)
 	}
@@ -277,9 +277,9 @@ func TestReadCodexSupportFilesIncludesAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCodexSupportFiles error: %v", err)
 	}
-	archiveB64 := envs["SAFE_AGENTIC_CODEX_SUPPORT_B64"]
+	archiveB64 := envs["BERTH_CODEX_SUPPORT_B64"]
 	if archiveB64 == "" {
-		t.Fatal("expected SAFE_AGENTIC_CODEX_SUPPORT_B64")
+		t.Fatal("expected BERTH_CODEX_SUPPORT_B64")
 	}
 	archiveBytes, err := base64.StdEncoding.DecodeString(archiveB64)
 	if err != nil {
@@ -314,7 +314,7 @@ func TestReadCodexConfigMissingDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCodexConfig missing dir returned error: %v", err)
 	}
-	val := envs["SAFE_AGENTIC_CODEX_CONFIG_B64"]
+	val := envs["BERTH_CODEX_CONFIG_B64"]
 	if val == "" {
 		t.Fatalf("expected managed default Codex config, got %v", envs)
 	}
@@ -378,9 +378,9 @@ func TestReadAWSCredentialsProfileFound(t *testing.T) {
 		t.Errorf("AWS_PROFILE = %q, want %q", envs["AWS_PROFILE"], "my-profile")
 	}
 
-	b64val, ok := envs["SAFE_AGENTIC_AWS_CREDS_B64"]
+	b64val, ok := envs["BERTH_AWS_CREDS_B64"]
 	if !ok {
-		t.Fatal("expected SAFE_AGENTIC_AWS_CREDS_B64 key")
+		t.Fatal("expected BERTH_AWS_CREDS_B64 key")
 	}
 	decoded, err := base64.StdEncoding.DecodeString(b64val)
 	if err != nil {
@@ -458,9 +458,9 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadClaudeSupportFiles error: %v", err)
 	}
-	archiveB64 := envs["SAFE_AGENTIC_CLAUDE_SUPPORT_B64"]
+	archiveB64 := envs["BERTH_CLAUDE_SUPPORT_B64"]
 	if archiveB64 == "" {
-		t.Fatal("expected SAFE_AGENTIC_CLAUDE_SUPPORT_B64")
+		t.Fatal("expected BERTH_CLAUDE_SUPPORT_B64")
 	}
 
 	archiveBytes, err := base64.StdEncoding.DecodeString(archiveB64)

@@ -11,20 +11,20 @@ An isolated environment for running AI coding agents (Claude Code, Codex) inside
 **Homebrew (recommended):**
 
 ```bash
-brew tap 0x666c6f/tap && brew install safe-agentic
+brew tap 0x666c6f/tap && brew install berth
 ```
 
-This installs the CLI as `safe-ag`. Check the installed version with `safe-ag --version`.
+This installs the CLI as `berth`. Check the installed version with `berth --version`.
 
-**From source:** Clone the repo, run `make build-all`, and add `bin/` to your PATH. The binaries are `safe-ag`, `safe-ag-claude`, and `safe-ag-codex`.
+**From source:** Clone the repo, run `make build-all`, and add `bin/` to your PATH. The binaries are `berth`, `berth-claude`, and `berth-codex`.
 
-All documentation below uses `safe-ag` as the command name.
+All documentation below uses `berth` as the command name.
 
 ## Architecture
 
 ```
-macOS Host (safe-ag Go CLI)
-  └── Apple container machine "safe-agentic" (Alpine 3.22, hardened)
+macOS Host (berth Go CLI)
+  └── Apple container machine "berth" (Alpine 3.22, hardened)
        └── Docker containers (ephemeral, per-agent)
             ├── Read-only rootfs + tmpfs scratch
             ├── cap-drop ALL + no-new-privileges
@@ -41,8 +41,8 @@ Full diagrams in `docs/architecture.md`.
 
 ### Go CLI (runs on macOS host)
 
-- **`cmd/safe-ag/`** — Cobra CLI binary. `main.go` (root command), `spawn.go` (spawn/run), `lifecycle.go` (list/attach/stop/cleanup/retry), `observe.go` (peek/output/summary/cost/audit/sessions/replay), `workflow.go` (diff/checkpoint/todo/pr/review), `fleet.go` (fleet/pipeline), `setup.go` (setup/update/vm/diagnose), `config_cmd.go` (config/template/mcp-login/aws-refresh).
-- **`pkg/vmexec/`** — `Executor` interface wrapping `container machine run -n safe-agentic`. All Docker/VM commands go through this. `FakeExecutor` for testing.
+- **`cmd/berth/`** — Cobra CLI binary. `main.go` (root command), `spawn.go` (spawn/run), `lifecycle.go` (list/attach/stop/cleanup/retry), `observe.go` (peek/output/summary/cost/audit/sessions/replay), `workflow.go` (diff/checkpoint/todo/pr/review), `fleet.go` (fleet/pipeline), `setup.go` (setup/update/vm/diagnose), `config_cmd.go` (config/template/mcp-login/aws-refresh).
+- **`pkg/vmexec/`** — `Executor` interface wrapping `container machine run -n berth`. All Docker/VM commands go through this. `FakeExecutor` for testing.
 - **`pkg/docker/`** — `DockerRunCmd` builder (type-safe replacement for bash arrays), container/volume/network/SSH/DinD management.
 - **`pkg/validate/`** — Input validation: container names, network names, PIDs limits.
 - **`pkg/repourl/`** — URL parsing with traversal prevention.
@@ -53,7 +53,7 @@ Full diagrams in `docs/architecture.md`.
 - **`pkg/events/`** — Event emission, notification targets, budget monitoring.
 - **`pkg/cost/`** — API cost computation with model pricing table.
 - **`pkg/fleet/`** — YAML manifest parsing for fleet/pipeline orchestration.
-- **`pkg/labels/`** — All `safe-agentic.*` Docker label constants.
+- **`pkg/labels/`** — All `berth.*` Docker label constants.
 
 ### Container-side (runs inside Docker)
 
@@ -69,64 +69,64 @@ Full diagrams in `docs/architecture.md`.
 
 ```bash
 # First-time setup (creates VM, installs Docker, builds image)
-safe-ag setup
+berth setup
 
 # Spawn agents
-safe-ag spawn claude --ssh --repo git@github.com:org/repo.git
-safe-ag spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
-safe-ag spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
-safe-ag spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
-safe-ag spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
-safe-ag spawn claude --background --auto-trust --on-exit 'safe-ag output --latest --json > out.json' --repo ...
+berth spawn claude --ssh --repo git@github.com:org/repo.git
+berth spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name my-task
+berth spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
+berth spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
+berth spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
+berth spawn claude --background --auto-trust --on-exit 'berth output --latest --json > out.json' --repo ...
 
 # Quick start with smart defaults (auto-enables `--ssh` for SSH URLs)
-safe-ag run git@github.com:org/repo.git "Fix the CI tests"
-safe-ag run https://github.com/org/repo.git "Add unit tests"
+berth run git@github.com:org/repo.git "Fix the CI tests"
+berth run https://github.com/org/repo.git "Add unit tests"
 
 # Agent-facing shortcuts (auto-detect SSH from URL)
-safe-ag-claude git@github.com:org/repo.git
-safe-ag-codex https://github.com/org/repo.git --dry-run
+berth-claude git@github.com:org/repo.git
+berth-codex https://github.com/org/repo.git --dry-run
 
 # Management
-safe-ag list                     # shows running + stopped containers
-safe-ag tui                      # k9s-style interactive dashboard (build: make -C tui)
+berth list                     # shows running + stopped containers
+berth tui                      # k9s-style interactive dashboard (build: make -C tui)
 # macOS desktop app (Wails v3): make -C app dev|build — see app/README.md
-safe-ag attach <name>            # reattach (restarts stopped containers)
-safe-ag stop <name|--all>        # stop + remove
-safe-ag cleanup                  # removes containers + managed networks (keeps auth)
+berth attach <name>            # reattach (restarts stopped containers)
+berth stop <name|--all>        # stop + remove
+berth cleanup                  # removes containers + managed networks (keeps auth)
 
 # MCP OAuth login
-safe-ag mcp-login linear
-safe-ag mcp-login notion <container>
+berth mcp-login linear
+berth mcp-login notion <container>
 
 # Export session history
-safe-ag sessions <container>
-safe-ag sessions --latest ~/sessions/
+berth sessions <container>
+berth sessions --latest ~/sessions/
 
 # Peek at agent output without attaching
-safe-ag peek <container>                 # last 30 lines of tmux pane
-safe-ag peek --latest --lines 50         # more lines
+berth peek <container>                 # last 30 lines of tmux pane
+berth peek --latest --lines 50         # more lines
 
 # AWS credentials
-safe-ag spawn claude --ssh --aws my-aws-profile --repo git@github.com:org/repo.git
-safe-ag aws-refresh <container>              # refresh expired credentials
-safe-ag aws-refresh --latest my-profile      # refresh with different profile
+berth spawn claude --ssh --aws my-aws-profile --repo git@github.com:org/repo.git
+berth aws-refresh <container>              # refresh expired credentials
+berth aws-refresh --latest my-profile      # refresh with different profile
 
 # Image rebuild
-safe-ag update                   # cached build
-safe-ag update --quick           # bust only AI CLI layer
-safe-ag update --full            # no cache
+berth update                   # cached build
+berth update --quick           # bust only AI CLI layer
+berth update --full            # no cache
 
 # VM management
-safe-ag vm ssh                   # debug the VM
-safe-ag vm start                 # start + re-harden
-safe-ag vm stop
+berth vm ssh                   # debug the VM
+berth vm start                 # start + re-harden
+berth vm stop
 
 # Resource tuning
-safe-ag spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
+berth spawn claude --memory 16g --cpus 8 --pids-limit 1024 --repo ...
 
 # Untrusted repos (no SSH, no internet)
-safe-ag spawn claude --repo https://... --network agent-isolated
+berth spawn claude --repo https://... --network agent-isolated
 ```
 
 ```bash
@@ -138,45 +138,45 @@ safe-ag spawn claude --repo https://... --network agent-isolated
 #   --max-cost N.NN         Kill agent if estimated cost exceeds budget
 
 # Workflow
-safe-ag diff <name>|--latest [--stat]       # show git diff from agent working tree
-safe-ag checkpoint create <name> [label]     # snapshot working tree
-safe-ag checkpoint list <name>               # list snapshots
-safe-ag checkpoint revert <name> <ref>       # revert to snapshot
-safe-ag todo add <name> "text"               # add merge requirement
-safe-ag todo list <name>                     # show todos
-safe-ag todo check <name> <index>            # mark done
-safe-ag pr <name> [--title T --base B]       # create GitHub PR
-safe-ag review <name> [--base B]             # AI code review
+berth diff <name>|--latest [--stat]       # show git diff from agent working tree
+berth checkpoint create <name> [label]     # snapshot working tree
+berth checkpoint list <name>               # list snapshots
+berth checkpoint revert <name> <ref>       # revert to snapshot
+berth todo add <name> "text"               # add merge requirement
+berth todo list <name>                     # show todos
+berth todo check <name> <index>            # mark done
+berth pr <name> [--title T --base B]       # create GitHub PR
+berth review <name> [--base B]             # AI code review
 
 # Output & inspection
-safe-ag output <name>|--latest              # last agent message
-safe-ag output --diff <name>                # git diff
-safe-ag output --files <name>               # list changed files
-safe-ag output --commits <name>             # git log
-safe-ag output --json <name>                # all as JSON
-safe-ag summary <name>|--latest             # one-screen overview
-safe-ag replay <name>|--latest              # replay session from event log
+berth output <name>|--latest              # last agent message
+berth output --diff <name>                # git diff
+berth output --files <name>               # list changed files
+berth output --commits <name>             # git log
+berth output --json <name>                # all as JSON
+berth summary <name>|--latest             # one-screen overview
+berth replay <name>|--latest              # replay session from event log
 
 # Retry
-safe-ag retry <name>|--latest [--feedback "text"]  # re-run with same config
+berth retry <name>|--latest [--feedback "text"]  # re-run with same config
 
 # Templates
-safe-ag template list                       # list built-in + custom templates
-safe-ag template show <name>                # print template prompt
-safe-ag template create <name>              # create custom template
+berth template list                       # list built-in + custom templates
+berth template show <name>                # print template prompt
+berth template create <name>              # create custom template
 
 # Config
-safe-ag config set|get|show|reset           # manage defaults
+berth config set|get|show|reset           # manage defaults
 
 # Fleet & Pipelines
-safe-ag fleet manifest.yaml [--dry-run]      # spawn agents from manifest
-safe-ag fleet status                         # show running fleet progress
-safe-ag pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
+berth fleet manifest.yaml [--dry-run]      # spawn agents from manifest
+berth fleet status                         # show running fleet progress
+berth pipeline pipeline.yaml [--dry-run]   # run multi-step pipeline
 
 # Analytics
-safe-ag cost <name>                          # estimate API spend
-safe-ag cost --history [7d]                  # historical cost from audit log
-safe-ag audit [--lines N]                    # show operation log
+berth cost <name>                          # estimate API spend
+berth cost --history [7d]                  # historical cost from audit log
+berth audit [--lines N]                    # show operation log
 ```
 
 ## Security Model
@@ -185,7 +185,7 @@ safe-ag audit [--lines N]                    # show operation log
 |---------|----------|
 | SSH agent OFF | `--ssh` (uses socat relay in VM for userns-remap compat) |
 | Per-container auth volume | `--reuse-auth` to opt into shared Claude/Codex auth |
-| AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `safe-ag aws-refresh`) |
+| AWS credentials OFF | `--aws <profile>` (tmpfs-backed, refresh with `berth aws-refresh`) |
 | Host config auto-injected (seeds only, no overwrite) | — |
 | Security preamble injected into CLAUDE.md / AGENTS.md | — |
 | Read-only rootfs | — |
@@ -212,7 +212,7 @@ go test ./...
 go test ./pkg/docker/ -v
 ```
 
-Go test packages in `pkg/` and `cmd/safe-ag/`:
+Go test packages in `pkg/` and `cmd/berth/`:
 - `pkg/validate` — name, network, PIDs validation
 - `pkg/vmexec` — Executor interface and FakeExecutor
 - `pkg/repourl` — URL parsing, traversal prevention
@@ -224,7 +224,7 @@ Go test packages in `pkg/` and `cmd/safe-ag/`:
 - `pkg/events` — event emission, notifications, budget
 - `pkg/cost` — model pricing, cost computation
 - `pkg/fleet` — YAML manifest parsing
-- `cmd/safe-ag` — spawn parity, container name resolution, retry reconstruction
+- `cmd/berth` — spawn parity, container name resolution, retry reconstruction
 
 Shell runtime verification lives in focused smoke or integration tests rather than a standalone `tests/` bash suite.
 
@@ -252,7 +252,7 @@ Agent skills in `.claude/skills/` and `.codex/skills/`:
 - `agent-spawn` — spawn a sandboxed agent
 - `agent-manage` — list/attach/stop/cleanup
 - `agent-setup` — first-time setup, rebuild, troubleshooting
-- `agent-orchestrate` — supervise multi-agent safe-ag workflows
+- `agent-orchestrate` — supervise multi-agent berth workflows
 - `agent-manifest-author` — author fleet and pipeline manifests
 
 ## Commit Style & Releases
@@ -275,15 +275,15 @@ Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
 4. Packages tarball, creates GitHub Release with changelog
 5. Updates Homebrew tap (`0x666c6f/homebrew-tap`) with new formula
 
-**Version injection:** `cmd/safe-ag/main.go` has `var Version = "dev"`. The release workflow injects the real version via `-ldflags "-X main.Version=X.Y.Z"`. `safe-ag --version` prints `safe-agentic vX.Y.Z`.
+**Version injection:** `cmd/berth/main.go` has `var Version = "dev"`. The release workflow injects the real version via `-ldflags "-X main.Version=X.Y.Z"`. `berth --version` prints `berth vX.Y.Z`.
 
 **No release?** If all commits since last tag are `docs:`, `chore:`, `ci:`, or `test:`, no release is created.
 
 ## Known Limitations
 
-- **Default posture: `--home-mount none`** — the host home is never shared with the VM (strongest isolation). Apple's `container` has no way to mount a single host directory into a machine (only `--home-mount ro|rw|none`), so `--worktree` (which needs a host directory bind-mounted into the agent) is **opt-in**: `safe-ag setup --enable-worktrees` (or `safe-ag config set defaults.worktrees_mount true`) switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds only the worktrees root (`~/.safe-ag/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Agent containers only bind-mount a per-agent subdir of `/worktrees`, so the only host path reachable is the worktrees root.
-- **Enabling worktrees is a deliberate weakening of the VM boundary.** `home-mount=rw` shares the whole home with the machine at the virtiofs level; safe-agentic detaches/masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home (default `home-mount=none` shares nothing, so it can't). Keep secrets and unrelated projects out of the worktrees root. `safe-ag diagnose` reports the posture; `safe-ag setup`/`safe-ag vm start` reconcile the machine in either direction and re-assert the masks. A `--worktree-path` outside the worktrees root is rejected before launch. See `docs/security/threat-model.md`.
-- VM internet egress relies on host pf NAT plus `net.inet.ip.forwarding=1`, applied during `safe-ag setup`. A macOS reboot resets forwarding and flushes the pf anchor, so the VM loses egress (clones time out, agents die on startup). `safe-ag vm start` now re-applies NAT, and `safe-ag diagnose` flags the missing egress.
+- **Default posture: `--home-mount none`** — the host home is never shared with the VM (strongest isolation). Apple's `container` has no way to mount a single host directory into a machine (only `--home-mount ro|rw|none`), so `--worktree` (which needs a host directory bind-mounted into the agent) is **opt-in**: `berth setup --enable-worktrees` (or `berth config set defaults.worktrees_mount true`) switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds only the worktrees root (`~/.berth/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Agent containers only bind-mount a per-agent subdir of `/worktrees`, so the only host path reachable is the worktrees root.
+- **Enabling worktrees is a deliberate weakening of the VM boundary.** `home-mount=rw` shares the whole home with the machine at the virtiofs level; berth detaches/masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home (default `home-mount=none` shares nothing, so it can't). Keep secrets and unrelated projects out of the worktrees root. `berth diagnose` reports the posture; `berth setup`/`berth vm start` reconcile the machine in either direction and re-assert the masks. A `--worktree-path` outside the worktrees root is rejected before launch. See `docs/security/threat-model.md`.
+- VM internet egress relies on host pf NAT plus `net.inet.ip.forwarding=1`, applied during `berth setup`. A macOS reboot resets forwarding and flushes the pf anchor, so the VM loses egress (clones time out, agents die on startup). `berth vm start` now re-applies NAT, and `berth diagnose` flags the missing egress.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
 - Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
 - Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.

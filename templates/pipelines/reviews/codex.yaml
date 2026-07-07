@@ -10,8 +10,8 @@ inputs:
     required: true
     infer: pr
 examples:
-  - safe-ag pr-review codex
-  - safe-ag pr-review codex 16
+  - berth pr-review codex
+  - berth pr-review codex 16
 tags:
   - review
   - pr

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
+	"github.com/0x666c6f/berth/pkg/agentstate"
 )
 
 // statePaneLines is how much of the live tmux pane the poller inspects to infer
-// agent state (mirrors cmd/safe-ag/status.go).
+// agent state (mirrors cmd/berth/status.go).
 const statePaneLines = 40
 
 // dockerPSEntry maps the JSON output of `docker ps --format '{{json .}}'`.
@@ -258,16 +258,16 @@ func fetchAgents() ([]Agent, error) {
 	// corruption that occurs with Docker's {{json .}} Labels field.
 	format := strings.Join([]string{
 		"{{.Names}}",
-		`{{.Label "safe-agentic.agent-type"}}`,
-		`{{.Label "safe-agentic.repo-display"}}`,
-		`{{.Label "safe-agentic.ssh"}}`,
-		`{{.Label "safe-agentic.auth"}}`,
-		`{{.Label "safe-agentic.gh-auth"}}`,
-		`{{.Label "safe-agentic.docker"}}`,
-		`{{.Label "safe-agentic.network-mode"}}`,
-		`{{.Label "safe-agentic.fleet"}}`,
-		`{{.Label "safe-agentic.hierarchy"}}`,
-		`{{.Label "safe-agentic.terminal"}}`,
+		`{{.Label "berth.agent-type"}}`,
+		`{{.Label "berth.repo-display"}}`,
+		`{{.Label "berth.ssh"}}`,
+		`{{.Label "berth.auth"}}`,
+		`{{.Label "berth.gh-auth"}}`,
+		`{{.Label "berth.docker"}}`,
+		`{{.Label "berth.network-mode"}}`,
+		`{{.Label "berth.fleet"}}`,
+		`{{.Label "berth.hierarchy"}}`,
+		`{{.Label "berth.terminal"}}`,
 		"{{.Status}}",
 	}, "\t")
 	psData, psErr := execVM("docker", "ps", "-a",

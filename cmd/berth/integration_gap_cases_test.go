@@ -1,0 +1,393 @@
+//go:build integration
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func requireDeepIntegration(t *testing.T) {
+	t.Helper()
+	if os.Getenv("BERTH_DEEP_INTEGRATION") != "1" {
+		t.Skip("set BERTH_DEEP_INTEGRATION=1 to run deep live integration cases")
+	}
+}
+
+func cleanupNamedArtifacts(name string) {
+	ctx := context.Background()
+	vmExec.Run(ctx, "docker", "rm", "-f", name)
+	vmExec.Run(ctx, "docker", "rm", "-f", "berth-docker-"+name)
+	vmExec.Run(ctx, "docker", "network", "rm", name+"-net")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-docker-sock")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-docker-data")
+	vmExec.Run(ctx, "docker", "volume", "rm", name+"-auth")
+}
+
+func cleanupArtifactsByLabel(label string) {
+	ctx := context.Background()
+	out, _ := vmExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+	for _, id := range strings.Fields(string(out)) {
+		nameOut, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", id)
+		if err != nil {
+			vmExec.Run(ctx, "docker", "rm", "-f", id)
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
+		if name != "" {
+			cleanupNamedArtifacts(name)
+		}
+	}
+}
+
+func waitForContainerByLabel(t *testing.T, label string) string {
+	t.Helper()
+	ctx := context.Background()
+	for i := 0; i < 60; i++ {
+		out, _ := vmExec.Run(ctx, "docker", "ps", "-aq", "--filter", "label="+label)
+		names := strings.Fields(string(out))
+		if len(names) > 0 {
+			nameOut, err := vmExec.Run(ctx, "docker", "inspect", "--format", "{{.Name}}", names[0])
+			if err == nil {
+				return strings.TrimPrefix(strings.TrimSpace(string(nameOut)), "/")
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("container with label %s did not appear", label)
+	return ""
+}
+
+func runBerthEnv(t *testing.T, env map[string]string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(binaryPath, args...)
+	cmd.Env = integrationCommandEnv(env)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func dockerInspectAllEnv(t *testing.T, name string) string {
+	t.Helper()
+	return dockerInspectField(t, name, "{{range .Config.Env}}{{println .}}{{end}}")
+}
+
+func dockerInspectMountsJSON(t *testing.T, name string) string {
+	t.Helper()
+	return dockerInspectField(t, name, "{{json .Mounts}}")
+}
+
+func dockerInspectTmpfsJSON(t *testing.T, name string) string {
+	t.Helper()
+	return dockerInspectField(t, name, "{{json .HostConfig.Tmpfs}}")
+}
+
+func waitForDockerLogs(t *testing.T, name, needle string) string {
+	t.Helper()
+	ctx := context.Background()
+	var logs string
+	for i := 0; i < 30; i++ {
+		out, _ := vmExec.Run(ctx, "docker", "logs", name)
+		logs = string(out)
+		if strings.Contains(logs, needle) {
+			return logs
+		}
+		time.Sleep(1 * time.Second)
+	}
+	t.Fatalf("docker logs for %s never contained %q:\n%s", name, needle, logs)
+	return ""
+}
+
+func TestE2E_SpawnInjectsHostConfigsAndAuthMounts(t *testing.T) {
+	requireDeepIntegration(t)
+	suffix := testPrefix + "-configinject"
+	fullName := containerFullName("shell", suffix)
+	cleanupNamedArtifacts(fullName)
+	defer stopAndRemove(t, fullName)
+
+	tmp := t.TempDir()
+	claudeDir := filepath.Join(tmp, "claude")
+	codexDir := filepath.Join(tmp, "codex")
+	if err := os.MkdirAll(filepath.Join(claudeDir, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"env":{"A":"B"}}`), 0o644)
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("host claude doc"), 0o644)
+	os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("approval_policy = \"never\"\n"), 0o644)
+
+	out, err := runBerthEnv(t, map[string]string{
+		"CLAUDE_CONFIG_DIR": claudeDir,
+		"CODEX_HOME":        codexDir,
+	}, "spawn", "shell",
+		"--name", suffix,
+		"--repo", "https://github.com/octocat/Hello-World.git",
+		"--reuse-auth",
+		"--reuse-gh-auth",
+		"--background")
+	if err != nil {
+		t.Fatalf("spawn shell with config injection failed: %v\n%s", err, out)
+	}
+	if !waitForContainer(t, fullName) {
+		t.Fatal("container did not appear")
+	}
+
+	envs := dockerInspectAllEnv(t, fullName)
+	for _, key := range []string{
+		"BERTH_CLAUDE_CONFIG_B64=",
+		"BERTH_CLAUDE_SUPPORT_B64=",
+		"BERTH_CODEX_CONFIG_B64=",
+	} {
+		if !strings.Contains(envs, key) {
+			t.Fatalf("expected env %s in container envs:\n%s", key, envs)
+		}
+	}
+
+	mounts := dockerInspectMountsJSON(t, fullName)
+	if !strings.Contains(mounts, "berth-shell-auth") {
+		t.Fatalf("shared auth volume missing:\n%s", mounts)
+	}
+	if !strings.Contains(mounts, "berth-shell-gh-auth") {
+		t.Fatalf("shared gh auth volume missing:\n%s", mounts)
+	}
+}
+
+func TestE2E_SpawnAWSInjectsEnvAndTmpfs(t *testing.T) {
+	requireDeepIntegration(t)
+	suffix := testPrefix + "-aws"
+	fullName := containerFullName("shell", suffix)
+	cleanupNamedArtifacts(fullName)
+	defer stopAndRemove(t, fullName)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	credPath := filepath.Join(awsDir, "credentials")
+	var backup []byte
+	if existing, err := os.ReadFile(credPath); err == nil {
+		backup = existing
+	}
+	defer func() {
+		if backup != nil {
+			_ = os.WriteFile(credPath, backup, 0o600)
+		} else {
+			_ = os.Remove(credPath)
+		}
+	}()
+	creds := "[integ]\naws_access_key_id = test\naws_secret_access_key = secret\n"
+	if err := os.WriteFile(credPath, []byte(creds), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runBerth(t, "spawn", "shell",
+		"--name", suffix,
+		"--repo", "https://github.com/octocat/Hello-World.git",
+		"--aws", "integ",
+		"--background")
+	if err != nil {
+		t.Fatalf("spawn shell with aws failed: %v\n%s", err, out)
+	}
+	if !waitForContainer(t, fullName) {
+		t.Fatal("container did not appear")
+	}
+
+	envs := dockerInspectAllEnv(t, fullName)
+	if !strings.Contains(envs, "BERTH_AWS_CREDS_B64=") || !strings.Contains(envs, "AWS_PROFILE=integ") {
+		t.Fatalf("expected aws env injection:\n%s", envs)
+	}
+	tmpfs := dockerInspectTmpfsJSON(t, fullName)
+	if !strings.Contains(tmpfs, "/home/agent/.aws") {
+		t.Fatalf("expected /home/agent/.aws tmpfs:\n%s", tmpfs)
+	}
+}
+
+func TestE2E_SpawnDockerModes(t *testing.T) {
+	requireDeepIntegration(t)
+	t.Run("DinD", func(t *testing.T) {
+		suffix := testPrefix + "-dind"
+		fullName := containerFullName("shell", suffix)
+		dindName := "berth-docker-" + fullName
+		cleanupNamedArtifacts(fullName)
+		defer stopAndRemove(t, fullName)
+		defer vmExec.Run(context.Background(), "docker", "rm", "-f", dindName)
+
+		out, err := runBerth(t, "spawn", "shell",
+			"--name", suffix,
+			"--repo", "https://github.com/octocat/Hello-World.git",
+			"--docker",
+			"--background")
+		if err != nil {
+			if strings.Contains(out, "privileged mode is incompatible with user namespaces") {
+				return
+			}
+			t.Fatalf("spawn shell --docker failed: %v\n%s", err, out)
+		}
+		if !waitForContainer(t, fullName) {
+			t.Fatal("parent container did not appear")
+		}
+		if !waitForContainer(t, dindName) {
+			t.Fatal("dind sidecar did not appear")
+		}
+		if got := dockerInspectField(t, fullName, `{{index .Config.Labels "berth.docker"}}`); got != "dind" {
+			t.Fatalf("docker label = %q, want dind", got)
+		}
+		if _, err := vmExec.Run(context.Background(), "docker", "exec", dindName, "docker", "info"); err != nil {
+			t.Fatalf("dind docker info failed: %v", err)
+		}
+	})
+
+	t.Run("HostSocket", func(t *testing.T) {
+		suffix := testPrefix + "-hostsock"
+		fullName := containerFullName("shell", suffix)
+		cleanupNamedArtifacts(fullName)
+		defer stopAndRemove(t, fullName)
+
+		out, err := runBerth(t, "spawn", "shell",
+			"--name", suffix,
+			"--repo", "https://github.com/octocat/Hello-World.git",
+			"--docker-socket",
+			"--background")
+		if err != nil {
+			t.Fatalf("spawn shell --docker-socket failed: %v\n%s", err, out)
+		}
+		if !waitForContainer(t, fullName) {
+			t.Fatal("container did not appear")
+		}
+		envs := dockerInspectAllEnv(t, fullName)
+		if !strings.Contains(envs, "DOCKER_HOST=unix:///run/docker-host.sock") {
+			t.Fatalf("expected DOCKER_HOST env:\n%s", envs)
+		}
+		mounts := dockerInspectMountsJSON(t, fullName)
+		if !strings.Contains(mounts, "/var/run/docker.sock") || !strings.Contains(mounts, "/run/docker-host.sock") {
+			t.Fatalf("expected docker socket bind mount:\n%s", mounts)
+		}
+	})
+}
+
+func TestE2E_LiveFleetAndPipelineExecution(t *testing.T) {
+	requireDeepIntegration(t)
+	t.Run("FleetShellManifest", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "fleet.yaml")
+		data := `name: integ-shell-fleet
+agents:
+  - name: fleet-one
+    type: shell
+    repo: https://github.com/octocat/Hello-World.git
+  - name: fleet-two
+    type: shell
+    repo: https://github.com/octocat/Hello-World.git
+`
+		if err := os.WriteFile(manifest, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"agent-shell-fleet-one", "agent-shell-fleet-two"} {
+			cleanupNamedArtifacts(name)
+		}
+
+		out, err := runBerth(t, "fleet", manifest)
+		if err != nil {
+			t.Fatalf("fleet run failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Fleet volume:") || !strings.Contains(out, "Fleet spawned 2 agent(s).") {
+			t.Fatalf("unexpected fleet output:\n%s", out)
+		}
+		for _, name := range []string{"agent-shell-fleet-one", "agent-shell-fleet-two"} {
+			defer stopAndRemove(t, name)
+			if !waitForContainer(t, name) {
+				t.Fatalf("fleet container %s did not appear", name)
+			}
+		}
+	})
+
+	t.Run("PipelineShellManifest", func(t *testing.T) {
+		dir := t.TempDir()
+		child := filepath.Join(dir, "child.yaml")
+		parent := filepath.Join(dir, "parent.yaml")
+		if err := os.WriteFile(child, []byte(`name: child-pipe
+steps:
+  - name: child-step
+    type: shell
+    repo: https://github.com/octocat/Hello-World.git
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		parentBody := fmt.Sprintf(`name: integ-shell-pipeline
+stages:
+  - name: root-step
+    agents:
+      - name: root-step
+        type: shell
+        repo: https://github.com/octocat/Hello-World.git
+  - name: nested
+    depends_on: [root-step]
+    pipeline: %q
+`, child)
+		if err := os.WriteFile(parent, []byte(parentBody), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cleanupArtifactsByLabel("berth.fleet=integ-shell-pipeline")
+
+		out, err := runBerth(t, "pipeline", parent)
+		if err != nil {
+			t.Fatalf("pipeline run failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, `Pipeline "integ-shell-pipeline" complete.`) {
+			t.Fatalf("unexpected pipeline output:\n%s", out)
+		}
+		for _, label := range []string{
+			"berth.hierarchy=integ-shell-pipeline/root-step",
+			"berth.hierarchy=integ-shell-pipeline/child-pipe/child-step",
+		} {
+			name := waitForContainerByLabel(t, label)
+			defer cleanupNamedArtifacts(name)
+		}
+	})
+}
+
+func TestE2E_ClaudeAndCodexStartupLogs(t *testing.T) {
+	requireDeepIntegration(t)
+	cases := []struct {
+		agentType string
+	}{
+		{agentType: "claude"},
+		{agentType: "codex"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.agentType, func(t *testing.T) {
+			suffix := testPrefix + "-" + tc.agentType + "-startup"
+			fullName := containerFullName(tc.agentType, suffix)
+			cleanupNamedArtifacts(fullName)
+			defer stopAndRemove(t, fullName)
+
+			out, err := runBerth(t, "spawn", tc.agentType,
+				"--name", suffix,
+				"--repo", "https://github.com/octocat/Hello-World.git",
+				"--auto-trust",
+				"--background")
+			if err != nil {
+				t.Fatalf("spawn %s failed: %v\n%s", tc.agentType, err, out)
+			}
+			if !waitForContainer(t, fullName) {
+				t.Fatalf("%s container did not appear", tc.agentType)
+			}
+			logs := waitForDockerLogs(t, fullName, "[entrypoint] Cloning https://github.com/octocat/Hello-World.git")
+			if strings.Contains(logs, "Do you trust this project") {
+				t.Fatalf("%s logs should not contain trust prompt:\n%s", tc.agentType, logs)
+			}
+		})
+	}
+}

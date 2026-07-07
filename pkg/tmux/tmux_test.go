@@ -6,19 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 func TestSessionName_Default(t *testing.T) {
-	t.Setenv("SAFE_AGENTIC_TMUX_SESSION_NAME", "")
+	t.Setenv("BERTH_TMUX_SESSION_NAME", "")
 	name := SessionName()
-	if name != "safe-agentic" {
-		t.Errorf("expected default session name %q, got %q", "safe-agentic", name)
+	if name != "berth" {
+		t.Errorf("expected default session name %q, got %q", "berth", name)
 	}
 }
 
 func TestSessionName_EnvOverride(t *testing.T) {
-	t.Setenv("SAFE_AGENTIC_TMUX_SESSION_NAME", "my-session")
+	t.Setenv("BERTH_TMUX_SESSION_NAME", "my-session")
 	name := SessionName()
 	if name != "my-session" {
 		t.Errorf("expected session name %q from env, got %q", "my-session", name)

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/berth/pkg/config"
 )
 
 type Options struct {
@@ -68,7 +68,7 @@ func VMPath(root, hostPath string) (string, error) {
 	}
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("worktree path %s is outside the safe-agentic worktrees root %s; the VM only mounts that root at %s, so worktrees must live under it (default ~/.safe-ag/worktrees). Relocate it or set a new root with: safe-ag config set defaults.worktrees_dir <path> (must be under your home directory)", absPath, absRoot, VMMountPoint)
+		return "", fmt.Errorf("worktree path %s is outside the berth worktrees root %s; the VM only mounts that root at %s, so worktrees must live under it (default ~/.berth/worktrees). Relocate it or set a new root with: berth config set defaults.worktrees_dir <path> (must be under your home directory)", absPath, absRoot, VMMountPoint)
 	}
 	if rel == "." {
 		return VMMountPoint, nil
@@ -91,7 +91,7 @@ func DefaultBranch(containerName string) string {
 	if safe == "" {
 		safe = "agent"
 	}
-	return "safe-ag/" + safe
+	return "berth/" + safe
 }
 
 func RegistryPath() string {
@@ -170,7 +170,7 @@ func Prepare(opts Options) (Worktree, error) {
 
 func CopyIncludes(repoRoot, worktreePath, includeFile string) ([]string, error) {
 	if includeFile == "" {
-		includeFile = filepath.Join(repoRoot, ".safe-aginclude")
+		includeFile = filepath.Join(repoRoot, ".berthinclude")
 	}
 	data, err := os.ReadFile(includeFile)
 	if os.IsNotExist(err) {

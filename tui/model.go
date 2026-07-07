@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
+	"github.com/0x666c6f/berth/pkg/agentstate"
 )
 
-// Agent represents a single safe-agentic container with its metadata and live stats.
+// Agent represents a single berth container with its metadata and live stats.
 type Agent struct {
 	Name        string
 	Type        string // "claude", "codex", "shell"
@@ -19,7 +19,7 @@ type Agent struct {
 	NetworkMode string
 	Fleet       string // fleet/pipeline volume name (empty if standalone)
 	Hierarchy   string // slash-separated nested fleet/pipeline hierarchy
-	Terminal    string // safe-agentic.terminal label ("tmux", "background", …)
+	Terminal    string // berth.terminal label ("tmux", "background", …)
 	Status      string
 	Running     bool
 	Finished    bool

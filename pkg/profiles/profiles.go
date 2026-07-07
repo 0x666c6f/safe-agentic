@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/berth/pkg/config"
 	"github.com/BurntSushi/toml"
 )
 
@@ -92,7 +92,7 @@ func UserDir() string {
 }
 
 func ProjectDir(cwd string) string {
-	return filepath.Join(cwd, ".safe-ag", "agents")
+	return filepath.Join(cwd, ".berth", "agents")
 }
 
 func DefaultDirs(cwd string) []string {

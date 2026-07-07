@@ -1,6 +1,6 @@
 # Isolation Boundaries
 
-safe-agentic relies on three boundaries, not one.
+berth relies on three boundaries, not one.
 
 ## Boundary 1: macOS host -> Apple container machine
 

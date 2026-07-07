@@ -1,9 +1,9 @@
-module github.com/0x666c6f/safe-agentic/app
+module github.com/0x666c6f/berth/app
 
 go 1.25.5
 
 require (
-	github.com/0x666c6f/safe-agentic v0.0.0-00010101000000-000000000000
+	github.com/0x666c6f/berth v0.0.0-00010101000000-000000000000
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.112
@@ -25,4 +25,4 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 )
 
-replace github.com/0x666c6f/safe-agentic => ../
+replace github.com/0x666c6f/berth => ../

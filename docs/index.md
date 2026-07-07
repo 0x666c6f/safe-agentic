@@ -6,7 +6,7 @@ hide:
 
 <div class="landing-hero" markdown="1">
 
-<p class="landing-eyebrow">safe-agentic</p>
+<p class="landing-eyebrow">berth</p>
 
 # Sandbox coding agents without handing them your host
 
@@ -17,15 +17,15 @@ Launch Claude Code and Codex inside a hardened Apple container machine, with one
 ```bash
 open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
-brew install safe-agentic
-safe-ag setup
+brew install berth
+berth setup
 ```
 
 </div>
 
 [Get Started](quickstart.md){ .md-button .md-button--primary }
 [Command Map](usage.md){ .md-button }
-[GitHub](https://github.com/0x666c6f/safe-agentic){ .md-button }
+[GitHub](https://github.com/0x666c6f/berth){ .md-button }
 
 <div class="landing-meta">
   <span>macOS host</span>
@@ -37,7 +37,7 @@ safe-ag setup
 
 <div class="landing-callout" markdown="1">
 
-`safe-agentic` is a sandbox runner for autonomous coding agents. It is not an editor policy layer pretending to be isolation.
+`berth` is a sandbox runner for autonomous coding agents. It is not an editor policy layer pretending to be isolation.
 
 </div>
 
@@ -77,22 +77,22 @@ safe-ag setup
   <a class="landing-panel" href="guide/spawning/">
     <span class="landing-panel-kicker">Spawn</span>
     <strong>Launch Claude Code, Codex, or a shell in an isolated container.</strong>
-    <code>safe-ag spawn codex --repo ...</code>
+    <code>berth spawn codex --repo ...</code>
   </a>
   <a class="landing-panel" href="guide/workflow/">
     <span class="landing-panel-kicker">Review</span>
     <strong>Peek at output, diff the workspace, review changes, then open a PR.</strong>
-    <code>safe-ag peek --latest</code>
+    <code>berth peek --latest</code>
   </a>
   <a class="landing-panel" href="guide/fleet/">
     <span class="landing-panel-kicker">Orchestrate</span>
     <strong>Run fleets and pipelines for fan-out review, staged fixes, and consolidation.</strong>
-    <code>safe-ag fleet manifest.yaml</code>
+    <code>berth fleet manifest.yaml</code>
   </a>
   <a class="landing-panel" href="guide/tui/">
     <span class="landing-panel-kicker">Observe</span>
     <strong>Use the TUI to monitor live sessions without dropping into Docker.</strong>
-    <code>safe-ag tui</code>
+    <code>berth tui</code>
   </a>
 </div>
 
@@ -130,27 +130,27 @@ safe-ag setup
 === "Single agent"
 
     ```bash
-    safe-ag spawn claude \
+    berth spawn claude \
       --ssh \
       --repo git@github.com:org/repo.git \
       --prompt "Fix the failing CI tests"
 
-    safe-ag peek --latest
-    safe-ag diff --latest
-    safe-ag review --latest
+    berth peek --latest
+    berth diff --latest
+    berth review --latest
     ```
 
 === "Parallel review"
 
     ```bash
-    safe-ag fleet examples/fleet-review-and-fix.yaml
-    safe-ag tui
+    berth fleet examples/fleet-review-and-fix.yaml
+    berth tui
     ```
 
 === "Staged pipeline"
 
     ```bash
-    safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+    berth pipeline examples/pipeline-consolidate-and-fix.yaml
     ```
 
 ## Read in this order

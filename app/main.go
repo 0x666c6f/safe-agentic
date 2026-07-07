@@ -17,16 +17,16 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/dock"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/cli"
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
-	"github.com/0x666c6f/safe-agentic/app/internal/poll"
-	"github.com/0x666c6f/safe-agentic/app/internal/state"
-	"github.com/0x666c6f/safe-agentic/app/internal/svc"
-	"github.com/0x666c6f/safe-agentic/app/internal/term"
-	"github.com/0x666c6f/safe-agentic/app/internal/watch"
-	"github.com/0x666c6f/safe-agentic/pkg/config"
-	"github.com/0x666c6f/safe-agentic/pkg/events"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/cli"
+	"github.com/0x666c6f/berth/app/internal/emit"
+	"github.com/0x666c6f/berth/app/internal/poll"
+	"github.com/0x666c6f/berth/app/internal/state"
+	"github.com/0x666c6f/berth/app/internal/svc"
+	"github.com/0x666c6f/berth/app/internal/term"
+	"github.com/0x666c6f/berth/app/internal/watch"
+	"github.com/0x666c6f/berth/pkg/config"
+	"github.com/0x666c6f/berth/pkg/events"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
@@ -36,7 +36,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// Menubar glyph: safe-agentic shield rendered as a macOS template icon
+// Menubar glyph: berth mark rendered as a macOS template icon
 // (black + alpha; generated from docs/assets/dashboard-favicon.png).
 //
 //go:embed assets/trayicon-template.png
@@ -143,10 +143,10 @@ func chatMenuLine(a poll.Agent, needsYou map[string]bool) (string, []byte) {
 }
 
 func vmName() string {
-	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+	if v := os.Getenv("BERTH_VM_NAME"); v != "" {
 		return v
 	}
-	return "safe-agentic"
+	return "berth"
 }
 
 func main() {
@@ -168,7 +168,7 @@ func main() {
 	dockSvc := dock.New()
 
 	app := application.New(application.Options{
-		Name: "Safe Agentic",
+		Name: "Berth",
 		Services: []application.Service{
 			application.NewService(agentSvc),
 			application.NewService(termSvc),
@@ -195,7 +195,7 @@ func main() {
 
 	newWindow := func() *application.WebviewWindow {
 		return app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Title:  "Safe Agentic",
+			Title:  "Berth",
 			Width:  1400,
 			Height: 900,
 			URL:    "/",
@@ -310,7 +310,7 @@ func main() {
 			em.Emit("focus.spawn", nil)
 		})
 		menu.AddSeparator()
-		menu.Add("Open Safe Agentic").OnClick(func(*application.Context) { showApp() })
+		menu.Add("Open Berth").OnClick(func(*application.Context) { showApp() })
 		menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 		tray.SetMenu(menu)
 	}

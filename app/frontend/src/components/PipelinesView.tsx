@@ -7,8 +7,8 @@ import {
   type Pipeline, type Step, type StepType,
   newStep, emptyPipeline, parsePipeline, dumpPipeline, pipelineVars, parsePrUrl,
 } from "../pipeline";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
-import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
+import { Service } from "../../bindings/github.com/0x666c6f/berth/app/internal/state";
 
 const Toggle = ({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) => (
   <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-400">

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/cli"
-	"github.com/0x666c6f/safe-agentic/app/internal/poll"
-	"github.com/0x666c6f/safe-agentic/app/internal/state"
-	"github.com/0x666c6f/safe-agentic/pkg/audit"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/cli"
+	"github.com/0x666c6f/berth/app/internal/poll"
+	"github.com/0x666c6f/berth/app/internal/state"
+	"github.com/0x666c6f/berth/pkg/audit"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 type AgentService struct {
@@ -160,7 +160,7 @@ func (s *AgentService) CheckpointRestore(name, ref string) error {
 
 func (s *AgentService) Cost(name string) (string, error) { return s.run("cost", name) }
 
-// CostSummary returns `safe-ag cost <name>` stdout, pairing with the MaxCost
+// CostSummary returns `berth cost <name>` stdout, pairing with the MaxCost
 // budget surfaced on the agent card.
 func (s *AgentService) CostSummary(name string) (string, error) { return s.run("cost", name) }
 
@@ -168,7 +168,7 @@ func (s *AgentService) CostHistory(window string) (string, error) {
 	return s.run("cost", "--history", window)
 }
 
-// CommandLog returns the recent executed safe-ag commands (the console feed).
+// CommandLog returns the recent executed berth commands (the console feed).
 func (s *AgentService) CommandLog() []cli.CommandEntry {
 	if s.Runner == nil {
 		return nil
@@ -199,7 +199,7 @@ func (s *AgentService) AuditFor(name string, limit int) ([]audit.Entry, error) {
 	return out, nil
 }
 
-// Diagnose returns `safe-ag diagnose` stdout. Uses the long timeout — diagnose
+// Diagnose returns `berth diagnose` stdout. Uses the long timeout — diagnose
 // probes the VM/Docker/NAT and can take well over the default budget.
 func (s *AgentService) Diagnose() (string, error) { return s.runLong("diagnose") }
 
@@ -214,7 +214,7 @@ func (s *AgentService) Clone(name string) (string, error) {
 	ctx, cancel := s.ctx()
 	defer cancel()
 	out, err := s.Exec.Run(ctx, "docker", "inspect", "--format",
-		`{{index .Config.Labels "safe-agentic.agent-type"}}|{{index .Config.Labels "safe-agentic.ssh"}}|{{range .Config.Env}}{{println .}}{{end}}`,
+		`{{index .Config.Labels "berth.agent-type"}}|{{index .Config.Labels "berth.ssh"}}|{{range .Config.Env}}{{println .}}{{end}}`,
 		name)
 	if err != nil {
 		return "", fmt.Errorf("inspect %s: %w", name, err)
@@ -279,7 +279,7 @@ func (s *AgentService) VMRestart() (string, error) {
 	return stopOut + "\n" + startOut, err
 }
 
-// VMRepair re-runs the idempotent `safe-ag setup` — re-hardens the machine,
+// VMRepair re-runs the idempotent `berth setup` — re-hardens the machine,
 // reconciles Docker/NAT, and rebuilds support files. The heavy "reset" option.
 func (s *AgentService) VMRepair() (string, error) { return s.runLong("setup") }
 

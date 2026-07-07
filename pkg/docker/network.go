@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/validate"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/labels"
+	"github.com/0x666c6f/berth/pkg/validate"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 func ManagedNetworkName(containerName string) string {
@@ -15,7 +15,7 @@ func ManagedNetworkName(containerName string) string {
 
 func ManagedBridgeName(containerName string) string {
 	sum := sha1.Sum([]byte(containerName))
-	return fmt.Sprintf("sa%x", sum[:6])
+	return fmt.Sprintf("bt%x", sum[:6])
 }
 
 func CreateManagedNetwork(ctx context.Context, exec vmexec.Executor, containerName string) (string, error) {

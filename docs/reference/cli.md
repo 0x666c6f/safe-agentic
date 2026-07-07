@@ -1,6 +1,6 @@
 # CLI Reference
 
-This page is the exhaustive command reference for `safe-ag` as it exists today.
+This page is the exhaustive command reference for `berth` as it exists today.
 
 Conventions used below:
 - `<required>` means a required positional argument
@@ -10,8 +10,8 @@ Conventions used below:
 ## Top-level
 
 ```bash
-safe-ag [command]
-safe-ag [command] --help
+berth [command]
+berth [command] --help
 ```
 
 Global flags:
@@ -56,7 +56,7 @@ Top-level commands:
 | `review-comments` | store local file/line review comments |
 | `run` | quick-start wrapper around `spawn` |
 | `search` | search agent session logs |
-| `server` | serve safe-agentic state over JSON protocol |
+| `server` | serve berth state over JSON protocol |
 | `sessions` | export session data |
 | `setup` | initialize VM and build the image |
 | `spawn` | start a new agent container |
@@ -78,8 +78,8 @@ Top-level commands:
 Many commands take one of these forms:
 
 ```bash
-safe-ag <command> <name>
-safe-ag <command> --latest
+berth <command> <name>
+berth <command> --latest
 ```
 
 `<name>` may be a full container name or a unique substring. Ambiguous substrings fail and print the matching container names.
@@ -107,7 +107,7 @@ Commands in this family:
 Usage:
 
 ```bash
-safe-ag spawn <claude|codex|shell> [flags]
+berth spawn <claude|codex|shell> [flags]
 ```
 
 Flags:
@@ -117,7 +117,7 @@ Flags:
 | `--auto-trust` | bool | skip the trust prompt |
 | `--aws` | string | AWS profile for credential injection |
 | `--background` | bool | run detached instead of attaching |
-| `--allow-setup-scripts` | bool | allow repo-provided `safe-agentic.json` setup hooks |
+| `--allow-setup-scripts` | bool | allow repo-provided `berth.json` setup hooks |
 | `--cpus` | string | CPU limit |
 | `--docker` | bool | enable Docker-in-Docker |
 | `--docker-socket` | bool | mount the VM Docker socket directly |
@@ -152,33 +152,33 @@ Flags:
 | `--var` | strings | template variable assignment `key=value`; repeatable |
 | `--worktree` | bool | create and mount a managed git worktree from the current checkout |
 | `--worktree-branch` | string | branch name for `--worktree` |
-| `--worktree-include` | string | include file for ignored local files; default `.safe-aginclude` |
+| `--worktree-include` | string | include file for ignored local files; default `.berthinclude` |
 | `--worktree-path` | string | destination path for `--worktree` |
 
 Worktree mode:
 
 ```bash
-safe-ag spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
+berth spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
 ```
 
-`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `safe-ag/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.safe-aginclude`.
+`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `berth/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.berthinclude`.
 
-**`--worktree` is opt-in and off by default.** Apple's `container` cannot mount an arbitrary host directory into a machine — the only host share is `--home-mount ro|rw|none`, and safe-agentic defaults to `none` (nothing shared, strongest isolation). To use `--worktree` you must enable the worktree mount:
+**`--worktree` is opt-in and off by default.** Apple's `container` cannot mount an arbitrary host directory into a machine — the only host share is `--home-mount ro|rw|none`, and berth defaults to `none` (nothing shared, strongest isolation). To use `--worktree` you must enable the worktree mount:
 
 ```bash
-safe-ag setup --enable-worktrees      # or: safe-ag config set defaults.worktrees_mount true && safe-ag setup
+berth setup --enable-worktrees      # or: berth config set defaults.worktrees_mount true && berth setup
 ```
 
-This switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds *only* the worktrees root — `~/.safe-ag/worktrees` by default, or `defaults.worktrees_dir` (must be under your home) — to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`. On spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the Docker bind. A `--worktree-path` outside the worktrees root is rejected before launch.
+This switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds *only* the worktrees root — `~/.berth/worktrees` by default, or `defaults.worktrees_dir` (must be under your home) — to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`. On spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the Docker bind. A `--worktree-path` outside the worktrees root is rejected before launch.
 
-Disable again with `safe-ag setup --disable-worktrees` (restores `home-mount=none`). `safe-ag setup` and `safe-ag vm start` reconcile the machine to match the config in either direction; `safe-ag diagnose` reports the current posture.
+Disable again with `berth setup --disable-worktrees` (restores `home-mount=none`). `berth setup` and `berth vm start` reconcile the machine to match the config in either direction; `berth diagnose` reports the current posture.
 
-**Security trade-off:** enabling the worktree mount **weakens the VM boundary**. `home-mount=rw` shares your whole home with the machine at the virtiofs level; safe-agentic detaches and masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home — the default `home-mount=none` shares nothing and cannot. Keep secrets and unrelated projects out of the worktrees root. See [Threat model](../security/threat-model.md).
+**Security trade-off:** enabling the worktree mount **weakens the VM boundary**. `home-mount=rw` shares your whole home with the machine at the virtiofs level; berth detaches and masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home — the default `home-mount=none` shares nothing and cannot. Keep secrets and unrelated projects out of the worktrees root. See [Threat model](../security/threat-model.md).
 
 Spawn policy:
 
 ```toml
-# ~/.safe-ag/rules.toml or .safe-ag/rules.toml
+# ~/.berth/rules.toml or .berth/rules.toml
 [allow]
 docker_modes = ["off", "dind"]
 networks = ["managed"]
@@ -204,7 +204,7 @@ persisted (base64) on the container and reconstructed for later delivery.
 | `command` | `command:<path>` | run an executable with the event |
 | `system` | `system` | native macOS notification |
 
-The `system` target posts a macOS notification titled `safe-ag: <container>`
+The `system` target posts a macOS notification titled `berth: <container>`
 via `terminal-notifier` when it is on `PATH`, otherwise via
 `osascript -e 'display notification …'`. The sound conveys severity:
 attention-worthy events (`blocked`, `failed`, `needs-auth`, `stuck`) play a
@@ -215,7 +215,7 @@ hosts the `system` target is a no-op.
 Example:
 
 ```bash
-safe-ag spawn claude --notify terminal,system --repo git@github.com:org/repo.git
+berth spawn claude --notify terminal,system --repo git@github.com:org/repo.git
 ```
 
 ## `run`
@@ -223,7 +223,7 @@ safe-ag spawn claude --notify terminal,system --repo git@github.com:org/repo.git
 Usage:
 
 ```bash
-safe-ag run <repo-url> [repo-url...] [prompt] [flags]
+berth run <repo-url> [repo-url...] [prompt] [flags]
 ```
 
 `run` is a convenience wrapper around `spawn`.
@@ -232,7 +232,7 @@ Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
-| `--allow-setup-scripts` | bool | allow repo-provided `safe-agentic.json` setup hooks |
+| `--allow-setup-scripts` | bool | allow repo-provided `berth.json` setup hooks |
 | `--background` | bool | run detached |
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
@@ -256,11 +256,11 @@ Flags:
 Usage:
 
 ```bash
-safe-ag list [flags]
+berth list [flags]
 ```
 
 The human-readable output includes a **STATE** column next to each agent —
-the same `agentstate` classification used by `safe-ag status` and the TUI
+the same `agentstate` classification used by `berth status` and the TUI
 (`blocked` / `working` / `done` / `idle` / `exited`). Running tmux agents are
 detected from their live pane; stopped containers map to `done` (clean exit) or
 `exited` (non-zero) by exit code.
@@ -279,12 +279,12 @@ Docker fields are preserved unchanged, so the output stays backward compatible.
 Usage:
 
 ```bash
-safe-ag action list
-safe-ag action show <name>
-safe-ag action run <name> [agent|--latest]
+berth action list
+berth action show <name>
+berth action run <name> [agent|--latest]
 ```
 
-Actions are loaded from `~/.safe-ag/actions.toml`, then `.safe-ag/actions.toml` in the current directory. Project actions override user actions with the same name.
+Actions are loaded from `~/.berth/actions.toml`, then `.berth/actions.toml` in the current directory. Project actions override user actions with the same name.
 
 Schema:
 
@@ -310,12 +310,12 @@ Flags:
 Usage:
 
 ```bash
-safe-ag profile list
-safe-ag profile show <name>
-safe-ag profile run <name> [prompt]
+berth profile list
+berth profile show <name>
+berth profile run <name> [prompt]
 ```
 
-Profiles are loaded from `~/.safe-ag/agents/*.toml`, then `.safe-ag/agents/*.toml` in the current directory. Project profiles override user profiles with the same name.
+Profiles are loaded from `~/.berth/agents/*.toml`, then `.berth/agents/*.toml` in the current directory. Project profiles override user profiles with the same name.
 
 Schema:
 
@@ -344,7 +344,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag search <query> [agent|--latest]
+berth search <query> [agent|--latest]
 ```
 
 Flags:
@@ -360,8 +360,8 @@ Flags:
 Usage:
 
 ```bash
-safe-ag server --stdio
-SAFE_AGENTIC_SERVER_TOKEN=secret safe-ag server --listen 127.0.0.1:8765
+berth server --stdio
+BERTH_SERVER_TOKEN=secret berth server --listen 127.0.0.1:8765
 ```
 
 Reads newline-delimited JSON requests from stdin and writes JSON responses to stdout. With `--listen`, accepts authenticated `POST /rpc` requests with `Authorization: Bearer <token>`. HTTP listen addresses must be loopback-only (`localhost`, `127.0.0.1`, or `::1`).
@@ -379,17 +379,17 @@ Example:
 Usage:
 
 ```bash
-safe-ag browser capture <url> [--mode auto|http|chrome] [--annotation NOTE] [--out DIR] [--timeout 30s]
+berth browser capture <url> [--mode auto|http|chrome] [--annotation NOTE] [--out DIR] [--timeout 30s]
 ```
 
-Captures browser artifacts under `~/.safe-ag/state/browser/<timestamp>` by default. `http` mode captures DOM and headers. `chrome` mode uses headless Chrome/CDP to capture DOM, screenshot, console, and network artifacts. `--annotation` writes notes into `annotations.json` for handoff to agents. `auto` tries Chrome when available, then falls back to HTTP. It does not mount or reuse host browser profiles or cookies.
+Captures browser artifacts under `~/.berth/state/browser/<timestamp>` by default. `http` mode captures DOM and headers. `chrome` mode uses headless Chrome/CDP to capture DOM, screenshot, console, and network artifacts. `--annotation` writes notes into `annotations.json` for handoff to agents. `auto` tries Chrome when available, then falls back to HTTP. It does not mount or reuse host browser profiles or cookies.
 
 ## `attach`
 
 Usage:
 
 ```bash
-safe-ag attach <name|--latest> [flags]
+berth attach <name|--latest> [flags]
 ```
 
 Flags:
@@ -406,13 +406,13 @@ conversation. If it exited, the container is restarted and the entrypoint
 resumes automatically. If it is running but has no attachable tmux session,
 `attach --resume` **refuses** rather than relaunch — a headless agent (e.g.
 `--background`) may still be alive, and starting a second agent against the same
-workspace and auth volume would be unsafe; use `safe-ag steer` to send input, or
-`safe-ag stop` then `attach --resume` to restart. Resume works only when the
+workspace and auth volume would be unsafe; use `berth steer` to send input, or
+`berth stop` then `attach --resume` to restart. Resume works only when the
 conversation transcript survived: it lives under `~/.claude` / `~/.codex`, so a
 session that used `--ephemeral-auth` (tmpfs) loses its transcript once the
 container stops — on a stopped ephemeral container `attach --resume` **refuses**
 (restarting would auto-continue against an empty auth dir and error), so use
-plain `safe-ag attach <name>` or `safe-ag retry` for a fresh run. Use
+plain `berth attach <name>` or `berth retry` for a fresh run. Use
 `--reuse-auth` (a persistent named volume) if you want conversations to survive
 stops. `--resume` supports claude and codex agents only.
 
@@ -421,7 +421,7 @@ stops. `--resume` supports claude and codex agents only.
 Usage:
 
 ```bash
-safe-ag steer <name|--latest> "follow-up message"
+berth steer <name|--latest> "follow-up message"
 ```
 
 If the target container is stopped, `steer` starts it first and waits for the tmux session.
@@ -437,7 +437,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag peek [name|--latest] [flags]
+berth peek [name|--latest] [flags]
 ```
 
 Flags:
@@ -452,7 +452,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag logs [name|--latest] [flags]
+berth logs [name|--latest] [flags]
 ```
 
 Flags:
@@ -476,16 +476,16 @@ miss — so ambiguous panes resolve to `working` or `unknown` rather than
 Usage:
 
 ```bash
-safe-ag status [name|--latest] [flags]
-safe-ag status --all
-safe-ag status agent-foo --json
+berth status [name|--latest] [flags]
+berth status --all
+berth status agent-foo --json
 ```
 
 Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
-| `--all` | bool | show every safe-agentic container |
+| `--all` | bool | show every berth container |
 | `--json` | bool | output as JSON |
 | `--latest` | bool | target the latest container |
 
@@ -497,7 +497,7 @@ and can drive the [`system` notify target](#notify-targets).
 Usage:
 
 ```bash
-safe-ag summary [name|--latest] [flags]
+berth summary [name|--latest] [flags]
 ```
 
 Flags:
@@ -514,7 +514,7 @@ The summary includes a `State:` line with the same detection used by
 Usage:
 
 ```bash
-safe-ag output [name|--latest] [flags]
+berth output [name|--latest] [flags]
 ```
 
 Flags:
@@ -532,7 +532,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag diff [name|--latest] [flags]
+berth diff [name|--latest] [flags]
 ```
 
 Flags:
@@ -549,7 +549,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag review [name|--latest] [flags]
+berth review [name|--latest] [flags]
 ```
 
 Flags:
@@ -558,20 +558,20 @@ Flags:
 |---|---|---|
 | `--base` | string | base branch for diff; default `main` |
 
-The review prompt requires every finding to carry a risk tag (`[HIGH]`, `[MEDIUM]`, or `[LOW]`) with a `file:line` location, and a closing `VERDICT:` line. After the raw review text, `safe-ag review` prints a grouped HIGH → LOW summary (untagged findings are kept under `UNTAGGED`, never dropped) followed by the verdict.
+The review prompt requires every finding to carry a risk tag (`[HIGH]`, `[MEDIUM]`, or `[LOW]`) with a `file:line` location, and a closing `VERDICT:` line. After the raw review text, `berth review` prints a grouped HIGH → LOW summary (untagged findings are kept under `UNTAGGED`, never dropped) followed by the verdict.
 
 ## `review-comments`
 
 Usage:
 
 ```bash
-safe-ag review-comments list [agent|--latest]
-safe-ag review-comments add [agent|--latest] <file> <line> <body>
-safe-ag review-comments resolve <id>
-safe-ag review-comments clear <agent|--latest>
+berth review-comments list [agent|--latest]
+berth review-comments add [agent|--latest] <file> <line> <body>
+berth review-comments resolve <id>
+berth review-comments clear <agent|--latest>
 ```
 
-Comments are stored locally in `~/.safe-ag/state/review-comments.jsonl`. Use them to keep file/line review notes attached to an agent while you steer fixes or prepare handoff.
+Comments are stored locally in `~/.berth/state/review-comments.jsonl`. Use them to keep file/line review notes attached to an agent while you steer fixes or prepare handoff.
 
 Flags:
 
@@ -586,8 +586,8 @@ Flags:
 Usage:
 
 ```bash
-safe-ag handoff <agent|--latest> --to-local ./workspace-copy
-safe-ag handoff <agent|--latest> --to-worktree
+berth handoff <agent|--latest> --to-local ./workspace-copy
+berth handoff <agent|--latest> --to-worktree
 ```
 
 `--to-local` copies `/workspace` out of the container. `--to-worktree` prints the managed host worktree path for agents spawned with `--worktree`.
@@ -597,11 +597,11 @@ safe-ag handoff <agent|--latest> --to-worktree
 Usage:
 
 ```bash
-safe-ag workspace stage <agent|--latest> <path...>
-safe-ag workspace unstage <agent|--latest> <path...>
-safe-ag workspace revert <agent|--latest> <path...> --yes
-safe-ag workspace stage-patch <agent|--latest> selected.patch
-safe-ag workspace revert-patch <agent|--latest> selected.patch --yes
+berth workspace stage <agent|--latest> <path...>
+berth workspace unstage <agent|--latest> <path...>
+berth workspace revert <agent|--latest> <path...> --yes
+berth workspace stage-patch <agent|--latest> selected.patch
+berth workspace revert-patch <agent|--latest> selected.patch --yes
 ```
 
 Paths must stay relative to the workspace. `revert` and `revert-patch` discard changes and require `--yes` when stdin is not interactive. Patch commands accept selected hunks from a normal unified diff and reject workspace-escaping paths.
@@ -611,23 +611,23 @@ Paths must stay relative to the workspace. `revert` and `revert-patch` discard c
 Usage:
 
 ```bash
-safe-ag worktree list
-safe-ag worktree snapshot <agent|--latest> [label]
-safe-ag worktree restore <agent|--latest> <stash-ref>
-safe-ag worktree cleanup [--dry-run] [--all]
+berth worktree list
+berth worktree snapshot <agent|--latest> [label]
+berth worktree restore <agent|--latest> <stash-ref>
+berth worktree cleanup [--dry-run] [--all]
 ```
 
-`list` reads `~/.safe-ag/state/worktrees.jsonl`. `snapshot` and `restore` operate on the git worktree attached to an agent. `cleanup` drops missing registry entries by default; `--all` also removes registered worktrees with `git worktree remove --force`.
+`list` reads `~/.berth/state/worktrees.jsonl`. `snapshot` and `restore` operate on the git worktree attached to an agent. `cleanup` drops missing registry entries by default; `--all` also removes registered worktrees with `git worktree remove --force`.
 
 ## `timeline`
 
 Usage:
 
 ```bash
-safe-ag timeline
+berth timeline
 ```
 
-Shows recent events from `~/.safe-ag/state/events.jsonl` and audit entries from `~/.safe-ag/state/audit.jsonl`.
+Shows recent events from `~/.berth/state/events.jsonl` and audit entries from `~/.berth/state/audit.jsonl`.
 
 Flags:
 
@@ -640,8 +640,8 @@ Flags:
 Usage:
 
 ```bash
-safe-ag inbox
-safe-ag inbox --all
+berth inbox
+berth inbox --all
 ```
 
 Shows events likely to need attention, such as failed cron jobs or entries marked `needs-auth`, `blocked`, `stuck`, `failed-tests`, `ready-for-review`, or `ready-for-pr`. In addition to logged events, `inbox` sweeps running agents live and adds a `blocked` item for any agent currently waiting on a prompt.
@@ -657,7 +657,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag pr [name|--latest] [flags]
+berth pr [name|--latest] [flags]
 ```
 
 Flags:
@@ -672,7 +672,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag retry <name|--latest> [flags]
+berth retry <name|--latest> [flags]
 ```
 
 Flags:
@@ -693,7 +693,7 @@ session used `--ephemeral-auth`, its transcript did not survive the stop and
 fresh attempt, or re-run the task with `--reuse-auth` so future sessions
 persist. If the source container is still running but has no live tmux session
 (a headless agent may still be active), `retry --resume` refuses rather than
-risk a second agent — use `safe-ag steer`, or `safe-ag stop` it first.
+risk a second agent — use `berth steer`, or `berth stop` it first.
 `--resume` supports claude and codex agents only.
 
 ## `replay`
@@ -701,7 +701,7 @@ risk a second agent — use `safe-ag steer`, or `safe-ag stop` it first.
 Usage:
 
 ```bash
-safe-ag replay [name|--latest] [flags]
+berth replay [name|--latest] [flags]
 ```
 
 Flags:
@@ -716,7 +716,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag sessions [name|--latest] [dest] [flags]
+berth sessions [name|--latest] [dest] [flags]
 ```
 
 Flags:
@@ -730,7 +730,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag aws-refresh [name|--latest] [profile] [flags]
+berth aws-refresh [name|--latest] [profile] [flags]
 ```
 
 Flags:
@@ -744,7 +744,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag cost [name|--latest] [flags]
+berth cost [name|--latest] [flags]
 ```
 
 Flags:
@@ -759,7 +759,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag audit [flags]
+berth audit [flags]
 ```
 
 Flags:
@@ -775,19 +775,19 @@ Subcommands:
 ### `checkpoint create`
 
 ```bash
-safe-ag checkpoint create <name|--latest> [label]
+berth checkpoint create <name|--latest> [label]
 ```
 
 ### `checkpoint list`
 
 ```bash
-safe-ag checkpoint list <name|--latest>
+berth checkpoint list <name|--latest>
 ```
 
 ### `checkpoint restore`
 
 ```bash
-safe-ag checkpoint restore <name|--latest> <ref>
+berth checkpoint restore <name|--latest> <ref>
 ```
 
 No additional flags beyond `--help`.
@@ -799,25 +799,25 @@ Subcommands:
 ### `todo add`
 
 ```bash
-safe-ag todo add <name|--latest> <text>
+berth todo add <name|--latest> <text>
 ```
 
 ### `todo list`
 
 ```bash
-safe-ag todo list <name|--latest>
+berth todo list <name|--latest>
 ```
 
 ### `todo check`
 
 ```bash
-safe-ag todo check <name|--latest> <index>
+berth todo check <name|--latest> <index>
 ```
 
 ### `todo uncheck`
 
 ```bash
-safe-ag todo uncheck <name|--latest> <index>
+berth todo uncheck <name|--latest> <index>
 ```
 
 No additional flags beyond `--help`.
@@ -827,8 +827,8 @@ No additional flags beyond `--help`.
 Usage:
 
 ```bash
-safe-ag fleet <manifest.yaml> [flags]
-safe-ag fleet status
+berth fleet <manifest.yaml> [flags]
+berth fleet status
 ```
 
 Flags:
@@ -844,7 +844,7 @@ Subcommands:
 ### `fleet status`
 
 ```bash
-safe-ag fleet status
+berth fleet status
 ```
 
 ## `pipeline`
@@ -852,13 +852,13 @@ safe-ag fleet status
 Usage:
 
 ```bash
-safe-ag pipeline <pipeline.yaml|name> [flags]
-safe-ag pipeline list
-safe-ag pipeline show <name>
-safe-ag pipeline inspect <name>
-safe-ag pipeline render <name>
-safe-ag pipeline validate <name>
-safe-ag pipeline create <name>
+berth pipeline <pipeline.yaml|name> [flags]
+berth pipeline list
+berth pipeline show <name>
+berth pipeline inspect <name>
+berth pipeline render <name>
+berth pipeline validate <name>
+berth pipeline create <name>
 ```
 
 Flags:
@@ -870,7 +870,7 @@ Flags:
 | `--repo` | strings | default repo URL for agents missing `repo` or `repos` |
 | `--var` | strings | manifest variable assignment `key=value`; repeatable |
 
-Saved user pipelines live in `~/.safe-ag/pipelines/`. Built-in review presets ship under the same catalog surface.
+Saved user pipelines live in `~/.berth/pipelines/`. Built-in review presets ship under the same catalog surface.
 
 ### Judge stages (best-of-N "crown")
 
@@ -931,17 +931,17 @@ The judge agent is instructed to emit exactly:
 
 The verdict is parsed leniently (the first well-formed JSON object whose
 `winner` is a real candidate wins), printed at pipeline end, and persisted to
-`~/.safe-ag/state/judge/<pipeline>-<stage>-<timestamp>.json`. If the judge
+`~/.berth/state/judge/<pipeline>-<stage>-<timestamp>.json`. If the judge
 produces no usable verdict, the stage fails and the raw judge output is saved to
 that same file for inspection.
 
-With `auto_pr: true`, safe-ag opens a PR from the winning candidate. The winner
-container has already exited by then; safe-ag does **not** restart it (that would
+With `auto_pr: true`, berth opens a PR from the winning candidate. The winner
+container has already exited by then; berth does **not** restart it (that would
 re-run its agent and could mutate the workspace). Instead it launches a
 short-lived helper container that mounts the winner's volumes with
 `--volumes-from` (carrying `/workspace` and the gh auth volume) but overrides the
 entrypoint. The helper creates a dedicated head branch
-(`safe-ag/judge-<pipeline>-<stage>-<timestamp>`) from the candidate's committed
+(`berth/judge-<pipeline>-<stage>-<timestamp>`) from the candidate's committed
 work — never the cloned default branch — pushes it, and opens the PR (base
 `base`, body = the judge summary with the reason appended).
 
@@ -960,43 +960,43 @@ Subcommands:
 ### `config show`
 
 ```bash
-safe-ag config show
+berth config show
 ```
 
-Reads `~/.safe-ag/config.toml`.
-Set `SAFE_AGENTIC_CONFIG_HOME` to read from another safe-agentic config home
+Reads `~/.berth/config.toml`.
+Set `BERTH_CONFIG_HOME` to read from another berth config home
 without changing the process `HOME`.
 
 ### `config get`
 
 ```bash
-safe-ag config get <key>
+berth config get <key>
 ```
 
 Examples:
 
 ```bash
-safe-ag config get defaults.memory
-safe-ag config get SAFE_AGENTIC_DEFAULT_MEMORY
+berth config get defaults.memory
+berth config get BERTH_DEFAULT_MEMORY
 ```
 
 ### `config set`
 
 ```bash
-safe-ag config set <key> <value>
+berth config set <key> <value>
 ```
 
 Examples:
 
 ```bash
-safe-ag config set defaults.memory 16g
-safe-ag config set defaults.identity "Your Name <you@example.com>"
+berth config set defaults.memory 16g
+berth config set defaults.identity "Your Name <you@example.com>"
 ```
 
 ### `config reset`
 
 ```bash
-safe-ag config reset <key>
+berth config reset <key>
 ```
 
 No additional flags beyond `--help`.
@@ -1008,41 +1008,41 @@ Subcommands:
 ### `template list`
 
 ```bash
-safe-ag template list
+berth template list
 ```
 
-User templates live in `~/.safe-ag/templates/`.
+User templates live in `~/.berth/templates/`.
 
 ### `template show`
 
 ```bash
-safe-ag template show <name>
+berth template show <name>
 ```
 
 ### `template render`
 
 ```bash
-safe-ag template render <name>
+berth template render <name>
 ```
 
 ### `template create`
 
 ```bash
-safe-ag template create <name>
+berth template create <name>
 ```
 
 No additional flags beyond `--help`.
 
 ## `pipeline` saved catalog
 
-Saved user pipelines live in `~/.safe-ag/pipelines/`.
+Saved user pipelines live in `~/.berth/pipelines/`.
 
 ## `pr-review`
 
 Usage:
 
 ```bash
-safe-ag pr-review [claude|codex|dual] [pr]
+berth pr-review [claude|codex|dual] [pr]
 ```
 
 Flags:
@@ -1063,7 +1063,7 @@ Behavior:
 Usage:
 
 ```bash
-safe-ag pr-fix [pr]
+berth pr-fix [pr]
 ```
 
 Flags:
@@ -1079,7 +1079,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag mcp-login <service> [container]
+berth mcp-login <service> [container]
 ```
 
 No additional flags beyond `--help`.
@@ -1091,7 +1091,7 @@ Subcommands:
 ### `cron add`
 
 ```bash
-safe-ag cron add <name> <schedule> <command...>
+berth cron add <name> <schedule> <command...>
 ```
 
 Accepted schedule styles:
@@ -1104,37 +1104,37 @@ Accepted schedule styles:
 ### `cron list`
 
 ```bash
-safe-ag cron list
+berth cron list
 ```
 
 ### `cron remove`
 
 ```bash
-safe-ag cron remove <name>
+berth cron remove <name>
 ```
 
 ### `cron enable`
 
 ```bash
-safe-ag cron enable <name>
+berth cron enable <name>
 ```
 
 ### `cron disable`
 
 ```bash
-safe-ag cron disable <name>
+berth cron disable <name>
 ```
 
 ### `cron run`
 
 ```bash
-safe-ag cron run <name>
+berth cron run <name>
 ```
 
 ### `cron daemon`
 
 ```bash
-safe-ag cron daemon
+berth cron daemon
 ```
 
 No additional flags beyond `--help`.
@@ -1144,7 +1144,7 @@ No additional flags beyond `--help`.
 Usage:
 
 ```bash
-safe-ag tui
+berth tui
 ```
 
 No command-specific flags beyond `--help`.
@@ -1156,7 +1156,7 @@ See [TUI Reference](tui.md) for keybindings, modes, and interaction model.
 Usage:
 
 ```bash
-safe-ag setup
+berth setup
 ```
 
 No command-specific flags beyond `--help`.
@@ -1166,7 +1166,7 @@ No command-specific flags beyond `--help`.
 Usage:
 
 ```bash
-safe-ag update [flags]
+berth update [flags]
 ```
 
 Flags:
@@ -1181,19 +1181,19 @@ Flags:
 Usage:
 
 ```bash
-safe-ag diagnose
+berth diagnose
 ```
 
 No command-specific flags beyond `--help`.
 
-`diagnose` also prints the effective spawn defaults from `~/.safe-ag/config.toml` and warns when defaults widen the sandbox, such as default SSH forwarding, shared auth, Docker access, setup hooks, or custom networking.
+`diagnose` also prints the effective spawn defaults from `~/.berth/config.toml` and warns when defaults widen the sandbox, such as default SSH forwarding, shared auth, Docker access, setup hooks, or custom networking.
 
 ## `cleanup`
 
 Usage:
 
 ```bash
-safe-ag cleanup [flags]
+berth cleanup [flags]
 ```
 
 Flags:
@@ -1207,7 +1207,7 @@ Flags:
 Usage:
 
 ```bash
-safe-ag stop <name|--latest|--all> [flags]
+berth stop <name|--latest|--all> [flags]
 ```
 
 Flags:
@@ -1224,19 +1224,19 @@ Subcommands:
 ### `vm start`
 
 ```bash
-safe-ag vm start
+berth vm start
 ```
 
 ### `vm stop`
 
 ```bash
-safe-ag vm stop
+berth vm stop
 ```
 
 ### `vm ssh`
 
 ```bash
-safe-ag vm ssh
+berth vm ssh
 ```
 
 No additional flags beyond `--help`.

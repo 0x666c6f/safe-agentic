@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, TerminalSquare } from "lucide-react";
 import { Events } from "@wailsio/runtime";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 
 const unwrap = (e: any) => e?.data;
 const CAP = 100;
 
-// One executed safe-ag CLI invocation. Shape mirrors the `cli.exec` event and
+// One executed berth CLI invocation. Shape mirrors the `cli.exec` event and
 // AgentService.CommandLog() backlog (both added Go-side in parallel).
 type Cmd = { ts?: string | number; argv?: string[]; ok?: boolean; durationMs?: number; tail?: string };
 
@@ -17,7 +17,7 @@ const clock = (ts?: string | number): string => {
   return new Date(t).toTimeString().slice(0, 8); // HH:MM:SS
 };
 
-// ConsolePane surfaces the safe-ag commands the app runs on your behalf — a
+// ConsolePane surfaces the berth commands the app runs on your behalf — a
 // collapsible "CLI activity" log so nothing happens invisibly. Newest first,
 // capped so a long-lived window can't grow unbounded.
 export function ConsolePane() {

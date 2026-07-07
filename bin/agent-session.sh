@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SESSION_STATE_DIR="${SAFE_AGENTIC_SESSION_STATE_DIR:-/workspace/.safe-agentic}"
+SESSION_STATE_DIR="${BERTH_SESSION_STATE_DIR:-/workspace/.berth}"
 SESSION_STATE_FILE="$SESSION_STATE_DIR/started"
 SESSION_EVENTS_DIR="$SESSION_STATE_DIR"
 SESSION_EVENTS_FILE="$SESSION_EVENTS_DIR/session-events.jsonl"
@@ -22,7 +22,7 @@ write_session_event() {
 }
 
 resuming=false
-if [ -f "$SESSION_STATE_FILE" ] && [ "${SAFE_AGENTIC_BACKGROUND:-}" != "1" ] && [ "${SAFE_AGENTIC_FLEET:-}" != "1" ]; then
+if [ -f "$SESSION_STATE_FILE" ] && [ "${BERTH_BACKGROUND:-}" != "1" ] && [ "${BERTH_FLEET:-}" != "1" ]; then
   resuming=true
 fi
 touch "$SESSION_STATE_FILE"
@@ -51,14 +51,14 @@ launch_codex() {
     return 0
   fi
 
-  if [ $# -gt 0 ] && { [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ] || [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; }; then
+  if [ $# -gt 0 ] && { [ "${BERTH_BACKGROUND:-}" = "1" ] || [ "${BERTH_FLEET:-}" = "1" ]; }; then
     # Non-interactive pipeline/background runs must exit after the prompt.
     # `codex exec` does that; interactive `codex PROMPT` drops into the TUI.
     codex exec --dangerously-bypass-approvals-and-sandbox "$@" || return $?
     return 0
   fi
 
-  if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+  if [ "${BERTH_BACKGROUND:-}" = "1" ]; then
     # Background mode: run via script PTY (needed for auth refresh).
     # Output goes to stdout → docker logs. No tmux.
     local rendered
@@ -68,7 +68,7 @@ launch_codex() {
   fi
 
   if [ $# -gt 0 ]; then
-    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+    if [ "${BERTH_FLEET:-}" = "1" ]; then
       # Fleet/pipeline mode: run prompt and exit when done.
       exec codex --yolo "$@"
       return $?
@@ -85,8 +85,8 @@ launch_codex() {
 trust_workspace() {
   # Auto-trust the current workspace so Claude/Codex don't prompt
   # "Do you trust this project?" which blocks non-interactive sessions.
-  # Only enabled when SAFE_AGENTIC_AUTO_TRUST=1 (set via --auto-trust flag).
-  [ "${SAFE_AGENTIC_AUTO_TRUST:-}" = "1" ] || return 0
+  # Only enabled when BERTH_AUTO_TRUST=1 (set via --auto-trust flag).
+  [ "${BERTH_AUTO_TRUST:-}" = "1" ] || return 0
   local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   local settings_local="$claude_dir/settings.json"
   local codex_dir="${CODEX_HOME:-$HOME/.codex}"
@@ -161,7 +161,7 @@ launch_claude() {
     cmd+=("$@")
   fi
 
-  if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
+  if [ "${BERTH_BACKGROUND:-}" = "1" ]; then
     # Background mode: run with -p via script PTY (needed for OAuth refresh).
     # Output goes to stdout → docker logs. No tmux.
     rendered=$(quote_cmd "${cmd[@]}")
@@ -170,7 +170,7 @@ launch_claude() {
   fi
 
   if $has_prompt; then
-    if [ "${SAFE_AGENTIC_FLEET:-}" = "1" ]; then
+    if [ "${BERTH_FLEET:-}" = "1" ]; then
       # Fleet/pipeline mode: pass -p directly to Claude so it runs
       # non-interactively and exits when done. Run directly (no script
       # wrapper) so output is visible in the tmux pane for preview.

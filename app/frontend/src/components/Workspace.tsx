@@ -5,7 +5,7 @@ import { TerminalPane } from "./TerminalPane";
 import { OutputTab } from "./OutputTab";
 import { InfoTab } from "./InfoTab";
 import { DiffTab } from "./DiffTab";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import type { Tab } from "../types";
 
 const TABS: Tab[] = ["terminal", "diff", "output", "info"];

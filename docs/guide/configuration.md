@@ -14,37 +14,53 @@ Configuration falls into four buckets:
 Path:
 
 ```bash
-~/.safe-ag/
+~/.berth/
 ```
 
 Layout:
 
 ```bash
-~/.safe-ag/config.toml
-~/.safe-ag/rules.toml
-~/.safe-ag/templates/
-~/.safe-ag/actions.toml
-~/.safe-ag/pipelines/
-~/.safe-ag/cron.json
-~/.safe-ag/state/
+~/.berth/config.toml
+~/.berth/rules.toml
+~/.berth/templates/
+~/.berth/actions.toml
+~/.berth/pipelines/
+~/.berth/cron.json
+~/.berth/state/
 ```
 
-For isolated harnesses, set `SAFE_AGENTIC_CONFIG_HOME` to relocate this tree
+For isolated harnesses, set `BERTH_CONFIG_HOME` to relocate this tree
 without changing `HOME` for host tools:
 
 ```bash
-SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home safe-ag list
+BERTH_CONFIG_HOME=/tmp/berth-home berth list
 ```
 
-State files can be relocated separately with `SAFE_AGENTIC_STATE_HOME`.
+State files can be relocated separately with `BERTH_STATE_HOME`.
 When unset, state stays under the config home.
+
+### Migrating from safe-agentic
+
+berth is the renamed safe-agentic. The config home moved from `~/.safe-ag` to
+`~/.berth` (same layout, so a plain move migrates everything), env vars from
+`SAFE_AGENTIC_*` to `BERTH_*`, and the VM name from `safe-agentic` to `berth`:
+
+```bash
+brew uninstall safe-agentic && brew install 0x666c6f/tap/berth
+mv ~/.safe-ag ~/.berth        # merge instead if ~/.berth already exists
+berth setup                   # creates the new VM and image
+container machine stop safe-agentic && container machine rm safe-agentic
+```
+
+If `defaults.worktrees_dir` in `config.toml` points at a path under
+`~/.safe-ag`, update it after the move.
 
 ## Preferences file
 
 Path:
 
 ```bash
-~/.safe-ag/config.toml
+~/.berth/config.toml
 ```
 
 Format:
@@ -65,39 +81,39 @@ network = "my-net"
 identity = "Your Name <you@example.com>"
 ```
 
-These defaults apply to `safe-ag spawn` and `safe-ag run`.
+These defaults apply to `berth spawn` and `berth run`.
 
 Risk-widening defaults still have per-command opt-outs:
 
 ```bash
-safe-ag spawn claude --no-ssh --no-reuse-auth --repo https://github.com/org/repo.git
-safe-ag spawn claude --no-docker --no-reuse-gh-auth --no-seed-auth --repo https://github.com/org/repo.git
-safe-ag spawn claude --ephemeral-auth --repo https://github.com/org/repo.git
+berth spawn claude --no-ssh --no-reuse-auth --repo https://github.com/org/repo.git
+berth spawn claude --no-docker --no-reuse-gh-auth --no-seed-auth --repo https://github.com/org/repo.git
+berth spawn claude --ephemeral-auth --repo https://github.com/org/repo.git
 ```
 
 Use `--ephemeral-auth` or `--no-reuse-auth` to override `reuse_auth = true` for one session. Use `--no-seed-auth` to override `seed_auth = true`.
 
-## `safe-ag config`
+## `berth config`
 
 ```bash
-safe-ag config show
-safe-ag config get defaults.memory
-safe-ag config set defaults.memory 16g
-safe-ag config set defaults.identity "Your Name <you@example.com>"
-safe-ag config reset defaults.memory
+berth config show
+berth config get defaults.memory
+berth config set defaults.memory 16g
+berth config set defaults.identity "Your Name <you@example.com>"
+berth config reset defaults.memory
 ```
 
 Legacy env-style keys still work as aliases for `get`, `set`, and `reset`.
 
 ## Policy rules
 
-Policy rules are hard spawn-time guards. They are checked after defaults are applied and before safe-agentic creates networks, worktrees, or containers.
+Policy rules are hard spawn-time guards. They are checked after defaults are applied and before berth creates networks, worktrees, or containers.
 
 Locations:
 
 ```bash
-~/.safe-ag/rules.toml
-.safe-ag/rules.toml
+~/.berth/rules.toml
+.berth/rules.toml
 ```
 
 User rules and the nearest project rules both apply. Project rules cannot weaken user rules.
@@ -132,19 +148,19 @@ seed_auth = false
 ## Templates
 
 ```bash
-safe-ag template list
-safe-ag template show security-audit
-safe-ag template create backend-audit
+berth template list
+berth template show security-audit
+berth template create backend-audit
 ```
 
 Use templates at spawn time:
 
 ```bash
-safe-ag spawn claude --repo ... --template security-audit
-safe-ag spawn claude --repo ... --template security-audit --var area=payments
+berth spawn claude --repo ... --template security-audit
+berth spawn claude --repo ... --template security-audit --var area=payments
 ```
 
-If `--repo` is omitted, `safe-ag` tries to infer `${repo}` from the current checkout's `origin` remote.
+If `--repo` is omitted, `berth` tries to infer `${repo}` from the current checkout's `origin` remote.
 
 ## Agent profiles
 
@@ -153,8 +169,8 @@ Profiles are reusable spawn presets for roles you run often.
 Locations:
 
 ```bash
-~/.safe-ag/agents/*.toml
-.safe-ag/agents/*.toml
+~/.berth/agents/*.toml
+.berth/agents/*.toml
 ```
 
 Project profiles override user profiles with the same filename or `name`.
@@ -175,21 +191,21 @@ background = true
 Run:
 
 ```bash
-safe-ag profile list
-safe-ag profile show reviewer
-safe-ag profile run reviewer "focus auth code"
-safe-ag profile run reviewer --dry-run
+berth profile list
+berth profile show reviewer
+berth profile run reviewer "focus auth code"
+berth profile run reviewer --dry-run
 ```
 
 ## Actions
 
-Actions are named commands you can run inside an agent workspace. They mirror Codex app local actions while keeping execution inside the safe-agentic container.
+Actions are named commands you can run inside an agent workspace. They mirror Codex app local actions while keeping execution inside the berth container.
 
 Locations:
 
 ```bash
-~/.safe-ag/actions.toml
-.safe-ag/actions.toml
+~/.berth/actions.toml
+.berth/actions.toml
 ```
 
 Project actions override user actions with the same name.
@@ -209,19 +225,19 @@ cwd = "frontend"
 Run:
 
 ```bash
-safe-ag action list
-safe-ag action run test --latest
-safe-ag action run frontend-lint my-agent
+berth action list
+berth action run test --latest
+berth action run frontend-lint my-agent
 ```
 
 ## Pipelines
 
 ```bash
-safe-ag pipeline list
-safe-ag pipeline show review
-safe-ag pipeline create review
-safe-ag pipeline review --repo git@github.com:org/repo.git
-safe-ag pipeline review --repo git@github.com:org/repo.git --var topic=security
+berth pipeline list
+berth pipeline show review
+berth pipeline create review
+berth pipeline review --repo git@github.com:org/repo.git
+berth pipeline review --repo git@github.com:org/repo.git --var topic=security
 ```
 
 ## Auth helpers
@@ -229,29 +245,29 @@ safe-ag pipeline review --repo git@github.com:org/repo.git --var topic=security
 MCP auth:
 
 ```bash
-safe-ag mcp-login linear
-safe-ag mcp-login notion
-safe-ag mcp-login linear <container>
+berth mcp-login linear
+berth mcp-login notion
+berth mcp-login linear <container>
 ```
 
 AWS refresh:
 
 ```bash
-safe-ag aws-refresh --latest
-safe-ag aws-refresh api-refactor my-profile
+berth aws-refresh --latest
+berth aws-refresh api-refactor my-profile
 ```
 
 ## VM and image maintenance
 
 ```bash
-safe-ag setup
-safe-ag update
-safe-ag update --quick
-safe-ag update --full
-safe-ag vm start
-safe-ag vm stop
-safe-ag vm ssh
-safe-ag diagnose
+berth setup
+berth update
+berth update --quick
+berth update --full
+berth vm start
+berth vm stop
+berth vm ssh
+berth diagnose
 ```
 
 Use:
@@ -263,13 +279,13 @@ Use:
 ## Advanced environment variables
 
 ```bash
-SAFE_AGENTIC_VM_NAME=safe-agentic-alt
-SAFE_AGENTIC_CONFIG_HOME=/tmp/safe-ag-home
-SAFE_AGENTIC_STATE_HOME=/tmp/safe-ag-state
+BERTH_VM_NAME=berth-alt
+BERTH_CONFIG_HOME=/tmp/berth-home
+BERTH_STATE_HOME=/tmp/berth-state
 ```
 
-`SAFE_AGENTIC_VM_NAME` points the CLI at a different Apple container machine.
-`SAFE_AGENTIC_CONFIG_HOME` and `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic
+`BERTH_VM_NAME` points the CLI at a different Apple container machine.
+`BERTH_CONFIG_HOME` and `BERTH_STATE_HOME` relocate berth
 files while keeping the process `HOME` intact for host tools.
 
 Useful for:

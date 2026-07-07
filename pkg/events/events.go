@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/berth/pkg/config"
 )
 
 type Event struct {

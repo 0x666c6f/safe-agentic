@@ -72,21 +72,21 @@ func TestSelectedOrWarn(t *testing.T) {
 	}
 }
 
-func TestResolveCLIBinaryPrefersSiblingSafeAg(t *testing.T) {
+func TestResolveCLIBinaryPrefersSiblingBerth(t *testing.T) {
 	t.Setenv("PATH", "")
 	dir := t.TempDir()
 	sibling := filepath.Join(dir, cliBinaryName)
 	if err := os.WriteFile(sibling, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write sibling cli: %v", err)
 	}
-	got := resolveCLIBinaryFrom(filepath.Join(dir, "safe-ag-tui"))
+	got := resolveCLIBinaryFrom(filepath.Join(dir, "berth-tui"))
 	if got != sibling {
 		t.Fatalf("resolveCLIBinaryFrom() = %q, want %q", got, sibling)
 	}
 }
 
 func TestResolveCLIBinaryFallsBackToPathName(t *testing.T) {
-	got := resolveCLIBinaryFrom(filepath.Join(t.TempDir(), "safe-ag-tui"))
+	got := resolveCLIBinaryFrom(filepath.Join(t.TempDir(), "berth-tui"))
 	if got != cliBinaryName {
 		t.Fatalf("resolveCLIBinaryFrom() = %q, want %q", got, cliBinaryName)
 	}

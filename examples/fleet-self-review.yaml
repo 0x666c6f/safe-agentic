@@ -1,10 +1,10 @@
-# Fleet manifest: comprehensive review of the safe-agentic repo itself
-# Usage: safe-ag fleet examples/fleet-self-review.yaml
+# Fleet manifest: comprehensive review of the berth repo itself
+# Usage: berth fleet examples/fleet-self-review.yaml
 
 agents:
   - name: code-review
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -12,7 +12,7 @@ agents:
 
   - name: security-audit
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -20,15 +20,15 @@ agents:
 
   - name: pentest
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
-    prompt: "You are a penetration tester. Your target is the safe-agentic sandboxing system. Try to find ways to: escape the container, access the host filesystem, bypass network egress filtering, steal SSH keys or auth tokens, escalate privileges, communicate between containers, or persist after container removal. For each attack vector, explain the technique, whether it works against the current defenses, and what mitigation exists. Be thorough and creative."
+    prompt: "You are a penetration tester. Your target is the berth sandboxing system. Try to find ways to: escape the container, access the host filesystem, bypass network egress filtering, steal SSH keys or auth tokens, escalate privileges, communicate between containers, or persist after container removal. For each attack vector, explain the technique, whether it works against the current defenses, and what mitigation exists. Be thorough and creative."
 
   - name: feature-exploration
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -36,7 +36,7 @@ agents:
 
   - name: test-coverage
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -44,7 +44,7 @@ agents:
 
   - name: doc-review
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true

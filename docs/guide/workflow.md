@@ -5,10 +5,10 @@ This page covers the "agent did work, now what?" loop.
 ## Status and output
 
 ```bash
-safe-ag summary --latest
-safe-ag output --latest
-safe-ag diff --latest
-safe-ag review --latest
+berth summary --latest
+berth output --latest
+berth diff --latest
+berth review --latest
 ```
 
 Typical order:
@@ -21,8 +21,8 @@ Typical order:
 ## Retry with feedback
 
 ```bash
-safe-ag retry --latest
-safe-ag retry --latest --feedback "Focus only on src/ and add tests"
+berth retry --latest
+berth retry --latest --feedback "Focus only on src/ and add tests"
 ```
 
 `retry` reconstructs the original spawn options and starts a fresh container with the same session shape.
@@ -30,8 +30,8 @@ safe-ag retry --latest --feedback "Focus only on src/ and add tests"
 ## Steer a running agent
 
 ```bash
-safe-ag steer --latest "Focus only on the failing test and avoid unrelated refactors"
-safe-ag steer api-refactor "Run the narrower test first"
+berth steer --latest "Focus only on the failing test and avoid unrelated refactors"
+berth steer api-refactor "Run the narrower test first"
 ```
 
 Use `steer` when the agent is active and you want to add guidance without attaching to the tmux session. If the container is stopped, `steer` starts it and waits for tmux.
@@ -39,20 +39,20 @@ Use `steer` when the agent is active and you want to add guidance without attach
 ## Review comments
 
 ```bash
-safe-ag review-comments add --latest cmd/main.go 42 "Handle empty input before parsing"
-safe-ag review-comments list --latest
-safe-ag steer --latest "Address the open review comments, then run tests"
-safe-ag review-comments resolve rc-123
+berth review-comments add --latest cmd/main.go 42 "Handle empty input before parsing"
+berth review-comments list --latest
+berth steer --latest "Address the open review comments, then run tests"
+berth review-comments resolve rc-123
 ```
 
-Use review comments for local file/line notes that should survive between `review`, `diff`, `steer`, and PR handoff. They are stored on the host under `~/.safe-ag/state/`.
+Use review comments for local file/line notes that should survive between `review`, `diff`, `steer`, and PR handoff. They are stored on the host under `~/.berth/state/`.
 
 ## Checkpoints
 
 ```bash
-safe-ag checkpoint create --latest "before big refactor"
-safe-ag checkpoint list --latest
-safe-ag checkpoint restore --latest <ref>
+berth checkpoint create --latest "before big refactor"
+berth checkpoint list --latest
+berth checkpoint restore --latest <ref>
 ```
 
 Use checkpoints when you want a reversible snapshot before the agent makes a risky change.
@@ -60,10 +60,10 @@ Use checkpoints when you want a reversible snapshot before the agent makes a ris
 ## Todos
 
 ```bash
-safe-ag todo add --latest "Run integration tests"
-safe-ag todo add --latest "Update changelog"
-safe-ag todo list --latest
-safe-ag todo check --latest 1
+berth todo add --latest "Run integration tests"
+berth todo add --latest "Update changelog"
+berth todo list --latest
+berth todo check --latest 1
 ```
 
 This is the built-in merge checklist.
@@ -71,11 +71,11 @@ This is the built-in merge checklist.
 ## PR creation
 
 ```bash
-safe-ag pr --latest --title "fix: stabilize flaky tests"
-safe-ag pr --latest --base main
+berth pr --latest --title "fix: stabilize flaky tests"
+berth pr --latest --base main
 ```
 
-Before `safe-ag pr`, you usually want:
+Before `berth pr`, you usually want:
 - SSH enabled at spawn time
 - GitHub auth available
 - todos completed
@@ -83,19 +83,19 @@ Before `safe-ag pr`, you usually want:
 ## Typical end-to-end loop
 
 ```bash
-safe-ag spawn claude --ssh --reuse-auth \
+berth spawn claude --ssh --reuse-auth \
   --repo git@github.com:org/api.git \
   --prompt "Fix the failing CI tests"
 
-safe-ag peek --latest
-safe-ag steer --latest "Keep the fix narrow and add one regression test"
-safe-ag summary --latest
-safe-ag diff --latest
-safe-ag review --latest
-safe-ag review-comments add --latest src/api.go 37 "Add a regression test for this branch"
-safe-ag todo add --latest "Verify locally"
-safe-ag todo check --latest 1
-safe-ag pr --latest --title "fix: resolve CI failures"
+berth peek --latest
+berth steer --latest "Keep the fix narrow and add one regression test"
+berth summary --latest
+berth diff --latest
+berth review --latest
+berth review-comments add --latest src/api.go 37 "Add a regression test for this branch"
+berth todo add --latest "Verify locally"
+berth todo check --latest 1
+berth pr --latest --title "fix: resolve CI failures"
 ```
 
 ## Hooks and post-run automation
@@ -103,11 +103,11 @@ safe-ag pr --latest --title "fix: resolve CI failures"
 You can use lifecycle hooks to automate follow-up work:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --background \
   --repo https://github.com/org/repo.git \
   --prompt "Write a migration plan" \
-  --on-exit "safe-ag output --latest > /tmp/plan.txt"
+  --on-exit "berth output --latest > /tmp/plan.txt"
 ```
 
 ## What belongs here vs elsewhere

@@ -41,7 +41,7 @@ func CaptureHTTP(ctx context.Context, opts CaptureOptions) (Artifact, error) {
 	}
 	outDir := opts.OutDir
 	if outDir == "" {
-		outDir = filepath.Join(os.TempDir(), "safe-ag-browser")
+		outDir = filepath.Join(os.TempDir(), "berth-browser")
 	}
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return Artifact{}, fmt.Errorf("create output dir: %w", err)
@@ -53,7 +53,7 @@ func CaptureHTTP(ctx context.Context, opts CaptureOptions) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	req.Header.Set("User-Agent", "safe-agentic-browser-capture/1")
+	req.Header.Set("User-Agent", "berth-browser-capture/1")
 
 	client := &http.Client{Timeout: opts.Timeout}
 	resp, err := client.Do(req)

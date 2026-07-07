@@ -3,8 +3,8 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/labels"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 func VolumeExists(ctx context.Context, exec vmexec.Executor, name string) (bool, error) {
@@ -31,9 +31,9 @@ func AuthVolumeName(agentType string, ephemeral bool, containerName string) stri
 	if ephemeral {
 		return containerName + "-auth"
 	}
-	return "safe-agentic-" + agentType + "-auth"
+	return "berth-" + agentType + "-auth"
 }
 
 func GHAuthVolumeName(agentType string) string {
-	return "safe-agentic-" + agentType + "-gh-auth"
+	return "berth-" + agentType + "-gh-auth"
 }
