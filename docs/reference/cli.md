@@ -33,6 +33,7 @@ Top-level commands:
 | `checkpoint` | manage workspace snapshots |
 | `cleanup` | remove containers, networks, and optional auth volumes |
 | `config` | manage persistent defaults |
+| `config-sync` | push host Claude settings into an agent |
 | `cost` | estimate API cost from session data |
 | `cron` | manage scheduled jobs |
 | `diagnose` | run environment health checks |
@@ -137,10 +138,10 @@ Flags:
 | `--no-seed-auth` | bool | disable default host auth seeding |
 | `--no-ssh` | bool | disable default SSH agent forwarding |
 | `--network` | string | custom Docker network |
-| `--notify` | string | notification targets, comma-separated (see [Notify targets](#notify-targets)) |
-| `--on-complete` | string | command to run on success |
-| `--on-exit` | string | command to run on exit |
-| `--on-fail` | string | command to run on failure |
+| `--notify` | string | notification targets, comma-separated, delivered host-side (see [Notify targets](#notify-targets)) |
+| `--on-complete` | string | command run inside the container on success |
+| `--on-exit` | string | command run inside the container on exit |
+| `--on-fail` | string | command run inside the container on failure |
 | `--pids-limit` | int | PIDs limit, minimum 64 |
 | `--prompt` | string | initial prompt |
 | `--repo` | strings | repository URL to clone; repeatable |
@@ -227,6 +228,7 @@ Flags:
 | `--background` | bool | run detached |
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
+| `--ephemeral-auth` | bool | use a per-container throwaway auth volume |
 | `--instructions` | string | task instructions |
 | `--max-cost` | string | cost budget |
 | `--no-docker` | bool | disable default Docker-in-Docker |
@@ -241,6 +243,10 @@ Flags:
 | `--seed-auth` | bool | copy host Claude/Codex auth into this session |
 | `--template` | string | prompt template |
 | `--var` | strings | template variable assignment `key=value`; repeatable |
+| `--worktree` | bool | create and mount a managed git worktree from the current checkout |
+| `--worktree-branch` | string | branch name for `--worktree` |
+| `--worktree-path` | string | destination path for `--worktree` |
+| `--yes` | bool | skip the host-side risk confirmation prompt |
 
 ## `list`
 
@@ -605,14 +611,14 @@ berth handoff <agent|--latest> --to-worktree
 Usage:
 
 ```bash
-berth workspace stage <agent|--latest> <path...>
-berth workspace unstage <agent|--latest> <path...>
-berth workspace revert <agent|--latest> <path...> --yes
-berth workspace stage-patch <agent|--latest> selected.patch
-berth workspace revert-patch <agent|--latest> selected.patch --yes
+berth workspace stage <agent> <path...>
+berth workspace unstage <agent> <path...>
+berth workspace revert <agent> <path...> --yes
+berth workspace stage-patch <agent> selected.patch
+berth workspace revert-patch <agent> selected.patch --yes
 ```
 
-Paths must stay relative to the workspace. `revert` and `revert-patch` discard changes and require `--yes` when stdin is not interactive. Patch commands accept selected hunks from a normal unified diff and reject workspace-escaping paths.
+Unlike most commands, `workspace` subcommands take an explicit agent name — the `--latest` flag is not supported here. Paths must stay relative to the workspace. `revert` and `revert-patch` discard changes and require `--yes` when stdin is not interactive. Patch commands accept selected hunks from a normal unified diff and reject workspace-escaping paths.
 
 ## `worktree`
 

@@ -53,11 +53,13 @@ berth checkpoint restore --latest stash@{0}
 Take only part of what the agent did:
 
 ```bash
-berth workspace stage --latest src/api.go src/api_test.go
-berth workspace unstage --latest src/api.go
-berth workspace revert --latest scratch.txt --yes
-berth workspace stage-patch --latest ./picked-hunks.patch
+berth workspace stage api-fix src/api.go src/api_test.go
+berth workspace unstage api-fix src/api.go
+berth workspace revert api-fix scratch.txt --yes
+berth workspace stage-patch api-fix ./picked-hunks.patch
 ```
+
+Unlike most commands, `workspace` takes an explicit agent name — it does not support `--latest`.
 
 ## Todos
 

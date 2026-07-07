@@ -167,8 +167,8 @@ Stage fields:
 | `depends_on` | list | stages that must finish first; naming a `models`-expanded stage expands to its per-model children |
 | `agents` | list | agents that run in parallel within the stage |
 | `models` | list | duplicate the stage's agents once per entry; each entry becomes the agent `type` (`claude`, `codex`), available as `${model}` in prompts |
-| `pipeline` | string | path to a sub-pipeline YAML (mutually exclusive with `agents`) |
-| `judge` | block | best-of-N judge (mutually exclusive with `agents`/`pipeline`) |
+| `pipeline` | string | path to a sub-pipeline YAML — use *instead of* `agents`; if both are set, the sub-pipeline runs and inline `agents` are silently ignored (not validated) |
+| `judge` | block | best-of-N judge (validated as mutually exclusive with `agents`/`pipeline`/`models`) |
 
 ## Judge block
 

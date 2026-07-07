@@ -113,15 +113,14 @@ berth spawn claude --dry-run --repo ...          # print the launch command, don
 
 ```bash
 berth spawn claude --background --repo ... \
-  --prompt "Write a migration plan" \
-  --on-complete "berth output --latest > /tmp/plan.txt" \
-  --on-fail "say 'agent failed'" \
+  --prompt "Fix the flaky tests" \
+  --on-complete "cd /workspace/*/ && go test ./... > /workspace/test-results.txt 2>&1" \
   --notify terminal,system \
   --max-cost 5.00
 ```
 
-- `--on-exit` / `--on-complete` / `--on-fail` — shell commands run when the session ends / exits 0 / exits non-zero
-- `--notify` — comma-separated targets: `terminal`, `system`, `slack:<webhook>`, `command:<cmd>`
+- `--on-exit` / `--on-complete` / `--on-fail` — shell commands run **inside the container** when the session ends / exits 0 / exits non-zero
+- `--notify` — comma-separated targets delivered **on the host**: `terminal`, `system`, `slack:<webhook>`, `command:<cmd>`
 - `--max-cost` — budget in USD, recorded on the container (advisory — surfaced in `summary`/`cost`, not enforced)
 
 More patterns in [Automation](automation.md).

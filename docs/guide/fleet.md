@@ -76,6 +76,7 @@ defaults:
   repo: ${repo}
   ssh: true
   reuse_auth: true
+  reuse_gh_auth: true              # required by auto_pr (HTTPS push from the winner)
   auto_trust: true
 steps:
   - name: implement                # fan out across engines → 2 candidates

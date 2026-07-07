@@ -10,19 +10,26 @@ Run agents unattended: background sessions with lifecycle hooks, scheduled runs,
 berth spawn claude --background --ssh \
   --repo git@github.com:org/repo.git \
   --prompt "Fix the flaky test suite" \
-  --on-complete "berth output --latest --json > /tmp/result.json" \
-  --on-fail "open -a Terminal" \
+  --on-complete "cd /workspace/*/ && go test ./... > /workspace/test-results.txt 2>&1" \
   --notify system,slack:https://hooks.slack.com/services/XXX
 ```
 
-| Flag | Fires |
-|---|---|
-| `--on-exit` | when the session ends, any exit code |
-| `--on-complete` | agent exited 0 |
-| `--on-fail` | agent exited non-zero |
-| `--notify` | `terminal`, `system`, `slack:<webhook>`, `command:<cmd>` |
+| Flag | Fires | Runs |
+|---|---|---|
+| `--on-exit` | when the session ends, any exit code | **inside the container** |
+| `--on-complete` | agent exited 0 | **inside the container** |
+| `--on-fail` | agent exited non-zero | **inside the container** |
+| `--notify` | when the session ends | on the host |
 
-`command:` targets run on the host with `$BERTH_CONTAINER` and `$BERTH_MESSAGE` set. Add `--max-cost N.NN` to record a USD budget on the container (advisory — visible in `summary`/`cost`).
+The `--on-*` hooks execute in the agent container (workspace at `/workspace`) — use them for validation, artifacts, or git operations on the agent's work. For host-side reactions, use `--notify`: `terminal`, `system`, `slack:<webhook>`, or `command:<cmd>`, which runs on the host with `$BERTH_CONTAINER` and `$BERTH_MESSAGE` set:
+
+```bash
+berth spawn claude --background --repo https://github.com/org/repo.git \
+  --prompt "Write a migration plan" \
+  --notify "command:berth output \$BERTH_CONTAINER > /tmp/plan.txt"
+```
+
+Add `--max-cost N.NN` to record a USD budget on the container (advisory — visible in `summary`/`cost`).
 
 Check on background work with `berth inbox`, `berth status --all`, or the [TUI](tui.md).
 
@@ -31,8 +38,10 @@ Check on background work with `berth inbox`, `berth status --all`, or the [TUI](
 Any berth command can run on a schedule:
 
 ```bash
+berth pipeline create nightly-review   # save a pipeline first (~/.berth/pipelines/)
+
 berth cron add nightly-review "daily 06:00" \
-  pipeline review --repo git@github.com:org/repo.git
+  pipeline nightly-review --repo git@github.com:org/repo.git
 
 berth cron add hourly-triage "every 1h" \
   run https://github.com/org/repo.git "Triage new issues"
@@ -43,7 +52,7 @@ berth cron disable nightly-review   # keep but pause
 berth cron remove nightly-review
 ```
 
-Schedule formats: `"every 30m"` / `"every 1h"`, `"daily 09:00"`, or a cron expression like `"0 */6 * * *"`.
+Schedule formats: `"every 30m"` / `"every 1h"`, `"daily HH:MM"`, or a cron expression like `"0 */6 * * *"`. Note: `daily HH:MM` currently behaves as a plain 24-hour interval — a new job fires on the next daemon poll and then every 24h; it is not yet aligned to the clock time.
 
 Jobs only fire while the scheduler daemon is running (it polls every 60s):
 
@@ -67,12 +76,12 @@ berth server --listen 127.0.0.1:8765 --token s3cret   # HTTP on loopback
 ```bash
 curl -s -H "Authorization: Bearer s3cret" \
   -d '{"jsonrpc":"2.0","id":1,"method":"inbox"}' \
-  http://127.0.0.1:8765 | jq
+  http://127.0.0.1:8765/rpc | jq
 ```
 
 ## Putting it together
 
-Nightly self-review that opens a PR when something needs fixing:
+Nightly self-review that opens a PR when something needs fixing (using a pipeline you saved with `berth pipeline create review-and-fix`):
 
 ```bash
 berth cron add nightly "daily 02:00" \

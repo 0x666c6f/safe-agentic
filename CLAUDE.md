@@ -77,7 +77,7 @@ berth spawn codex --ssh --reuse-auth --repo git@github.com:org/repo.git --name m
 berth spawn codex --ssh --prompt 'Fix the CI tests' --repo git@github.com:org/repo.git
 berth spawn claude --ssh --template security-audit --repo git@github.com:org/repo.git
 berth spawn claude --ssh --instructions 'Focus on the auth module' --prompt 'Refactor auth' --repo ...
-berth spawn claude --background --auto-trust --on-exit 'berth output --latest --json > out.json' --repo ...
+berth spawn claude --background --auto-trust --notify 'command:berth output $BERTH_CONTAINER --json > out.json' --repo ...
 
 # Quick start with smart defaults (auto-enables `--ssh` for SSH URLs)
 berth run git@github.com:org/repo.git "Fix the CI tests"
@@ -131,11 +131,11 @@ berth spawn claude --repo https://... --network agent-isolated
 
 ```bash
 # Spawn flags (new in v2)
-#   --on-complete "cmd"     Run command on agent success
-#   --on-fail "cmd"         Run command on agent failure
-#   --notify targets        Notifications (terminal,slack,command:script)
+#   --on-complete "cmd"     Run command inside the container on agent success
+#   --on-fail "cmd"         Run command inside the container on agent failure
+#   --notify targets        Host-side notifications (terminal,system,slack:...,command:script)
 #   --ephemeral-auth        One-off session, don't reuse auth volume
-#   --max-cost N.NN         Kill agent if estimated cost exceeds budget
+#   --max-cost N.NN         Advisory cost budget recorded on the container (not enforced)
 
 # Workflow
 berth diff <name>|--latest [--stat]       # show git diff from agent working tree
