@@ -54,12 +54,21 @@ func ingestEvidence(ctx context.Context, exec vmexec.Executor, vmName, container
 // directly (not the Executor) because it needs a live stdin pipe; mirrors
 // syncBuildContextToVMImpl in setup.go.
 func populateEvidenceVolumeImpl(vmName, volName, imageName, hostPath string) error {
+	// Every argument must be a single word: the VM relay word-splits a
+	// multi-word arg (e.g. a `bash -c "script"` string), so use the tar
+	// entrypoint with tokenized flags — the same pattern syncBuildContextToVM
+	// relies on. WriteTar emits mode-0444 files (world-readable) and tar
+	// creates traversable parent dirs, so no post-extract chmod is needed.
+	// Run as root (-u 0): the image defaults to the non-root agent user, but a
+	// fresh named volume's root is owned by the container's (userns-remapped)
+	// root, so only root can write into it. Extracted files keep mode 0444
+	// (world-readable), so the agent container reads them fine over its RO mount.
 	cmd := exec.Command("container", "machine", "run", "-i", "-n", vmName, "-u", "root", "--",
-		"docker", "run", "--rm", "-i",
+		"docker", "run", "--rm", "-i", "-u", "0",
 		"-v", volName+":/evidence-dest",
-		"--entrypoint", "/bin/bash",
+		"--entrypoint", "/bin/tar",
 		imageName,
-		"-c", "tar xf - -C /evidence-dest --no-same-owner && chmod -R a+rX /evidence-dest",
+		"xf", "-", "-C", "/evidence-dest", "--no-same-owner",
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
