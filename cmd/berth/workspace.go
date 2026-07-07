@@ -66,15 +66,6 @@ func init() {
 	rootCmd.AddCommand(workspaceCmd)
 }
 
-// workspaceTarget splits the target from the remaining positional args:
-// with --latest every arg is a path/patch, otherwise the first arg is the agent.
-func workspaceTarget(cmd *cobra.Command, args []string) (string, []string) {
-	if latest, _ := cmd.Flags().GetBool("latest"); latest {
-		return "--latest", args
-	}
-	return args[0], args[1:]
-}
-
 // workspaceMinArgs requires n non-target args (paths), plus the agent name
 // unless --latest is set.
 func workspaceMinArgs(n int) cobra.PositionalArgs {
@@ -106,17 +97,26 @@ func workspaceExactArgs(n int) cobra.PositionalArgs {
 }
 
 func runWorkspaceStage(cmd *cobra.Command, args []string) error {
-	target, paths := workspaceTarget(cmd, args)
+	target, paths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	return runWorkspaceGit(target, paths, []string{"git", "add", "--"})
 }
 
 func runWorkspaceUnstage(cmd *cobra.Command, args []string) error {
-	target, paths := workspaceTarget(cmd, args)
+	target, paths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	return runWorkspaceGit(target, paths, []string{"git", "restore", "--staged", "--"})
 }
 
 func runWorkspaceRevert(cmd *cobra.Command, args []string) error {
-	target, rawPaths := workspaceTarget(cmd, args)
+	target, rawPaths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	paths, err := cleanWorkspacePaths(rawPaths)
 	if err != nil {
 		return err
@@ -132,12 +132,18 @@ func runWorkspaceRevert(cmd *cobra.Command, args []string) error {
 }
 
 func runWorkspaceStagePatch(cmd *cobra.Command, args []string) error {
-	target, rest := workspaceTarget(cmd, args)
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	return runWorkspacePatch(target, rest[0], false, []string{"git", "apply", "--cached", "--whitespace=nowarn"})
 }
 
 func runWorkspaceRevertPatch(cmd *cobra.Command, args []string) error {
-	target, rest := workspaceTarget(cmd, args)
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	if !workspaceYes {
 		if ok, err := confirmWorkspaceRevert([]string{rest[0]}); err != nil {
 			return err
