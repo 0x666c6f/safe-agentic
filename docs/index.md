@@ -12,29 +12,32 @@ hide:
 
 # berth
 
-<p class="bt-tagline">Run <strong>Claude Code</strong> and <strong>Codex</strong> in <strong>hardened sandboxes</strong> on macOS. One isolated container per agent — SSH, credentials, and Docker stay off until you opt in.</p>
+<p class="bt-tagline">Every coding agent gets its own <strong>berth</strong>: an isolated container inside a <strong>hardened VM</strong> on macOS. Claude Code and Codex work free inside — <strong>SSH, credentials, and Docker stay ashore</strong> until you opt in.</p>
 
 [Get started](install.md){ .md-button .md-button--primary }
 [Quickstart](quickstart.md){ .md-button }
 [GitHub](https://github.com/0x666c6f/berth){ .md-button }
 
-<div class="bt-chips">
-  <span><b>macOS</b> Apple container VM</span>
-  <span><b>isolation</b> container per agent</span>
-  <span><b>license</b> MIT</span>
-</div>
-
-</div>
-
-<div class="bt-install" markdown="1">
-<div class="bt-install-bar">Homebrew</div>
+<div class="bt-install-line" markdown="1">
 
 ```bash
-brew tap 0x666c6f/tap
-brew install berth
-berth setup
+brew tap 0x666c6f/tap && brew install berth && berth setup
 ```
 
+</div>
+
+</div>
+
+<div class="bt-dock">
+<div class="bt-dock-label"><span>macOS host</span><span>berth CLI · TUI · app</span></div>
+<div class="bt-dock-vm">
+<div class="bt-dock-label"><span>apple container VM</span><span>hardened · home-mount=none</span></div>
+<div class="bt-slot bt-slot-active"><span class="bt-dot"></span>claude · fix-ci<span class="bt-slot-state">working</span></div>
+<div class="bt-slot"><span class="bt-dot"></span>codex · review-pr<span class="bt-slot-state">needs you</span></div>
+<div class="bt-slot"><span class="bt-dot"></span>claude · audit<span class="bt-slot-state">done</span></div>
+<div class="bt-slot bt-slot-empty">berth free — <code>berth spawn</code></div>
+</div>
+<div class="bt-dock-foot"><span>read-only rootfs</span><span>cap-drop ALL</span><span>own network</span></div>
 </div>
 
 </div>
@@ -62,7 +65,7 @@ berth setup
   </a>
 </div>
 
-## Overview
+## <span class="bt-num">01</span> The loop
 
 <div class="bt-steps" markdown="1">
 
@@ -104,7 +107,7 @@ berth pr --latest --title "fix: stabilize CI"
 
 </div>
 
-## The desktop app
+## <span class="bt-num">02</span> The desktop app
 
 Berth ships a native macOS app for orchestrating agents: a live sidebar with agent states (working / needs-you / review / failed), embedded terminals attached to each container's tmux session, diff review, a spawn form, timeline and cost views, a ⌘K command palette, and native notifications.
 
@@ -115,7 +118,7 @@ Berth ships a native macOS app for orchestrating agents: a live sidebar with age
 
 Everything the app does shells out to the same `berth` CLI, so the app, the [TUI](guide/tui.md), and your terminal can drive the same agents interchangeably. [Desktop app guide →](guide/app.md)
 
-## Explore
+## <span class="bt-num">03</span> Explore
 
 <div class="bt-grid">
   <a class="bt-card" href="install/">

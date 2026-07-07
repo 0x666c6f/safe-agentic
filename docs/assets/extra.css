@@ -455,58 +455,119 @@ body {
   margin: 0 0.5rem 0.5rem 0;
 }
 
-.bt-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+.bt-install-line {
+  max-width: 34rem;
   margin-top: 1.1rem;
 }
 
-.bt-chips span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45em;
-  border: 1px solid var(--bt-border);
-  border-radius: 8px;
-  background: var(--bt-panel);
-  color: var(--bt-muted);
-  font-family: "FKGrotesk SemiMono", monospace;
-  font-size: 0.62rem;
-  padding: 0.4em 0.75em;
-}
-
-.bt-chips span b {
-  color: var(--bt-text);
-  font-weight: 500;
-}
-
-.bt-install {
-  border: 1px solid var(--bt-border);
-  border-radius: 12px;
-  background: var(--bt-panel);
-  overflow: hidden;
-}
-
-.bt-install-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  border-bottom: 1px solid var(--bt-border);
-  color: var(--bt-faint);
-  font-family: "FKGrotesk SemiMono", monospace;
-  font-size: 0.62rem;
-  padding: 0.55em 1em;
-}
-
-.bt-install .highlight,
-.bt-install pre {
+.bt-install-line .highlight {
   margin: 0;
 }
 
-.bt-install pre {
-  border: none;
-  border-radius: 0;
+/* The dock — berth's signature hero graphic: nested isolation boxes,
+   one amber container docked (echoes the logo mark). */
+
+.bt-dock {
+  border: 1px solid var(--bt-border);
+  border-radius: 16px;
+  background: var(--bt-panel);
+  font-family: "FKGrotesk SemiMono", monospace;
+  font-size: 0.62rem;
+  padding: 0.9rem 1rem 0.75rem;
+}
+
+.bt-dock-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--bt-faint);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-size: 0.56rem;
+  margin-bottom: 0.6rem;
+}
+
+.bt-dock-vm {
+  border: 1px dashed var(--bt-border-strong);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem 0.8rem;
+}
+
+.bt-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  border: 1px solid var(--bt-border);
+  border-radius: 8px;
+  background: var(--md-default-bg-color);
+  color: var(--bt-muted);
+  padding: 0.6em 0.85em;
+  margin-top: 0.5rem;
+}
+
+.bt-slot:first-of-type {
+  margin-top: 0;
+}
+
+.bt-slot-active {
+  background: var(--berth-amber);
+  border-color: var(--berth-amber);
+  color: #14171C;
+  font-weight: 500;
+}
+
+.bt-slot-empty {
+  border-style: dashed;
   background: transparent;
+  color: var(--bt-faint);
+  justify-content: center;
+}
+
+.bt-slot-empty code {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  padding: 0;
+}
+
+.bt-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.75;
+  flex: none;
+}
+
+.bt-slot-state {
+  margin-left: auto;
+  opacity: 0.65;
+  font-size: 0.56rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bt-dock-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: var(--bt-faint);
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.65rem 0.2rem 0;
+}
+
+/* Numbered section kickers */
+
+.bt-num {
+  color: var(--bt-accent);
+  font-family: "FKGrotesk SemiMono", monospace;
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  margin-right: 0.55em;
 }
 
 /* Feature grid */
