@@ -212,7 +212,35 @@ func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
 	}
 	return s.run(args...)
 }
-func (s *AgentService) VMStart() (string, error) { return s.run("vm", "start") }
+// runLong is run() with a generous timeout for VM lifecycle operations —
+// `vm start` re-provisions (apt, Docker config, NAT) and `setup` can rebuild
+// the agent image, both well past the default 120s.
+func (s *AgentService) runLong(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	out, err := s.Runner.Run(ctx, args...)
+	if s.Poller != nil {
+		s.Poller.ForceRefresh()
+	}
+	return string(out), err
+}
+
+func (s *AgentService) VMStart() (string, error) { return s.runLong("vm", "start") }
+func (s *AgentService) VMStop() (string, error)  { return s.runLong("vm", "stop") }
+
+// VMRestart stops then starts the machine (the CLI has no single restart).
+func (s *AgentService) VMRestart() (string, error) {
+	stopOut, err := s.runLong("vm", "stop")
+	if err != nil {
+		return stopOut, err
+	}
+	startOut, err := s.runLong("vm", "start")
+	return stopOut + "\n" + startOut, err
+}
+
+// VMRepair re-runs the idempotent `safe-ag setup` — re-hardens the machine,
+// reconciles Docker/NAT, and rebuilds support files. The heavy "reset" option.
+func (s *AgentService) VMRepair() (string, error) { return s.runLong("setup") }
 
 // PipelineRun runs (or --dry-run validates) a saved pipeline by name, passing
 // any ${vars} the manifest declares as --var key=value.

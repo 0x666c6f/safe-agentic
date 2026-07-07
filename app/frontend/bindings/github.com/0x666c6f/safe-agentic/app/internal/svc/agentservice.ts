@@ -143,8 +143,27 @@ export function TemplateList(): $CancellablePromise<string> {
     return $Call.ByID(3182057434);
 }
 
+/**
+ * VMRepair re-runs the idempotent `safe-ag setup` — re-hardens the machine,
+ * reconciles Docker/NAT, and rebuilds support files. The heavy "reset" option.
+ */
+export function VMRepair(): $CancellablePromise<string> {
+    return $Call.ByID(3438583656);
+}
+
+/**
+ * VMRestart stops then starts the machine (the CLI has no single restart).
+ */
+export function VMRestart(): $CancellablePromise<string> {
+    return $Call.ByID(384939432);
+}
+
 export function VMStart(): $CancellablePromise<string> {
     return $Call.ByID(3472829651);
+}
+
+export function VMStop(): $CancellablePromise<string> {
+    return $Call.ByID(637685665);
 }
 
 export function WorkspaceRevert(name: string): $CancellablePromise<void> {
