@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="docs/assets/readme-logo.png" alt="berth logo" width="220">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/berth-readme-header-dark-800x200.png">
+    <img src="docs/assets/brand/berth-readme-header-light-800x200.png" alt="berth" width="400">
+  </picture>
 </p>
-
-# berth
 
 [![CI](https://github.com/0x666c6f/berth/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/berth/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)

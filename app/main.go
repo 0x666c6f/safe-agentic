@@ -36,7 +36,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// Menubar glyph: berth shield rendered as a macOS template icon
+// Menubar glyph: berth mark rendered as a macOS template icon
 // (black + alpha; generated from docs/assets/dashboard-favicon.png).
 //
 //go:embed assets/trayicon-template.png

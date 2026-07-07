@@ -6,6 +6,8 @@ repo_name: 0x666c6f/berth
 
 theme:
   name: material
+  logo: assets/dashboard-logo.png
+  favicon: assets/dashboard-favicon.png
   palette:
     - scheme: slate
       primary: blue
