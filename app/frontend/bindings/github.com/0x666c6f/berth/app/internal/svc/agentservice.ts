@@ -20,7 +20,7 @@ import * as audit$0 from "../../../pkg/audit/models.js";
 import * as $models from "./models.js";
 
 export function Agents(): $CancellablePromise<poll$0.Agent[] | null> {
-    return $Call.ByID(693732554);
+    return $Call.ByID(493595822);
 }
 
 /**
@@ -29,19 +29,19 @@ export function Agents(): $CancellablePromise<poll$0.Agent[] | null> {
  * of a global tail). limit<=0 returns all matching entries.
  */
 export function AuditFor(name: string, limit: number): $CancellablePromise<audit$0.Entry[] | null> {
-    return $Call.ByID(2287484934, name, limit);
+    return $Call.ByID(454168434, name, limit);
 }
 
 export function CheckpointCreate(name: string, label: string): $CancellablePromise<void> {
-    return $Call.ByID(1559967510, name, label);
+    return $Call.ByID(1203724930, name, label);
 }
 
 export function CheckpointList(name: string): $CancellablePromise<string> {
-    return $Call.ByID(4129538782, name);
+    return $Call.ByID(1982986674, name);
 }
 
 export function CheckpointRestore(name: string, ref: string): $CancellablePromise<void> {
-    return $Call.ByID(2192857000, name, ref);
+    return $Call.ByID(1609975156, name, ref);
 }
 
 /**
@@ -49,7 +49,7 @@ export function CheckpointRestore(name: string, ref: string): $CancellablePromis
  * as an existing container (config reconstructed from its env + labels).
  */
 export function Clone(name: string): $CancellablePromise<string> {
-    return $Call.ByID(2001323193, name);
+    return $Call.ByID(1158028581, name);
 }
 
 /**
@@ -58,14 +58,14 @@ export function Clone(name: string): $CancellablePromise<string> {
  * relay the setup build-context sync uses). Skips .git and heavy build dirs.
  */
 export function CloneLocalFolder(container: string, localPath: string): $CancellablePromise<void> {
-    return $Call.ByID(1573691384, container, localPath);
+    return $Call.ByID(4134394540, container, localPath);
 }
 
 /**
  * CommandLog returns the recent executed berth commands (the console feed).
  */
 export function CommandLog(): $CancellablePromise<cli$0.CommandEntry[] | null> {
-    return $Call.ByID(1896204041);
+    return $Call.ByID(1710861373);
 }
 
 /**
@@ -73,15 +73,15 @@ export function CommandLog(): $CancellablePromise<cli$0.CommandEntry[] | null> {
  * restart applies them immediately (the session resumes).
  */
 export function ConfigSync(name: string, restart: boolean): $CancellablePromise<string> {
-    return $Call.ByID(95632153, name, restart);
+    return $Call.ByID(916041125, name, restart);
 }
 
 export function Cost(name: string): $CancellablePromise<string> {
-    return $Call.ByID(2020914969, name);
+    return $Call.ByID(1052200653, name);
 }
 
 export function CostHistory(window: string): $CancellablePromise<string> {
-    return $Call.ByID(2624464075, window);
+    return $Call.ByID(2760188247, window);
 }
 
 /**
@@ -89,7 +89,7 @@ export function CostHistory(window: string): $CancellablePromise<string> {
  * budget surfaced on the agent card.
  */
 export function CostSummary(name: string): $CancellablePromise<string> {
-    return $Call.ByID(451166327, name);
+    return $Call.ByID(733215835, name);
 }
 
 /**
@@ -97,26 +97,26 @@ export function CostSummary(name: string): $CancellablePromise<string> {
  * probes the VM/Docker/NAT and can take well over the default budget.
  */
 export function Diagnose(): $CancellablePromise<string> {
-    return $Call.ByID(745796388);
+    return $Call.ByID(3746217104);
 }
 
 export function Diff(name: string): $CancellablePromise<string> {
-    return $Call.ByID(587789987, name);
+    return $Call.ByID(3507026271, name);
 }
 
 /**
  * OpenURL opens an http(s) URL in the host's default browser.
  */
 export function OpenURL(url: string): $CancellablePromise<void> {
-    return $Call.ByID(2120322749, url);
+    return $Call.ByID(2543197025, url);
 }
 
 export function Output(name: string): $CancellablePromise<cli$0.OutputInfo> {
-    return $Call.ByID(1181229993, name);
+    return $Call.ByID(1862776229, name);
 }
 
 export function PR(name: string): $CancellablePromise<string> {
-    return $Call.ByID(1098575466, name);
+    return $Call.ByID(2178911310, name);
 }
 
 /**
@@ -124,14 +124,14 @@ export function PR(name: string): $CancellablePromise<string> {
  * workspace. Empty PRInfo (no error) when the agent has no repo/PR.
  */
 export function PRStatus(name: string, repoDisplay: string): $CancellablePromise<$models.PRInfo> {
-    return $Call.ByID(3159238996, name, repoDisplay);
+    return $Call.ByID(2038864880, name, repoDisplay);
 }
 
 /**
  * PickFolder opens the native directory picker (wired to Wails in main).
  */
 export function PickFolder(): $CancellablePromise<string> {
-    return $Call.ByID(86929653);
+    return $Call.ByID(4279425665);
 }
 
 /**
@@ -139,23 +139,23 @@ export function PickFolder(): $CancellablePromise<string> {
  * any ${vars} the manifest declares as --var key=value.
  */
 export function PipelineRun(name: string, vars: { [_ in string]?: string } | null, dryRun: boolean): $CancellablePromise<string> {
-    return $Call.ByID(2852768419, name, vars, dryRun);
+    return $Call.ByID(2281522943, name, vars, dryRun);
 }
 
 export function Refresh(): $CancellablePromise<void> {
-    return $Call.ByID(3662288047);
+    return $Call.ByID(295810323);
 }
 
 export function Retry(name: string, feedback: string): $CancellablePromise<void> {
-    return $Call.ByID(4119827342, name, feedback);
+    return $Call.ByID(1144104426, name, feedback);
 }
 
 export function Review(name: string): $CancellablePromise<string> {
-    return $Call.ByID(4193130360, name);
+    return $Call.ByID(1924006668, name);
 }
 
 export function Spawn(req: $models.SpawnRequest): $CancellablePromise<string> {
-    return $Call.ByID(3528838075, req);
+    return $Call.ByID(4115293367, req);
 }
 
 /**
@@ -163,19 +163,19 @@ export function Spawn(req: $models.SpawnRequest): $CancellablePromise<string> {
  * into it, so the agent works on a copy of a laptop directory (no git URL).
  */
 export function SpawnFromLocal(agent: string, localPath: string): $CancellablePromise<string> {
-    return $Call.ByID(1432195030, agent, localPath);
+    return $Call.ByID(1409442586, agent, localPath);
 }
 
 export function Steer(name: string, message: string): $CancellablePromise<void> {
-    return $Call.ByID(391136501, name, message);
+    return $Call.ByID(3156311465, name, message);
 }
 
 export function Stop(name: string): $CancellablePromise<void> {
-    return $Call.ByID(1027892044, name);
+    return $Call.ByID(881467568, name);
 }
 
 export function TemplateList(): $CancellablePromise<string> {
-    return $Call.ByID(3182057434);
+    return $Call.ByID(3423406350);
 }
 
 /**
@@ -183,30 +183,30 @@ export function TemplateList(): $CancellablePromise<string> {
  * reconciles Docker/NAT, and rebuilds support files. The heavy "reset" option.
  */
 export function VMRepair(): $CancellablePromise<string> {
-    return $Call.ByID(3438583656);
+    return $Call.ByID(2889144868);
 }
 
 /**
  * VMRestart stops then starts the machine (the CLI has no single restart).
  */
 export function VMRestart(): $CancellablePromise<string> {
-    return $Call.ByID(384939432);
+    return $Call.ByID(3603049916);
 }
 
 export function VMStart(): $CancellablePromise<string> {
-    return $Call.ByID(3472829651);
+    return $Call.ByID(437553615);
 }
 
 export function VMStop(): $CancellablePromise<string> {
-    return $Call.ByID(637685665);
+    return $Call.ByID(239495061);
 }
 
 export function WorkspaceRevert(name: string): $CancellablePromise<void> {
-    return $Call.ByID(1836280415, name);
+    return $Call.ByID(4236803763, name);
 }
 
 export function WorkspaceRevertPath(name: string, path: string): $CancellablePromise<void> {
-    return $Call.ByID(2651970552, name, path);
+    return $Call.ByID(2685527284, name, path);
 }
 
 /**
@@ -214,9 +214,9 @@ export function WorkspaceRevertPath(name: string, path: string): $CancellablePro
  * paths ("." = everything).
  */
 export function WorkspaceStage(name: string): $CancellablePromise<void> {
-    return $Call.ByID(2028950633, name);
+    return $Call.ByID(1023402237, name);
 }
 
 export function WorkspaceStagePath(name: string, path: string): $CancellablePromise<void> {
-    return $Call.ByID(1976009906, name, path);
+    return $Call.ByID(3093738398, name, path);
 }
