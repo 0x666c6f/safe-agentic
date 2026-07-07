@@ -859,6 +859,52 @@ func TestWorkspaceRejectsEscapingPath(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLatestFlag(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	containerName := "agent-claude-latest"
+	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", containerName+"\n")
+
+	if err := workspaceStageCmd.Flags().Set("latest", "true"); err != nil {
+		t.Fatalf("set latest flag: %v", err)
+	}
+	defer workspaceStageCmd.Flags().Set("latest", "false")
+
+	if err := runWorkspaceStage(workspaceStageCmd, []string{"src/app.go"}); err != nil {
+		t.Fatalf("runWorkspaceStage(--latest) error = %v", err)
+	}
+	got := strings.Join(fake.LastCommand(), " ")
+	if !strings.Contains(got, containerName) || !strings.Contains(got, "git add -- src/app.go") {
+		t.Fatalf("stage --latest command = %s", got)
+	}
+}
+
+func TestWorkspaceArgsValidators(t *testing.T) {
+	// Without --latest: agent name plus at least one path.
+	if err := workspaceStageCmd.Args(workspaceStageCmd, []string{"agent-x"}); err == nil {
+		t.Fatal("expected error for missing path without --latest")
+	}
+	if err := workspaceStageCmd.Args(workspaceStageCmd, []string{"agent-x", "a.go"}); err != nil {
+		t.Fatalf("unexpected error with agent + path: %v", err)
+	}
+
+	// With --latest: paths only.
+	if err := workspaceStageCmd.Flags().Set("latest", "true"); err != nil {
+		t.Fatalf("set latest flag: %v", err)
+	}
+	defer workspaceStageCmd.Flags().Set("latest", "false")
+	if err := workspaceStageCmd.Args(workspaceStageCmd, []string{"a.go"}); err != nil {
+		t.Fatalf("unexpected error with --latest + path: %v", err)
+	}
+	if err := workspaceStagePatchCmd.Flags().Set("latest", "true"); err != nil {
+		t.Fatalf("set latest flag: %v", err)
+	}
+	defer workspaceStagePatchCmd.Flags().Set("latest", "false")
+	if err := workspaceStagePatchCmd.Args(workspaceStagePatchCmd, []string{"p.patch", "extra"}); err == nil {
+		t.Fatal("expected error for extra arg with --latest on stage-patch")
+	}
+}
+
 func TestWorkspacePatchOperations(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
