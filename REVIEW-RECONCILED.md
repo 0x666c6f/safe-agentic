@@ -32,7 +32,7 @@ This document reconciles overlapping findings against the current `main` tree. S
 
 3. Critical/High: repo-controlled setup hooks cross a trust boundary too early.
    Sources: Security/Claude, Code/Codex, Docs/Codex.
-   `entrypoint.sh` auto-discovers and executes `safe-agentic.json` setup scripts from cloned repos. That is convenient, but it means arbitrary repo content runs automatically before the agent session starts.
+   `entrypoint.sh` auto-discovers and executes `berth.json` setup scripts from cloned repos. That is convenient, but it means arbitrary repo content runs automatically before the agent session starts.
 
 4. High: SSH relay setup is too permissive and not race-safe.
    Sources: Security/Codex, Security/Claude, Code/Claude.

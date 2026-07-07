@@ -23,71 +23,71 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestPathsUseSafeAgHome(t *testing.T) {
+func TestPathsUseBerthHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if got := UserDir(); got != filepath.Join(home, ".safe-ag") {
+	if got := UserDir(); got != filepath.Join(home, ".berth") {
 		t.Fatalf("UserDir() = %q", got)
 	}
-	if got := ConfigPath(); got != filepath.Join(home, ".safe-ag", "config.toml") {
+	if got := ConfigPath(); got != filepath.Join(home, ".berth", "config.toml") {
 		t.Fatalf("ConfigPath() = %q", got)
 	}
-	if got := TemplatesDir(); got != filepath.Join(home, ".safe-ag", "templates") {
+	if got := TemplatesDir(); got != filepath.Join(home, ".berth", "templates") {
 		t.Fatalf("TemplatesDir() = %q", got)
 	}
-	if got := PipelinesDir(); got != filepath.Join(home, ".safe-ag", "pipelines") {
+	if got := PipelinesDir(); got != filepath.Join(home, ".berth", "pipelines") {
 		t.Fatalf("PipelinesDir() = %q", got)
 	}
-	if got := CronPath(); got != filepath.Join(home, ".safe-ag", "cron.json") {
+	if got := CronPath(); got != filepath.Join(home, ".berth", "cron.json") {
 		t.Fatalf("CronPath() = %q", got)
 	}
-	if got := AuditPath(); got != filepath.Join(home, ".safe-ag", "state", "audit.jsonl") {
+	if got := AuditPath(); got != filepath.Join(home, ".berth", "state", "audit.jsonl") {
 		t.Fatalf("AuditPath() = %q", got)
 	}
-	if got := EventsPath(); got != filepath.Join(home, ".safe-ag", "state", "events.jsonl") {
+	if got := EventsPath(); got != filepath.Join(home, ".berth", "state", "events.jsonl") {
 		t.Fatalf("EventsPath() = %q", got)
 	}
-	if got := PipelineLogsDir(); got != filepath.Join(home, ".safe-ag", "state", "pipelines") {
+	if got := PipelineLogsDir(); got != filepath.Join(home, ".berth", "state", "pipelines") {
 		t.Fatalf("PipelineLogsDir() = %q", got)
 	}
 }
 
-func TestPathsUseSafeAgConfigHome(t *testing.T) {
+func TestPathsUseBerthConfigHome(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("HOME", filepath.Join(t.TempDir(), "host-home"))
-	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
+	t.Setenv("BERTH_CONFIG_HOME", configHome)
 
-	if got := UserDir(); got != filepath.Join(configHome, ".safe-ag") {
+	if got := UserDir(); got != filepath.Join(configHome, ".berth") {
 		t.Fatalf("UserDir() = %q", got)
 	}
-	if got := ConfigPath(); got != filepath.Join(configHome, ".safe-ag", "config.toml") {
+	if got := ConfigPath(); got != filepath.Join(configHome, ".berth", "config.toml") {
 		t.Fatalf("ConfigPath() = %q", got)
 	}
-	if got := CronPath(); got != filepath.Join(configHome, ".safe-ag", "cron.json") {
+	if got := CronPath(); got != filepath.Join(configHome, ".berth", "cron.json") {
 		t.Fatalf("CronPath() = %q", got)
 	}
-	if got := EventsPath(); got != filepath.Join(configHome, ".safe-ag", "state", "events.jsonl") {
+	if got := EventsPath(); got != filepath.Join(configHome, ".berth", "state", "events.jsonl") {
 		t.Fatalf("EventsPath() = %q", got)
 	}
 }
 
-func TestStatePathsUseSafeAgStateHome(t *testing.T) {
+func TestStatePathsUseBerthStateHome(t *testing.T) {
 	configHome := t.TempDir()
 	stateHome := t.TempDir()
-	t.Setenv("SAFE_AGENTIC_CONFIG_HOME", configHome)
-	t.Setenv("SAFE_AGENTIC_STATE_HOME", stateHome)
+	t.Setenv("BERTH_CONFIG_HOME", configHome)
+	t.Setenv("BERTH_STATE_HOME", stateHome)
 
-	if got := UserDir(); got != filepath.Join(configHome, ".safe-ag") {
+	if got := UserDir(); got != filepath.Join(configHome, ".berth") {
 		t.Fatalf("UserDir() = %q", got)
 	}
-	if got := StateDir(); got != filepath.Join(stateHome, ".safe-ag", "state") {
+	if got := StateDir(); got != filepath.Join(stateHome, ".berth", "state") {
 		t.Fatalf("StateDir() = %q", got)
 	}
-	if got := AuditPath(); got != filepath.Join(stateHome, ".safe-ag", "state", "audit.jsonl") {
+	if got := AuditPath(); got != filepath.Join(stateHome, ".berth", "state", "audit.jsonl") {
 		t.Fatalf("AuditPath() = %q", got)
 	}
-	if got := PipelineLogsDir(); got != filepath.Join(stateHome, ".safe-ag", "state", "pipelines") {
+	if got := PipelineLogsDir(); got != filepath.Join(stateHome, ".berth", "state", "pipelines") {
 		t.Fatalf("PipelineLogsDir() = %q", got)
 	}
 }
@@ -162,10 +162,10 @@ func TestSetValueAndSaveRawConfig(t *testing.T) {
 	if err := SetValue(&raw, "defaults.memory", "16g"); err != nil {
 		t.Fatalf("SetValue memory: %v", err)
 	}
-	if err := SetValue(&raw, "SAFE_AGENTIC_DEFAULT_REUSE_AUTH", "true"); err != nil {
+	if err := SetValue(&raw, "BERTH_DEFAULT_REUSE_AUTH", "true"); err != nil {
 		t.Fatalf("SetValue alias: %v", err)
 	}
-	if err := SetValue(&raw, "SAFE_AGENTIC_DEFAULT_SEED_AUTH", "true"); err != nil {
+	if err := SetValue(&raw, "BERTH_DEFAULT_SEED_AUTH", "true"); err != nil {
 		t.Fatalf("SetValue seed auth alias: %v", err)
 	}
 	if err := SetValue(&raw, "git.author_name", "Agent Bot"); err != nil {
@@ -216,7 +216,7 @@ func TestResetValueDeletesEmptyConfigFile(t *testing.T) {
 func TestGetValueSupportsAliases(t *testing.T) {
 	cfg := Defaults()
 	cfg.Defaults.Memory = "32g"
-	got, err := GetValue(cfg, "SAFE_AGENTIC_DEFAULT_MEMORY")
+	got, err := GetValue(cfg, "BERTH_DEFAULT_MEMORY")
 	if err != nil {
 		t.Fatalf("GetValue() error = %v", err)
 	}
@@ -294,7 +294,7 @@ func TestWorktreesDirConfigKey(t *testing.T) {
 func TestWorktreesDirDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if got, want := WorktreesDir(), filepath.Join(home, ".safe-ag", "worktrees"); got != want {
+	if got, want := WorktreesDir(), filepath.Join(home, ".berth", "worktrees"); got != want {
 		t.Fatalf("WorktreesDir() = %q, want %q", got, want)
 	}
 }

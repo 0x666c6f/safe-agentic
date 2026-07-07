@@ -1,8 +1,8 @@
 //go:build livespike
 
-// Live E2E QA harness: exercises the real safe-ag CLI + VM + a disposable
+// Live E2E QA harness: exercises the real berth CLI + VM + a disposable
 // shell container through the same service layer the GUI calls.
-// Run: SAFE_AG_LIVE_QA=1 go test -tags livespike -run TestLiveQA ./internal/svc/ -v -timeout 10m
+// Run: BERTH_LIVE_QA=1 go test -tags livespike -run TestLiveQA ./internal/svc/ -v -timeout 10m
 package svc
 
 import (
@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/cli"
-	"github.com/0x666c6f/safe-agentic/app/internal/poll"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/cli"
+	"github.com/0x666c6f/berth/app/internal/poll"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 
 func vmRun(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	ex := &vmexec.MachineExecutor{VMName: "safe-agentic"}
+	ex := &vmexec.MachineExecutor{VMName: "berth"}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	out, err := ex.Run(ctx, args...)
@@ -47,14 +47,14 @@ func waitFor(t *testing.T, within time.Duration, what string, cond func() bool) 
 }
 
 func TestLiveQA(t *testing.T) {
-	if os.Getenv("SAFE_AG_LIVE_QA") == "" {
-		t.Skip("set SAFE_AG_LIVE_QA=1 to run the live E2E QA harness")
+	if os.Getenv("BERTH_LIVE_QA") == "" {
+		t.Skip("set BERTH_LIVE_QA=1 to run the live E2E QA harness")
 	}
 	svc := &AgentService{Runner: cli.NewRunner()}
 
 	// Cleanup any prior run, then spawn the disposable target.
-	exec.Command("safe-ag", "stop", qaContainer).Run()
-	t.Cleanup(func() { exec.Command("safe-ag", "stop", qaContainer).Run() })
+	exec.Command("berth", "stop", qaContainer).Run()
+	t.Cleanup(func() { exec.Command("berth", "stop", qaContainer).Run() })
 
 	out, err := svc.Spawn(SpawnRequest{Agent: "shell", Name: qaName, Repo: qaRepo, SSH: false})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestLiveQA(t *testing.T) {
 		if !strings.HasPrefix(strings.TrimSpace(ps), "Up") {
 			return false
 		}
-		_, err := vmRun(t, "docker", "exec", qaContainer, "tmux", "has-session", "-t", "safe-agentic")
+		_, err := vmRun(t, "docker", "exec", qaContainer, "tmux", "has-session", "-t", "berth")
 		return err == nil
 	})
 	// Wait for the clone to land (entrypoint clones after container start).
@@ -75,7 +75,7 @@ func TestLiveQA(t *testing.T) {
 	})
 
 	t.Run("A6_poller_parses_real_docker", func(t *testing.T) {
-		ex := &vmexec.MachineExecutor{VMName: "safe-agentic"}
+		ex := &vmexec.MachineExecutor{VMName: "berth"}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		raw, err := ex.Run(ctx, "docker", "ps", "-a", "--filter", "name=^agent-", "--format", poll.PSFormat())
@@ -112,7 +112,7 @@ func TestLiveQA(t *testing.T) {
 			t.Fatalf("steer: %v", err)
 		}
 		waitFor(t, 20*time.Second, "steer output in pane", func() bool {
-			pane, _ := vmRun(t, "docker", "exec", qaContainer, "tmux", "capture-pane", "-t", "safe-agentic", "-p", "-S", "-50")
+			pane, _ := vmRun(t, "docker", "exec", qaContainer, "tmux", "capture-pane", "-t", "berth", "-p", "-S", "-50")
 			return strings.Contains(pane, "qa-steer-42")
 		})
 	})

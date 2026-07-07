@@ -3,7 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strconv"
 	"strings"
 )
@@ -28,7 +28,7 @@ func ResolveLatest(ctx context.Context, exec vmexec.Executor) (string, error) {
 	}
 	name := strings.TrimSpace(string(out))
 	if name == "" {
-		return "", fmt.Errorf("no safe-agentic containers found")
+		return "", fmt.Errorf("no berth containers found")
 	}
 	return name, nil
 }

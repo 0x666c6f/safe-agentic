@@ -5,9 +5,9 @@
 Use the fleet manifest first, then run the consolidation pipeline:
 
 ```bash
-safe-ag fleet examples/fleet-review-and-fix.yaml
-safe-ag tui
-safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+berth fleet examples/fleet-review-and-fix.yaml
+berth tui
+berth pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
 
 This:
@@ -21,23 +21,23 @@ This:
 
 ```bash
 # Phase 1: spawn reviewers
-safe-ag fleet examples/fleet-review-and-fix.yaml
-safe-ag tui  # monitor
+berth fleet examples/fleet-review-and-fix.yaml
+berth tui  # monitor
 
 # Phase 2: after all finish
-safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+berth pipeline examples/pipeline-consolidate-and-fix.yaml
 ```
 
 ## Standalone fleet (no follow-up)
 
 ```bash
-safe-ag fleet examples/fleet-self-review.yaml
+berth fleet examples/fleet-self-review.yaml
 ```
 
 ## Double review -> reconciliation
 
 ```bash
-safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
+berth pipeline examples/pipeline-double-review-reconcile.yaml
 ```
 
 This:
@@ -51,7 +51,7 @@ This:
 ## Standalone pipeline
 
 ```bash
-safe-ag pipeline examples/pipeline-security-hardening.yaml
+berth pipeline examples/pipeline-security-hardening.yaml
 ```
 
 ## Minimal nested pipeline for display checks
@@ -59,7 +59,7 @@ safe-ag pipeline examples/pipeline-security-hardening.yaml
 Use this when you only want to validate pipeline tree rendering.
 
 ```bash
-safe-ag pipeline examples/pipeline-display-nested.yaml --dry-run
+berth pipeline examples/pipeline-display-nested.yaml --dry-run
 ```
 
 If you run it without `--dry-run`, each nesting level spawns exactly one tiny leaf agent with prompt `Reply OK.` and `auto_trust: true`, so the run can progress without waiting at the Codex trust prompt.

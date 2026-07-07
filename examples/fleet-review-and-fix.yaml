@@ -5,15 +5,15 @@
 #   2. Run the pipeline to consolidate findings, fix issues, and create a PR
 #
 # Usage:
-#   safe-ag fleet examples/fleet-review-and-fix.yaml
-#   # Wait for agents to finish (monitor with: safe-ag tui)
+#   berth fleet examples/fleet-review-and-fix.yaml
+#   # Wait for agents to finish (monitor with: berth tui)
 #   # Then run the consolidation pipeline:
-#   safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+#   berth pipeline examples/pipeline-consolidate-and-fix.yaml
 
 agents:
   - name: review-code
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -22,7 +22,7 @@ agents:
 
   - name: review-security
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -31,7 +31,7 @@ agents:
 
   - name: review-tests
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true
@@ -40,7 +40,7 @@ agents:
 
   - name: review-docs
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true

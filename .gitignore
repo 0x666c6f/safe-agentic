@@ -2,9 +2,9 @@
 *.local
 node_modules/
 site/
-/safe-ag
-bin/safe-ag
-bin/safe-ag-tui
+/berth
+bin/berth
+bin/berth-tui
 .DS_Store
 .claude/worktrees/
 

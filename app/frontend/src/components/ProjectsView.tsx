@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { FolderPlus, Play, X } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
-import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
+import { Service } from "../../bindings/github.com/0x666c6f/berth/app/internal/state";
 
 type Project = { url: string; count: number; last: number };
 

@@ -29,7 +29,7 @@ for arg in "$@"; do
     cmd="$cmd $decoded"
     continue
   fi
-  if [ "$arg" = "/usr/local/bin/safe-ag-exec" ]; then
+  if [ "$arg" = "/usr/local/bin/berth-exec" ]; then
     decode=1
   fi
 done
@@ -52,14 +52,14 @@ EOF
   *"docker exec agent-beta tmux capture-pane"*)
     printf 'line one\nline two\n'
     ;;
-  *"docker exec agent-beta tmux has-session -t safe-agentic"*)
+  *"docker exec agent-beta tmux has-session -t berth"*)
     exit 0
     ;;
-  *"docker inspect --format {{index .Config.Labels \"safe-agentic.terminal\"}} agent-beta"*)
+  *"docker inspect --format {{index .Config.Labels \"berth.terminal\"}} agent-beta"*)
     echo tmux
     ;;
   *"docker stop agent-beta"*)
-    echo "$cmd" >> "$SAFE_AGENTIC_TEST_CONTAINER_LOG"
+    echo "$cmd" >> "$BERTH_TEST_CONTAINER_LOG"
     ;;
   *)
     exit 1
@@ -71,7 +71,7 @@ esac
 	}
 
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SAFE_AGENTIC_TEST_CONTAINER_LOG", filepath.Join(dir, "container.log"))
+	t.Setenv("BERTH_TEST_CONTAINER_LOG", filepath.Join(dir, "container.log"))
 }
 
 func TestParsePSOutputAndHelpers(t *testing.T) {
@@ -166,7 +166,7 @@ decode=0
 for arg in "$@"; do
   if [ "$decode" = "1" ]; then cmd="$arg"; decode=2; continue; fi
   if [ "$decode" = "2" ]; then decoded=$(printf '%s' "$arg" | base64 -d); cmd="$cmd $decoded"; continue; fi
-  if [ "$arg" = "/usr/local/bin/safe-ag-exec" ]; then decode=1; fi
+  if [ "$arg" = "/usr/local/bin/berth-exec" ]; then decode=1; fi
 done
 [ -n "$cmd" ] || cmd="$*"
 case "$cmd" in

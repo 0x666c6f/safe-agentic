@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/cli"
-	"github.com/0x666c6f/safe-agentic/app/internal/state"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/cli"
+	"github.com/0x666c6f/berth/app/internal/state"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 func recorderRunner() (*cli.Runner, *[][]string) {
 	var calls [][]string
-	r := &cli.Runner{Bin: "safe-ag",
+	r := &cli.Runner{Bin: "berth",
 		Exec: func(context.Context, string, ...string) ([]byte, []byte, error) {
 			return []byte("{}"), nil, nil
 		},
@@ -29,7 +29,7 @@ func TestSteerBuildsArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join((*calls)[0], " ")
-	if got != "safe-ag steer agent-x focus on tests" {
+	if got != "berth steer agent-x focus on tests" {
 		t.Fatalf("argv: %q", got)
 	}
 }
@@ -41,7 +41,7 @@ func TestRetryWithFeedback(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join((*calls)[0], " ")
-	if got != "safe-ag retry agent-x --feedback fix lint" {
+	if got != "berth retry agent-x --feedback fix lint" {
 		t.Fatalf("argv: %q", got)
 	}
 }
@@ -127,7 +127,7 @@ func TestCloneReconstructsSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join((*calls)[0], " ")
-	want := "safe-ag spawn claude --repo git@github.com:o/r.git --repo https://github.com/o/x.git --ssh --seed-auth --reuse-gh-auth --auto-trust --background"
+	want := "berth spawn claude --repo git@github.com:o/r.git --repo https://github.com/o/x.git --ssh --seed-auth --reuse-gh-auth --auto-trust --background"
 	if got != want {
 		t.Fatalf("\ngot:  %s\nwant: %s", got, want)
 	}

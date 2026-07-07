@@ -1,6 +1,6 @@
 // Saved projects (repos) for the spawn form — backed by the Go-side store
-// (~/.safe-ag/app-projects.json) shared with the systray Projects menu.
-import { Service } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
+// (~/.berth/app-projects.json) shared with the systray Projects menu.
+import { Service } from "../bindings/github.com/0x666c6f/berth/app/internal/state";
 
 export async function recordRepoUse(url: string): Promise<void> {
   if (url.trim()) await Service.ProjectUse(url.trim());

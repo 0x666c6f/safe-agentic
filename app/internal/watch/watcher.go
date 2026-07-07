@@ -11,8 +11,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
-	"github.com/0x666c6f/safe-agentic/pkg/events"
+	"github.com/0x666c6f/berth/app/internal/emit"
+	"github.com/0x666c6f/berth/pkg/events"
 )
 
 type Watcher struct {

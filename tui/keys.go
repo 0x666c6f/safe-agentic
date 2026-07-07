@@ -43,21 +43,21 @@ var keyBindings = []keyBinding{
 	{Key: "i", Label: "Steer", Desc: "Send a follow-up message to the selected agent", Section: "Actions", Handler: "steer"},
 	{Key: "n", Label: "New", Desc: "Spawn a new agent (form)", Section: "Actions", Handler: "new"},
 	{Key: "P", Label: "PR", Desc: "Create GitHub PR from agent branch", Section: "Actions", Handler: "pr"},
-	{Key: "S", Desc: "Run 'safe-ag vm start' to recover an unreachable VM", Section: "Actions", Handler: "vmstart"},
+	{Key: "S", Desc: "Run 'berth vm start' to recover an unreachable VM", Section: "Actions", Handler: "vmstart"},
 	{Key: "^R", Label: "Refresh", Desc: "Force an immediate refresh", Section: "Actions"},
 
 	// Inspect
 	{Key: "p", Label: "Preview", Desc: "Toggle preview pane (last output)", Section: "Inspect", Handler: "preview"},
-	{Key: "l", Label: "Logs", Desc: "Logs (safe-ag logs)", Section: "Inspect", Handler: "logs"},
+	{Key: "l", Label: "Logs", Desc: "Logs (berth logs)", Section: "Inspect", Handler: "logs"},
 	{Key: "d", Label: "Describe", Desc: "Describe container (docker inspect)", Section: "Inspect", Handler: "describe"},
-	{Key: "f", Label: "Diff", Desc: "Diff (safe-ag diff)", Section: "Inspect", Handler: "diff"},
+	{Key: "f", Label: "Diff", Desc: "Diff (berth diff)", Section: "Inspect", Handler: "diff"},
 	{Key: "x", Label: "Chkpt", Desc: "Checkpoint create", Section: "Inspect", Handler: "checkpoint"},
 	{Key: "t", Label: "Todos", Desc: "Todo list", Section: "Inspect", Handler: "todo"},
 	{Key: "e", Label: "Export", Desc: "Export sessions", Section: "Inspect", Handler: "export"},
 	{Key: "c", Label: "Copy", Desc: "Transfer files VM ↔ agent", Section: "Inspect", Handler: "copy"},
 	{Key: "$", Label: "Cost", Desc: "Cost estimate", Section: "Inspect", Handler: "cost"},
 	{Key: "A", Label: "Audit", Desc: "Audit log", Section: "Inspect", Handler: "audit"},
-	{Key: "R", Label: "Review", Desc: "Code review (safe-ag review)", Section: "Inspect", Handler: "review"},
+	{Key: "R", Label: "Review", Desc: "Code review (berth review)", Section: "Inspect", Handler: "review"},
 	{Key: "m", Label: "MCP", Desc: "MCP OAuth login", Section: "Inspect", Handler: "mcp"},
 
 	// Other

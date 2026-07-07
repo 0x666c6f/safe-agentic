@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
-	"github.com/0x666c6f/safe-agentic/pkg/labels"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/emit"
+	"github.com/0x666c6f/berth/pkg/labels"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 // Probe cadence: docker ps runs every tick (add/remove stays snappy), but the

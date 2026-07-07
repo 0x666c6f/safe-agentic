@@ -1,4 +1,4 @@
-module github.com/0x666c6f/safe-agentic
+module github.com/0x666c6f/berth
 
 go 1.25.5
 

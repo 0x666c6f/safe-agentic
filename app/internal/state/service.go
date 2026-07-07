@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/audit"
-	"github.com/0x666c6f/safe-agentic/pkg/config"
-	"github.com/0x666c6f/safe-agentic/pkg/events"
+	"github.com/0x666c6f/berth/pkg/audit"
+	"github.com/0x666c6f/berth/pkg/config"
+	"github.com/0x666c6f/berth/pkg/events"
 )
 
 type EventItem struct {
@@ -91,7 +91,7 @@ func (s *Service) PipelineFiles() ([]string, error) {
 		}
 		name := e.Name()
 		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
-			// Bare names: safe-ag's catalog resolves "<name>" as
+			// Bare names: berth's catalog resolves "<name>" as
 			// <PipelinesDir>/<name>.{yaml,yml}; passing "foo.yaml" would
 			// probe for foo.yaml.yaml and fail.
 			name = strings.TrimSuffix(strings.TrimSuffix(name, ".yaml"), ".yml")

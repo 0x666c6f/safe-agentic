@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/pkg/risk"
+	"github.com/0x666c6f/berth/pkg/risk"
 )
 
 func TestOverlayHelpers(t *testing.T) {

@@ -3,7 +3,7 @@ import { Command } from "cmdk";
 import { useStore, statusFor } from "../store";
 import { errText } from "../types";
 import { StatusDot } from "./StatusDot";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 
 export function Palette() {
   const [open, setOpen] = useState(false);

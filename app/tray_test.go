@@ -5,7 +5,7 @@ import (
 	"image/png"
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/poll"
+	"github.com/0x666c6f/berth/app/internal/poll"
 )
 
 func TestTrayHeaderAndChatLine(t *testing.T) {

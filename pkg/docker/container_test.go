@@ -2,7 +2,7 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"testing"
 )
@@ -50,7 +50,7 @@ func TestResolveLatest_Empty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty output")
 	}
-	if !strings.Contains(err.Error(), "no safe-agentic containers found") {
+	if !strings.Contains(err.Error(), "no berth containers found") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -130,7 +130,7 @@ func TestResolveTarget_NotFound(t *testing.T) {
 func TestInspectLabel(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("docker inspect --format", "claude")
-	val, err := InspectLabel(context.Background(), fake, "mycontainer", "safe-agentic.agent-type")
+	val, err := InspectLabel(context.Background(), fake, "mycontainer", "berth.agent-type")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

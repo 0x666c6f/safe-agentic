@@ -1,10 +1,10 @@
 .PHONY: build install clean
 
 build:
-	go build -o safe-ag-tui .
+	go build -o berth-tui .
 
 install:
-	go build -o ../bin/safe-ag-tui .
+	go build -o ../bin/berth-tui .
 
 clean:
-	rm -f safe-ag-tui ../bin/safe-ag-tui
+	rm -f berth-tui ../bin/berth-tui

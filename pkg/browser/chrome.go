@@ -36,7 +36,7 @@ func CaptureChrome(ctx context.Context, opts ChromeCaptureOptions) (Artifact, er
 	}
 	outDir := opts.OutDir
 	if outDir == "" {
-		outDir = filepath.Join(os.TempDir(), "safe-ag-browser")
+		outDir = filepath.Join(os.TempDir(), "berth-browser")
 	}
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return Artifact{}, fmt.Errorf("create output dir: %w", err)
@@ -50,7 +50,7 @@ func CaptureChrome(ctx context.Context, opts ChromeCaptureOptions) (Artifact, er
 		chromePath = DetectChrome()
 	}
 	if chromePath == "" {
-		return Artifact{}, fmt.Errorf("chrome executable not found; pass --chrome-path or set SAFE_AGENTIC_CHROME")
+		return Artifact{}, fmt.Errorf("chrome executable not found; pass --chrome-path or set BERTH_CHROME")
 	}
 
 	scriptPath := filepath.Join(outDir, "capture.mjs")
@@ -104,7 +104,7 @@ func CaptureChrome(ctx context.Context, opts ChromeCaptureOptions) (Artifact, er
 }
 
 func DetectChrome() string {
-	if path := strings.TrimSpace(os.Getenv("SAFE_AGENTIC_CHROME")); path != "" {
+	if path := strings.TrimSpace(os.Getenv("BERTH_CHROME")); path != "" {
 		return path
 	}
 	candidates := []string{
@@ -142,7 +142,7 @@ import { join } from "node:path";
 const [chromePath, targetURL, outDir, timeoutMsRaw] = process.argv.slice(2);
 const timeoutMs = Number(timeoutMsRaw || "30000");
 await mkdir(outDir, { recursive: true, mode: 0o700 });
-const profileDir = await mkdtemp(join(tmpdir(), "safe-ag-chrome-"));
+const profileDir = await mkdtemp(join(tmpdir(), "berth-chrome-"));
 
 let browser;
 let wsURL = "";

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
+	"github.com/0x666c6f/berth/app/internal/emit"
 )
 
 func TestNewManagerNilFactoryFallsBack(t *testing.T) {
@@ -20,7 +20,7 @@ func TestNewManagerNilFactoryFallsBack(t *testing.T) {
 
 func TestDefaultFactorySingleTERM(t *testing.T) {
 	t.Setenv("TERM", "dumb")
-	cmd := DefaultFactory("safe-agentic")("agent-x")
+	cmd := DefaultFactory("berth")("agent-x")
 	var terms []string
 	for _, kv := range cmd.Env {
 		if strings.HasPrefix(kv, "TERM=") {

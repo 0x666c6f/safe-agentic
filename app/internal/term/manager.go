@@ -16,24 +16,24 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
-	"github.com/0x666c6f/safe-agentic/pkg/tmux"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/emit"
+	"github.com/0x666c6f/berth/pkg/tmux"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 type CommandFactory func(container string) *exec.Cmd
 
 // vmNameFromEnv mirrors the CLI's VM-name rule.
 func vmNameFromEnv() string {
-	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+	if v := os.Getenv("BERTH_VM_NAME"); v != "" {
 		return v
 	}
-	return "safe-agentic"
+	return "berth"
 }
 
 func DefaultFactory(vmName string) CommandFactory {
 	return func(container string) *exec.Cmd {
-		// Route through the safe-ag-exec relay (base64-wrapped args) — the
+		// Route through the berth-exec relay (base64-wrapped args) — the
 		// only proven convention for arg-safe execution via `container
 		// machine run`; raw args get mangled by flag parsing.
 		//

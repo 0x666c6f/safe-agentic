@@ -1,9 +1,9 @@
 ---
 name: agent-manifest-author
-description: Author or update safe-agentic fleet and pipeline manifests. Use when the user wants reusable orchestration YAML for parallel workers, staged flows, nested pipelines, model fan-out, or dry-run validation before execution.
+description: Author or update berth fleet and pipeline manifests. Use when the user wants reusable orchestration YAML for parallel workers, staged flows, nested pipelines, model fan-out, or dry-run validation before execution.
 ---
 
-# Author Safe-Agentic Manifests
+# Author Berth Manifests
 
 Use this skill for reusable orchestration, not one-off `spawn` commands.
 
@@ -17,8 +17,8 @@ Use this skill for reusable orchestration, not one-off `spawn` commands.
 1. map work units, repos, auth needs, and dependency edges
 2. keep prompts task-specific; do not hide orchestration in one vague mega-prompt
 3. encode shared defaults once, override only when needed
-4. use `profile:` when a role already exists in `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml`
-5. dry-run first with `safe-ag fleet ... --dry-run` or `safe-ag pipeline ... --dry-run`
+4. use `profile:` when a role already exists in `~/.berth/agents/*.toml` or `.berth/agents/*.toml`
+5. dry-run first with `berth fleet ... --dry-run` or `berth pipeline ... --dry-run`
 6. keep example manifests and real manifests small and reviewable
 
 ## Fleet starter
@@ -65,8 +65,8 @@ Supported agent fields include `profile`, `template`, `template_vars`, `instruct
 ## Validation
 
 ```bash
-safe-ag fleet path/to/fleet.yaml --dry-run
-safe-ag pipeline path/to/pipeline.yaml --dry-run
+berth fleet path/to/fleet.yaml --dry-run
+berth pipeline path/to/pipeline.yaml --dry-run
 ```
 
 Check for:

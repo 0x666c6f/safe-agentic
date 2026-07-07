@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
-	"github.com/0x666c6f/safe-agentic/pkg/events"
+	"github.com/0x666c6f/berth/pkg/agentstate"
+	"github.com/0x666c6f/berth/pkg/events"
 )
 
 // stateNotifier fires a native desktop notification when an agent transitions
@@ -32,9 +32,9 @@ func newStateNotifier() *stateNotifier {
 }
 
 // notifyEnabled reports whether transition notifications are on. They default to
-// on; set SAFE_AG_TUI_NOTIFY=off (or 0/false/no) to silence them.
+// on; set BERTH_TUI_NOTIFY=off (or 0/false/no) to silence them.
 func notifyEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("SAFE_AG_TUI_NOTIFY"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BERTH_TUI_NOTIFY"))) {
 	case "off", "0", "false", "no":
 		return false
 	default:

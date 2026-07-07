@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
-import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
+import { Service } from "../../bindings/github.com/0x666c6f/berth/app/internal/state";
 import { useStore } from "../store";
 import { errText } from "../types";
 import type { AgentStatus } from "../types";

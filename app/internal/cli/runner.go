@@ -19,16 +19,16 @@ type CLIError struct {
 
 func (e *CLIError) Error() string {
 	if len(e.Argv) < 2 {
-		return fmt.Sprintf("safe-ag %v failed: %v\n%s", e.Argv, e.Err, e.Stderr)
+		return fmt.Sprintf("berth %v failed: %v\n%s", e.Argv, e.Err, e.Stderr)
 	}
-	return fmt.Sprintf("safe-ag %v failed: %v\n%s", e.Argv[1:], e.Err, e.Stderr)
+	return fmt.Sprintf("berth %v failed: %v\n%s", e.Argv[1:], e.Err, e.Stderr)
 }
 func (e *CLIError) Unwrap() error { return e.Err }
 
 // cmdLogCap bounds the executed-command ring buffer surfaced to the console.
 const cmdLogCap = 200
 
-// CommandEntry is one executed safe-ag invocation, for the command console.
+// CommandEntry is one executed berth invocation, for the command console.
 type CommandEntry struct {
 	TS         int64    `json:"ts"`         // unix milliseconds
 	Argv       []string `json:"argv"`       // secret/token values redacted
@@ -50,7 +50,7 @@ type Runner struct {
 
 func NewRunner() *Runner {
 	return &Runner{
-		Bin: "safe-ag",
+		Bin: "berth",
 		Exec: func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 			cmd := exec.CommandContext(ctx, name, args...)
 			var out, errb bytes.Buffer

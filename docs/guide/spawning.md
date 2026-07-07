@@ -1,40 +1,40 @@
 # Spawning Agents
 
-Use `safe-ag spawn` when you want explicit control over the agent session.
+Use `berth spawn` when you want explicit control over the agent session.
 
 ## Base form
 
 ```bash
-safe-ag spawn <claude|codex|shell> [flags]
+berth spawn <claude|codex|shell> [flags]
 ```
 
 Agent-first shortcuts:
 
 ```bash
-safe-ag-claude <repo-url> [repo-url...]
-safe-ag-codex <repo-url> [repo-url...]
+berth-claude <repo-url> [repo-url...]
+berth-codex <repo-url> [repo-url...]
 ```
 
-`safe-ag-claude` and `safe-ag-codex` expand to `spawn ... --repo ...` and auto-enable `--ssh` for `git@` and `ssh://` remotes.
+`berth-claude` and `berth-codex` expand to `spawn ... --repo ...` and auto-enable `--ssh` for `git@` and `ssh://` remotes.
 
 ## Most common cases
 
 Public repo:
 
 ```bash
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
+berth spawn claude --repo https://github.com/myorg/myrepo.git
 ```
 
 Private repo:
 
 ```bash
-safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+berth spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 ```
 
 Immediate task:
 
 ```bash
-safe-ag spawn codex \
+berth spawn codex \
   --ssh \
   --repo git@github.com:org/repo.git \
   --prompt "Fix the failing tests"
@@ -43,7 +43,7 @@ safe-ag spawn codex \
 Background run:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --background \
   --ssh \
   --repo git@github.com:org/repo.git \
@@ -63,7 +63,7 @@ safe-ag spawn claude \
 `--repo` is repeatable.
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --repo git@github.com:org/frontend.git \
   --repo git@github.com:org/backend.git
 ```
@@ -84,7 +84,7 @@ Auth-related flags:
 | `--no-reuse-gh-auth` | override `reuse_gh_auth = true` from config for one session |
 | `--seed-auth` | copy host Claude/Codex auth into this session's auth mount |
 | `--no-seed-auth` | override `seed_auth = true` from config for one session |
-| `--allow-setup-scripts` | allow repo-provided `safe-agentic.json` setup hooks to run |
+| `--allow-setup-scripts` | allow repo-provided `berth.json` setup hooks to run |
 
 By default, Claude/Codex auth starts empty in a per-container mount. Use `--seed-auth` only when you intentionally want to copy host agent auth into that session. Use `--reuse-auth` only when you intentionally want shared state across sessions.
 
@@ -93,11 +93,11 @@ By default, Claude/Codex auth starts empty in a per-container mount. Use `--seed
 Three ways to shape the agent session:
 
 ```bash
-safe-ag spawn claude --repo ... --prompt "Fix the flaky tests"
-safe-ag spawn claude --repo ... --instructions "Only touch docs and tests"
-safe-ag spawn claude --repo ... --instructions-file ./role.md
-safe-ag spawn claude --repo ... --template security-audit
-safe-ag spawn claude --repo ... --template security-audit --var area=payments
+berth spawn claude --repo ... --prompt "Fix the flaky tests"
+berth spawn claude --repo ... --instructions "Only touch docs and tests"
+berth spawn claude --repo ... --instructions-file ./role.md
+berth spawn claude --repo ... --template security-audit
+berth spawn claude --repo ... --template security-audit --var area=payments
 ```
 
 Use:
@@ -106,50 +106,50 @@ Use:
 - `--template` for a reusable built-in prompt
 - `--var key=value` for template placeholders
 
-Templates can reference `${repo}`. If `--repo` is omitted, `safe-ag` tries to infer it from the current checkout's `origin` remote.
+Templates can reference `${repo}`. If `--repo` is omitted, `berth` tries to infer it from the current checkout's `origin` remote.
 
 ## Managed worktrees
 
 Use `--worktree` when you want a Codex-app-style isolated checkout for the task while keeping the container sandbox.
 
 ```bash
-safe-ag spawn claude --worktree --name auth-fix --prompt "Fix the auth tests"
-safe-ag spawn codex --worktree --worktree-branch safe-ag/api-review --background
+berth spawn claude --worktree --name auth-fix --prompt "Fix the auth tests"
+berth spawn codex --worktree --worktree-branch berth/api-review --background
 ```
 
 Rules:
 - run from inside the source git checkout
 - do not pass `--repo`; the current checkout is the source
-- default path is `~/.safe-ag/worktrees/<container-name>`
-- default branch is `safe-ag/<container-name>`
-- ignored local files listed in `.safe-aginclude` are copied into the worktree
+- default path is `~/.berth/worktrees/<container-name>`
+- default branch is `berth/<container-name>`
+- ignored local files listed in `.berthinclude` are copied into the worktree
 
 `--worktree` is opt-in (off by default):
-- enable it once with `safe-ag setup --enable-worktrees` (or `safe-ag config set defaults.worktrees_mount true` then `safe-ag setup`); disable with `safe-ag setup --disable-worktrees`
-- when enabled, the machine runs `home-mount=rw` and `vm/setup.sh` binds *only* the worktrees root (`~/.safe-ag/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`
+- enable it once with `berth setup --enable-worktrees` (or `berth config set defaults.worktrees_mount true` then `berth setup`); disable with `berth setup --disable-worktrees`
+- when enabled, the machine runs `home-mount=rw` and `vm/setup.sh` binds *only* the worktrees root (`~/.berth/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`
 - on spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the container bind
 - a `--worktree-path` outside the worktrees root is rejected before launch; the root must live under your home directory
-- `safe-ag setup`/`safe-ag vm start` reconcile the machine to match the config; `safe-ag diagnose` reports the posture
+- `berth setup`/`berth vm start` reconcile the machine to match the config; `berth diagnose` reports the posture
 
 Security trade-off:
 - the default (`home-mount=none`) shares no host data with the VM; enabling the worktree mount switches to `home-mount=rw`, which shares your whole home at the virtiofs level
-- safe-agentic detaches and masks everything except the worktrees root, but this is a **weaker boundary** than the default — a VM-root compromise or Docker escape could re-reach host home
+- berth detaches and masks everything except the worktrees root, but this is a **weaker boundary** than the default — a VM-root compromise or Docker escape could re-reach host home
 - keep secrets and unrelated projects out of the worktrees root; see the [threat model](../security/threat-model.md)
 
 Handoff:
 
 ```bash
-safe-ag handoff auth-fix --to-worktree
-safe-ag handoff auth-fix --to-local ./workspace-copy
+berth handoff auth-fix --to-worktree
+berth handoff auth-fix --to-local ./workspace-copy
 ```
 
 Snapshots and cleanup:
 
 ```bash
-safe-ag worktree snapshot auth-fix "before review fixes"
-safe-ag worktree restore auth-fix stash@{0}
-safe-ag worktree list
-safe-ag worktree cleanup --dry-run
+berth worktree snapshot auth-fix "before review fixes"
+berth worktree restore auth-fix stash@{0}
+berth worktree list
+berth worktree cleanup --dry-run
 ```
 
 ## Runtime and network options
@@ -157,38 +157,38 @@ safe-ag worktree cleanup --dry-run
 Docker:
 
 ```bash
-safe-ag spawn claude --docker --repo ...
-safe-ag spawn claude --docker-socket --repo ...
-safe-ag spawn claude --no-docker --repo ...
+berth spawn claude --docker --repo ...
+berth spawn claude --docker-socket --repo ...
+berth spawn claude --no-docker --repo ...
 ```
 
-Use `--no-docker` or `--no-docker-socket` to override Docker defaults from `~/.safe-ag/config.toml`.
+Use `--no-docker` or `--no-docker-socket` to override Docker defaults from `~/.berth/config.toml`.
 
 AWS:
 
 ```bash
-safe-ag spawn claude --aws my-profile --repo ...
+berth spawn claude --aws my-profile --repo ...
 ```
 
 Custom network:
 
 ```bash
-safe-ag spawn claude --network my-net --repo ...
+berth spawn claude --network my-net --repo ...
 ```
 
 Resource tuning:
 
 ```bash
-safe-ag spawn claude --memory 12g --cpus 6 --pids-limit 1024 --repo ...
+berth spawn claude --memory 12g --cpus 6 --pids-limit 1024 --repo ...
 ```
 
 ## Naming and behavior flags
 
 ```bash
-safe-ag spawn claude --name api-fix --repo ...
-safe-ag spawn claude --background --repo ...
-safe-ag spawn claude --auto-trust --repo ...
-safe-ag spawn claude --dry-run --repo ...
+berth spawn claude --name api-fix --repo ...
+berth spawn claude --background --repo ...
+berth spawn claude --auto-trust --repo ...
+berth spawn claude --dry-run --repo ...
 ```
 
 Meaning:
@@ -199,20 +199,20 @@ Meaning:
 
 ## What happens after spawn
 
-1. safe-agentic resolves defaults and validates flags
+1. berth resolves defaults and validates flags
 2. it creates or joins the Docker network
 3. it starts the container with the hardened runtime flags
 4. it clones repos into `/workspace`
-5. if `--allow-setup-scripts` is set, it runs `safe-agentic.json` setup hooks
+5. if `--allow-setup-scripts` is set, it runs `berth.json` setup hooks
 6. it launches the agent inside tmux
 7. it attaches unless you used `--background`
 
 ## Related commands
 
 ```bash
-safe-ag list
-safe-ag attach --latest
-safe-ag peek --latest
-safe-ag diff --latest
-safe-ag output --latest
+berth list
+berth attach --latest
+berth peek --latest
+berth diff --latest
+berth output --latest
 ```

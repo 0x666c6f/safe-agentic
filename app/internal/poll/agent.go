@@ -15,16 +15,16 @@ type Agent struct {
 func PSFormat() string {
 	return strings.Join([]string{
 		"{{.Names}}",
-		`{{.Label "safe-agentic.agent-type"}}`,
-		`{{.Label "safe-agentic.repo-display"}}`,
-		`{{.Label "safe-agentic.ssh"}}`,
-		`{{.Label "safe-agentic.auth"}}`,
-		`{{.Label "safe-agentic.gh-auth"}}`,
-		`{{.Label "safe-agentic.docker"}}`,
-		`{{.Label "safe-agentic.network-mode"}}`,
-		`{{.Label "safe-agentic.fleet"}}`,
-		`{{.Label "safe-agentic.hierarchy"}}`,
-		`{{.Label "safe-agentic.terminal"}}`,
+		`{{.Label "berth.agent-type"}}`,
+		`{{.Label "berth.repo-display"}}`,
+		`{{.Label "berth.ssh"}}`,
+		`{{.Label "berth.auth"}}`,
+		`{{.Label "berth.gh-auth"}}`,
+		`{{.Label "berth.docker"}}`,
+		`{{.Label "berth.network-mode"}}`,
+		`{{.Label "berth.fleet"}}`,
+		`{{.Label "berth.hierarchy"}}`,
+		`{{.Label "berth.terminal"}}`,
 		"{{.Status}}",
 	}, "\t")
 }

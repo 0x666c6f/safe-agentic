@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/profiles"
+	"github.com/0x666c6f/berth/pkg/profiles"
 	"gopkg.in/yaml.v3"
 )
 

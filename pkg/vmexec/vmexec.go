@@ -51,7 +51,7 @@ func (e *MachineExecutor) buildArgsWithBase(base []string, args ...string) []str
 	if len(args) == 0 {
 		return base
 	}
-	wrapped := []string{"/usr/local/bin/safe-ag-exec", args[0]}
+	wrapped := []string{"/usr/local/bin/berth-exec", args[0]}
 	for _, arg := range args[1:] {
 		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
 	}
@@ -59,7 +59,7 @@ func (e *MachineExecutor) buildArgsWithBase(base []string, args ...string) []str
 }
 
 // BuildInteractiveArgs returns the host argv (for exec.Command("container", args...))
-// that runs cmdArgs inside the VM through the safe-ag-exec relay with an
+// that runs cmdArgs inside the VM through the berth-exec relay with an
 // interactive TTY, regardless of whether the caller's stdin is a terminal
 // (GUI callers allocate their own PTY). Mirrors the executor's interactive path.
 func BuildInteractiveArgs(vmName string, cmdArgs ...string) []string {
@@ -67,7 +67,7 @@ func BuildInteractiveArgs(vmName string, cmdArgs ...string) []string {
 	if len(cmdArgs) == 0 {
 		return base
 	}
-	wrapped := []string{"/usr/local/bin/safe-ag-exec", cmdArgs[0]}
+	wrapped := []string{"/usr/local/bin/berth-exec", cmdArgs[0]}
 	for _, arg := range cmdArgs[1:] {
 		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
 	}

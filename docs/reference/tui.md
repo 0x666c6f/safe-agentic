@@ -7,19 +7,19 @@ This page is the exhaustive reference for the terminal UI.
 Terminal UI:
 
 ```bash
-safe-ag tui
+berth tui
 ```
 
 Standalone binary help:
 
 ```bash
-safe-ag-tui --help
+berth-tui --help
 ```
 
 Current binary usage:
 
 ```text
-Usage: safe-ag-tui
+Usage: berth-tui
 ```
 
 ## Interaction model
@@ -74,7 +74,7 @@ Behavior:
 
 ### STATE column
 
-The `STATE` column is the same `agentstate` detection used by `safe-ag status`.
+The `STATE` column is the same `agentstate` detection used by `berth status`.
 The poller captures each running tmux agent's pane once per cycle and classifies
 it; stopped containers resolve to `done` (clean exit) or `exited` (non-zero).
 
@@ -95,7 +95,7 @@ container: the first observation of each agent seeds its state silently, so
 neither startup nor a freshly spawned agent produces a burst, and a state only
 notifies once per transition.
 
-Set `SAFE_AG_TUI_NOTIFY=off` (or `0`/`false`/`no`) to disable. Notifications are
+Set `BERTH_TUI_NOTIFY=off` (or `0`/`false`/`no`) to disable. Notifications are
 a no-op on non-macOS hosts.
 
 ## Footer modes
@@ -167,8 +167,8 @@ Current `:` commands:
 | Command | Action |
 |---|---|
 | `q` / `quit` | quit the TUI |
-| `fleet <file>` | run `safe-ag fleet <file>` |
-| `pipeline <file>` | run `safe-ag pipeline <file>` |
+| `fleet <file>` | run `berth fleet <file>` |
+| `pipeline <file>` | run `berth pipeline <file>` |
 | `profile <name> [prompt]` | run a saved agent profile |
 | `action <name>` | run a configured action in the selected agent |
 | `comments` | list saved review comments for the selected agent |
@@ -183,7 +183,7 @@ Unknown commands produce a footer error status.
 `f` opens the selected agent's `git diff` in a plain, scrollable overlay. tview
 overlays render plain text only, so delta's truecolor side-by-side output cannot
 display cleanly in the bordered pane. Pressing `s` inside the diff overlay
-suspends the TUI and renders `safe-ag diff --side-by-side` (delta, run inside the
+suspends the TUI and renders `berth diff --side-by-side` (delta, run inside the
 container) through a pager in the restored terminal, where its ANSI colors show
 correctly; on quit the TUI resumes.
 
@@ -221,17 +221,17 @@ Current spawn form fields:
 | `Repo URL (optional)` | text | HTTPS GitHub URLs auto-convert to SSH when SSH is enabled |
 | `Name (optional)` | text | container name suffix |
 | `Prompt (optional)` | text | initial task |
-| `SSH` | checkbox | default follows `~/.safe-ag/config.toml`; SSH repo URLs enable SSH automatically |
-| `Reuse auth` | checkbox | default follows `~/.safe-ag/config.toml` |
-| `Reuse GH auth` | checkbox | default follows `~/.safe-ag/config.toml` |
-| `Seed host auth` | checkbox | copy host Claude/Codex auth into this session; default follows `~/.safe-ag/config.toml` |
+| `SSH` | checkbox | default follows `~/.berth/config.toml`; SSH repo URLs enable SSH automatically |
+| `Reuse auth` | checkbox | default follows `~/.berth/config.toml` |
+| `Reuse GH auth` | checkbox | default follows `~/.berth/config.toml` |
+| `Seed host auth` | checkbox | copy host Claude/Codex auth into this session; default follows `~/.berth/config.toml` |
 | `AWS profile (optional)` | text | AWS profile name |
-| `Docker` | checkbox | enable DinD; default follows `~/.safe-ag/config.toml` |
-| `Docker socket` | checkbox | mount the VM Docker socket; default follows `~/.safe-ag/config.toml` |
+| `Docker` | checkbox | enable DinD; default follows `~/.berth/config.toml` |
+| `Docker socket` | checkbox | mount the VM Docker socket; default follows `~/.berth/config.toml` |
 | `Identity (optional)` | text | git identity |
 
 Submit behavior:
-- the TUI launches `safe-ag spawn ... --background`
+- the TUI launches `berth spawn ... --background`
 - when a checkbox differs from config defaults, the TUI emits the matching `--flag` or `--no-flag`
 - success message tries to extract the spawned container name from command output
 

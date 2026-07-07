@@ -19,10 +19,10 @@ const (
 var vmName = configuredVMName()
 
 func configuredVMName() string {
-	if v := os.Getenv("SAFE_AGENTIC_VM_NAME"); v != "" {
+	if v := os.Getenv("BERTH_VM_NAME"); v != "" {
 		return v
 	}
-	return "safe-agentic"
+	return "berth"
 }
 
 func main() {
@@ -55,9 +55,9 @@ func handleHelpMode() bool {
 	if len(os.Args) <= 1 || (os.Args[1] != "-h" && os.Args[1] != "--help") {
 		return false
 	}
-	fmt.Println("Usage: safe-ag-tui")
+	fmt.Println("Usage: berth-tui")
 	fmt.Println()
-	fmt.Println("Interactive terminal UI for monitoring and managing safe-agentic containers.")
+	fmt.Println("Interactive terminal UI for monitoring and managing berth containers.")
 	fmt.Println()
 	fmt.Println(helpText())
 	os.Exit(0)
@@ -94,7 +94,7 @@ func preflight() error {
 		return fmt.Errorf("'container' not found in PATH. Install Apple container first")
 	}
 	if err := exec.Command("container", "system", "status").Run(); err != nil {
-		return fmt.Errorf("Apple container system is stopped. Run 'safe-ag vm start'")
+		return fmt.Errorf("Apple container system is stopped. Run 'berth vm start'")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -102,7 +102,7 @@ func preflight() error {
 
 	out, err := exec.CommandContext(ctx, "container", "machine", "list", "--format", "json").Output()
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("timed out listing VMs. Check Apple container and run 'safe-ag vm start'")
+		return fmt.Errorf("timed out listing VMs. Check Apple container and run 'berth vm start'")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to list VMs: %w", err)
@@ -118,5 +118,5 @@ func preflight() error {
 			return nil
 		}
 	}
-	return fmt.Errorf("VM '%s' not found. Run 'safe-ag setup' first", configuredVMName())
+	return fmt.Errorf("VM '%s' not found. Run 'berth setup' first", configuredVMName())
 }

@@ -1,6 +1,6 @@
 # Security Defaults
 
-These are the defaults that shape a normal safe-agentic session.
+These are the defaults that shape a normal berth session.
 
 | Area | Default |
 |---|---|
@@ -27,9 +27,9 @@ The default session is intentionally useful but narrow:
 ## Opt-in examples
 
 ```bash
-safe-ag spawn claude --ssh --repo git@github.com:org/private.git
-safe-ag spawn claude --reuse-auth --repo https://github.com/org/repo.git
-safe-ag spawn claude --seed-auth --repo https://github.com/org/repo.git
-safe-ag spawn claude --aws my-profile --repo git@github.com:org/infra.git
-safe-ag spawn claude --docker --repo https://github.com/org/repo.git
+berth spawn claude --ssh --repo git@github.com:org/private.git
+berth spawn claude --reuse-auth --repo https://github.com/org/repo.git
+berth spawn claude --seed-auth --repo https://github.com/org/repo.git
+berth spawn claude --aws my-profile --repo git@github.com:org/infra.git
+berth spawn claude --docker --repo https://github.com/org/repo.git
 ```

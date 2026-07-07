@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import { TriangleAlert, X } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
@@ -123,7 +123,7 @@ export function SpawnForm() {
       <div className="flex gap-4">
         <Check k="SSH" label="SSH agent forwarding" title="SSH agent forwarding — lets the agent clone/push private repos via git@" />
         <Check k="ReuseAuth" label="Reuse shared auth" title="Reuse shared auth volume — persistent login shared across agents" />
-        <label className="flex items-center gap-2 text-sm" title="Local worktree — work on a git worktree of a local checkout instead of cloning a repo URL (needs: safe-ag setup --enable-worktrees)">
+        <label className="flex items-center gap-2 text-sm" title="Local worktree — work on a git worktree of a local checkout instead of cloning a repo URL (needs: berth setup --enable-worktrees)">
           <input type="checkbox" checked={req.Worktree}
             onChange={(e) => setReq((r) => ({ ...r, Worktree: e.target.checked, ...(e.target.checked ? { Repo: "" } : { WorktreeDir: "" }) }))} /> Local worktree
         </label>

@@ -1,6 +1,6 @@
 ---
 name: agent-manage
-description: List, attach to, steer, search, run actions for, stop, or clean up running safe-agentic containers. Use when the user asks to check agents, send follow-up instructions, run a configured action, find prior output, stop agents, attach to an agent, clean up, or manage running containers.
+description: List, attach to, steer, search, run actions for, stop, or clean up running berth containers. Use when the user asks to check agents, send follow-up instructions, run a configured action, find prior output, stop agents, attach to an agent, clean up, or manage running containers.
 ---
 
 # Manage Safe Agents
@@ -12,7 +12,7 @@ List, attach to, steer, search, run actions for, stop, export sessions, or clean
 ### List agents (running + stopped)
 
 ```bash
-safe-ag list
+berth list
 ```
 
 Shows all agent containers with name, type, repo, auth, network, and status.
@@ -20,7 +20,7 @@ Shows all agent containers with name, type, repo, auth, network, and status.
 ### Attach to an agent
 
 ```bash
-safe-ag attach <name>
+berth attach <name>
 ```
 
 If the container is running, opens a shell into it. If stopped, restarts it.
@@ -29,8 +29,8 @@ The name can be the full container name (e.g., `agent-codex-cardinality-restrict
 ### Steer an agent
 
 ```bash
-safe-ag steer <name> "focus on the failing test only"
-safe-ag steer --latest "continue, but keep the change narrow"
+berth steer <name> "focus on the failing test only"
+berth steer --latest "continue, but keep the change narrow"
 ```
 
 Sends follow-up text into a tmux-backed session without attaching. If the container is stopped, it starts it first.
@@ -38,8 +38,8 @@ Sends follow-up text into a tmux-backed session without attaching. If the contai
 ### Search agent logs
 
 ```bash
-safe-ag search "error text"
-safe-ag search "Needle" <name> --case-sensitive
+berth search "error text"
+berth search "Needle" <name> --case-sensitive
 ```
 
 Searches rendered session logs across all agents by default, or one target with `<name>` / `--latest`.
@@ -47,9 +47,9 @@ Searches rendered session logs across all agents by default, or one target with 
 ### Timeline and inbox
 
 ```bash
-safe-ag timeline
-safe-ag inbox
-safe-ag inbox --all
+berth timeline
+berth inbox
+berth inbox --all
 ```
 
 Use `timeline` for recent event/audit history. Use `inbox` for classified statuses such as `failed`, `failed-tests`, `needs-auth`, `stuck`, `ready-for-review`, and `ready-for-pr`.
@@ -57,33 +57,33 @@ Use `timeline` for recent event/audit history. Use `inbox` for classified status
 ### Run configured actions
 
 ```bash
-safe-ag action list
-safe-ag action show test
-safe-ag action run test --latest
-safe-ag action run lint <name>
+berth action list
+berth action show test
+berth action run test --latest
+berth action run lint <name>
 ```
 
-Loads actions from `~/.safe-ag/actions.toml` then `.safe-ag/actions.toml`. Project actions override user actions. Commands run inside the target agent workspace.
+Loads actions from `~/.berth/actions.toml` then `.berth/actions.toml`. Project actions override user actions. Commands run inside the target agent workspace.
 
 ### Track review comments
 
 ```bash
-safe-ag review-comments add <name> cmd/main.go 42 "Handle empty input first"
-safe-ag review-comments list <name>
-safe-ag review-comments resolve rc-123
-safe-ag review-comments clear <name>
+berth review-comments add <name> cmd/main.go 42 "Handle empty input first"
+berth review-comments list <name>
+berth review-comments resolve rc-123
+berth review-comments clear <name>
 ```
 
-Stores local file/line review notes in `~/.safe-ag/state/review-comments.jsonl`. Use with `safe-ag steer` when an agent needs to address review feedback without losing context.
+Stores local file/line review notes in `~/.berth/state/review-comments.jsonl`. Use with `berth steer` when an agent needs to address review feedback without losing context.
 
 ### Stage or revert workspace files
 
 ```bash
-safe-ag workspace stage <name> src/app.go
-safe-ag workspace unstage <name> src/app.go
-safe-ag workspace revert <name> src/app.go --yes
-safe-ag workspace stage-patch <name> selected.patch
-safe-ag workspace revert-patch <name> selected.patch --yes
+berth workspace stage <name> src/app.go
+berth workspace unstage <name> src/app.go
+berth workspace revert <name> src/app.go --yes
+berth workspace stage-patch <name> selected.patch
+berth workspace revert-patch <name> selected.patch --yes
 ```
 
 Use `workspace revert` or `revert-patch` only when the user asked to discard those changes or the scope is clearly confirmed. Patch commands are for selected hunks from a unified diff.
@@ -91,8 +91,8 @@ Use `workspace revert` or `revert-patch` only when the user asked to discard tho
 ### Capture browser verification artifacts
 
 ```bash
-safe-ag browser capture http://localhost:3000 --mode auto --annotation "login button visible"
-safe-ag browser capture https://example.com --mode chrome --out /tmp/browser-artifact
+berth browser capture http://localhost:3000 --mode auto --annotation "login button visible"
+berth browser capture https://example.com --mode chrome --out /tmp/browser-artifact
 ```
 
 Captures DOM, headers, and artifact metadata. Chrome mode also captures screenshot, console, and network data without reusing host browser profiles/cookies.
@@ -100,8 +100,8 @@ Captures DOM, headers, and artifact metadata. Chrome mode also captures screensh
 ### JSON protocol for clients
 
 ```bash
-safe-ag server --stdio
-SAFE_AGENTIC_SERVER_TOKEN=secret safe-ag server --listen 127.0.0.1:8765
+berth server --stdio
+BERTH_SERVER_TOKEN=secret berth server --listen 127.0.0.1:8765
 ```
 
 Use for client integrations that need `schema`, `ping`, `timeline`, `inbox`, `agents.list`, `agent.logs`, `agent.diff`, `actions.list`, or `actions.run` without scraping human CLI output. HTTP mode requires a bearer token.
@@ -109,10 +109,10 @@ Use for client integrations that need `schema`, `ping`, `timeline`, `inbox`, `ag
 ### Handoff workspaces
 
 ```bash
-safe-ag handoff <name> --to-worktree
-safe-ag handoff <name> --to-local ./workspace-copy
-safe-ag worktree list
-safe-ag worktree cleanup --dry-run
+berth handoff <name> --to-worktree
+berth handoff <name> --to-local ./workspace-copy
+berth worktree list
+berth worktree cleanup --dry-run
 ```
 
 Use `--to-worktree` for agents spawned with `--worktree`; it prints the managed host checkout path. Use `--to-local` to copy `/workspace` out of any agent container.
@@ -121,10 +121,10 @@ Use `--to-worktree` for agents spawned with `--worktree`; it prints the managed 
 
 ```bash
 # Stop one agent
-safe-ag stop <name>
+berth stop <name>
 
 # Stop all agents
-safe-ag stop --all
+berth stop --all
 ```
 
 Stops and removes the container, its DinD sidecar (if any), and managed network. Auth volumes persist until cleanup.
@@ -133,10 +133,10 @@ Stops and removes the container, its DinD sidecar (if any), and managed network.
 
 ```bash
 # Export to default path (./agent-sessions/<name>/)
-safe-ag sessions <name>
+berth sessions <name>
 
 # Export to custom path
-safe-ag sessions --latest ~/sessions/
+berth sessions --latest ~/sessions/
 ```
 
 Copies session files, history, and session index from the container to the host.
@@ -145,10 +145,10 @@ Copies session files, history, and session index from the container to the host.
 
 ```bash
 # Standalone (uses default agent-codex-auth volume)
-safe-ag mcp-login linear
+berth mcp-login linear
 
 # For a specific container
-safe-ag mcp-login notion <container>
+berth mcp-login notion <container>
 ```
 
 Runs OAuth login in a temporary container. Token persists in the auth volume for all agents using `--reuse-auth`.
@@ -157,13 +157,13 @@ Runs OAuth login in a temporary container. Token persists in the auth volume for
 
 ```bash
 # Refresh from container's original profile
-safe-ag aws-refresh <name>
+berth aws-refresh <name>
 
 # Refresh with explicit profile
-safe-ag aws-refresh <name> my-profile
+berth aws-refresh <name> my-profile
 
 # Refresh latest container
-safe-ag aws-refresh --latest
+berth aws-refresh --latest
 ```
 
 Re-reads `~/.aws/credentials` from the host and writes into the running container. No restart needed — AWS SDKs re-read the file automatically.
@@ -171,9 +171,9 @@ Re-reads `~/.aws/credentials` from the host and writes into the running containe
 ### Peek at agent output
 
 ```bash
-safe-ag peek <name>              # last 30 lines of tmux pane
-safe-ag peek --latest            # latest container
-safe-ag peek <name> --lines 50   # more lines
+berth peek <name>              # last 30 lines of tmux pane
+berth peek --latest            # latest container
+berth peek <name> --lines 50   # more lines
 ```
 
 Shows what the agent is currently doing without attaching. Only works on running tmux containers.
@@ -181,12 +181,12 @@ Shows what the agent is currently doing without attaching. Only works on running
 ### Output — extract agent results
 
 ```bash
-safe-ag output <name>            # last agent message
-safe-ag output --latest          # latest container
-safe-ag output --diff <name>     # git diff
-safe-ag output --files <name>    # list changed files
-safe-ag output --commits <name>  # git log
-safe-ag output --json <name>     # all of the above as JSON
+berth output <name>            # last agent message
+berth output --latest          # latest container
+berth output --diff <name>     # git diff
+berth output --files <name>    # list changed files
+berth output --commits <name>  # git log
+berth output --json <name>     # all of the above as JSON
 ```
 
 Use `--json` to pipe results into scripts or `--on-exit` callbacks.
@@ -194,8 +194,8 @@ Use `--json` to pipe results into scripts or `--on-exit` callbacks.
 ### Summary — one-screen overview
 
 ```bash
-safe-ag summary <name>
-safe-ag summary --latest
+berth summary <name>
+berth summary --latest
 ```
 
 Compact overview: type, status, repo, branch, elapsed time, cost estimate, last agent message, changed files. Use before reviewing or creating a PR.
@@ -203,9 +203,9 @@ Compact overview: type, status, repo, branch, elapsed time, cost estimate, last 
 ### Retry — re-run with original config
 
 ```bash
-safe-ag retry <name>
-safe-ag retry --latest
-safe-ag retry --latest --feedback "Focus only on the auth module"
+berth retry <name>
+berth retry --latest
+berth retry --latest --feedback "Focus only on the auth module"
 ```
 
 Stops the container, respawns with the same flags, and optionally appends feedback to the original prompt.
@@ -213,19 +213,19 @@ Stops the container, respawns with the same flags, and optionally appends feedba
 ### Config — manage defaults
 
 ```bash
-safe-ag config show                          # show all current defaults
-safe-ag config get memory                    # get one value
-safe-ag config set memory 16g                # set a value
-safe-ag config reset memory                  # reset to built-in default
-safe-ag config reset --all                   # reset everything
+berth config show                          # show all current defaults
+berth config get memory                    # get one value
+berth config set memory 16g                # set a value
+berth config reset memory                  # reset to built-in default
+berth config reset --all                   # reset everything
 ```
 
 ### Template — manage prompt templates
 
 ```bash
-safe-ag template list                        # list built-in + custom templates
-safe-ag template show security-audit         # preview a template
-safe-ag template create my-template          # create custom template ($EDITOR opens)
+berth template list                        # list built-in + custom templates
+berth template show security-audit         # preview a template
+berth template create my-template          # create custom template ($EDITOR opens)
 ```
 
 Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependency-update`, `bug-fix`, `docs-review`.
@@ -233,8 +233,8 @@ Built-in templates: `security-audit`, `code-review`, `test-coverage`, `dependenc
 ### Diff — review agent's changes
 
 ```bash
-safe-ag diff <name>              # full git diff
-safe-ag diff --latest --stat     # diffstat summary
+berth diff <name>              # full git diff
+berth diff --latest --stat     # diffstat summary
 ```
 
 Shows the git diff from the agent's working tree inside the container.
@@ -242,9 +242,9 @@ Shows the git diff from the agent's working tree inside the container.
 ### Checkpoints — snapshot and revert
 
 ```bash
-safe-ag checkpoint create <name> "before refactor"
-safe-ag checkpoint list <name>
-safe-ag checkpoint revert <name> checkpoint-1712678400
+berth checkpoint create <name> "before refactor"
+berth checkpoint list <name>
+berth checkpoint revert <name> checkpoint-1712678400
 ```
 
 Snapshots the working tree using git stash refs. Revert restores code without polluting branch history.
@@ -252,19 +252,19 @@ Snapshots the working tree using git stash refs. Revert restores code without po
 ### Todos — track merge requirements
 
 ```bash
-safe-ag todo add <name> "Run tests"
-safe-ag todo list <name>
-safe-ag todo check <name> 1
-safe-ag todo uncheck <name> 1
+berth todo add <name> "Run tests"
+berth todo list <name>
+berth todo check <name> 1
+berth todo uncheck <name> 1
 ```
 
-JSON-based todo list inside the container. `safe-ag pr` blocks if incomplete todos exist.
+JSON-based todo list inside the container. `berth pr` blocks if incomplete todos exist.
 
 ### PR creation
 
 ```bash
-safe-ag pr <name> --title "feat: add caching" --base dev
-safe-ag pr --latest
+berth pr <name> --title "feat: add caching" --base dev
+berth pr --latest
 ```
 
 Commits, pushes, and creates a GitHub PR via `gh pr create`. Requires `--ssh` on the container. Blocked by incomplete todos.
@@ -272,8 +272,8 @@ Commits, pushes, and creates a GitHub PR via `gh pr create`. Requires `--ssh` on
 ### Code review
 
 ```bash
-safe-ag review <name>                # codex review --uncommitted (or git diff fallback)
-safe-ag review --latest --base main  # codex review --base main
+berth review <name>                # codex review --uncommitted (or git diff fallback)
+berth review --latest --base main  # codex review --base main
 ```
 
 Runs `codex review` inside the container if available, otherwise shows raw `git diff`.
@@ -281,8 +281,8 @@ Runs `codex review` inside the container if available, otherwise shows raw `git 
 ### Cost estimation
 
 ```bash
-safe-ag cost <name>
-safe-ag cost --latest
+berth cost <name>
+berth cost --latest
 ```
 
 Parses session JSONL for token usage and estimates API spend per model.
@@ -290,17 +290,17 @@ Parses session JSONL for token usage and estimates API spend per model.
 ### Audit log
 
 ```bash
-safe-ag audit               # last 50 entries
-safe-ag audit --lines 100
+berth audit               # last 50 entries
+berth audit --lines 100
 ```
 
-Shows the append-only operation log (`~/.config/safe-agentic/audit.jsonl`). Every spawn, stop, and attach is recorded.
+Shows the append-only operation log (`~/.config/berth/audit.jsonl`). Every spawn, stop, and attach is recorded.
 
 ### Full cleanup
 
 ```bash
-safe-ag cleanup          # keeps auth volumes
-safe-ag cleanup --auth   # also removes auth volumes
+berth cleanup          # keeps auth volumes
+berth cleanup --auth   # also removes auth volumes
 ```
 
 This:
@@ -312,7 +312,7 @@ This:
 
 ## TUI keybindings
 
-`safe-ag tui` provides a k9s-style interactive dashboard. Key keybindings:
+`berth tui` provides a k9s-style interactive dashboard. Key keybindings:
 
 | Key | Action |
 |-----|--------|
@@ -342,7 +342,7 @@ This:
 
 ## Workflow
 
-1. **Check agents** with `safe-ag list`
+1. **Check agents** with `berth list`
 2. **Peek/search** to understand current or prior output
 3. **Steer** with a focused follow-up instead of attaching when possible
 4. **Run actions** for repo-native checks inside the agent workspace
@@ -354,17 +354,17 @@ This:
 
 ```bash
 # What agents exist?
-safe-ag list
+berth list
 
 # Reattach to a stopped codex agent
-safe-ag attach cardinality-restrictions
+berth attach cardinality-restrictions
 
 # Save sessions before cleanup
-safe-ag sessions cardinality-restrictions ~/my-sessions/
+berth sessions cardinality-restrictions ~/my-sessions/
 
 # Done for the day — stop everything
-safe-ag stop --all
+berth stop --all
 
 # Full reset — remove all containers, auth, networks
-safe-ag cleanup --auth
+berth cleanup --auth
 ```

@@ -31,7 +31,7 @@ func TestOpenTerminalPrefersITerm(t *testing.T) {
 		},
 	)
 
-	if err := openTerminal([]string{"safe-ag", "attach", "agent demo"}); err != nil {
+	if err := openTerminal([]string{"berth", "attach", "agent demo"}); err != nil {
 		t.Fatalf("openTerminal() error = %v", err)
 	}
 	if len(calls) != 2 {
@@ -61,7 +61,7 @@ func TestOpenTerminalFallsBackToTerminal(t *testing.T) {
 		},
 	)
 
-	if err := openTerminal([]string{"safe-ag", "attach", "agent-demo"}); err != nil {
+	if err := openTerminal([]string{"berth", "attach", "agent-demo"}); err != nil {
 		t.Fatalf("openTerminal() error = %v", err)
 	}
 	if len(calls) != 3 {
@@ -78,7 +78,7 @@ func TestOpenTerminalUnsupportedOS(t *testing.T) {
 		func(name string, args ...string) error { return nil },
 	)
 
-	if err := openTerminal([]string{"safe-ag", "attach", "agent-demo"}); err == nil {
+	if err := openTerminal([]string{"berth", "attach", "agent-demo"}); err == nil {
 		t.Fatal("openTerminal() error = nil, want unsupported OS error")
 	}
 }

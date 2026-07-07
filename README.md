@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="docs/assets/readme-logo.png" alt="safe-agentic logo" width="220">
+  <img src="docs/assets/readme-logo.png" alt="berth logo" width="220">
 </p>
 
-# safe-agentic
+# berth
 
-[![CI](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/safe-agentic/actions/workflows/ci.yml)
+[![CI](https://github.com/0x666c6f/berth/actions/workflows/ci.yml/badge.svg)](https://github.com/0x666c6f/berth/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.25.5-00ADD8?logo=go)](https://go.dev/)
-[![Go Report](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fsafe-agentic%2Fbadges%2F.github%2Fbadges%2Fgoreport.json)](https://github.com/0x666c6f/safe-agentic/actions/workflows/coverage.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fsafe-agentic%2Fbadges%2F.github%2Fbadges%2Fcoverage.json)](https://github.com/0x666c6f/safe-agentic/actions/workflows/coverage.yml)
+[![Go Report](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fberth%2Fbadges%2F.github%2Fbadges%2Fgoreport.json)](https://github.com/0x666c6f/berth/actions/workflows/coverage.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F0x666c6f%2Fberth%2Fbadges%2F.github%2Fbadges%2Fcoverage.json)](https://github.com/0x666c6f/berth/actions/workflows/coverage.yml)
 
-`safe-agentic` runs Claude Code and Codex inside Docker containers inside a hardened Apple container machine.
+`berth` runs Claude Code and Codex inside Docker containers inside a hardened Apple container machine.
 
-Primary CLI: `safe-ag`.
-Agent-facing shortcuts also ship: `safe-ag-claude`, `safe-ag-codex`.
+Primary CLI: `berth`.
+Agent-facing shortcuts also ship: `berth-claude`, `berth-codex`.
 
 The goal is simple:
 - let the agent operate freely inside its own sandbox
@@ -26,7 +26,7 @@ The goal is simple:
 - dedicated managed Docker networks by default
 - tmux-backed sessions that you can reattach to later
 - CLI + TUI for spawning, steering, monitoring, reviewing, and shipping work
-- managed worktrees for isolated host checkouts with handoff/snapshot helpers (opt-in: `safe-ag setup --enable-worktrees`, which deliberately widens the VM boundary — see the threat model)
+- managed worktrees for isolated host checkouts with handoff/snapshot helpers (opt-in: `berth setup --enable-worktrees`, which deliberately widens the VM boundary — see the threat model)
 - saved profiles, project/user actions, timeline, inbox, browser capture, workspace file ops, JSON stdio server, and log search for daily loops
 - fleet and pipeline manifests for parallel and staged agent runs
 
@@ -34,7 +34,7 @@ The goal is simple:
 
 ```text
 macOS host
-  -> Apple container machine (safe-agentic)
+  -> Apple container machine (berth)
     -> Docker daemon
       -> one container per agent
 ```
@@ -50,20 +50,20 @@ Default stance:
 
 ## Install
 
-Install Apple container from the signed pkg on GitHub Releases, then install safe-agentic with Homebrew:
+Install Apple container from the signed pkg on GitHub Releases, then install berth with Homebrew:
 
 ```bash
 open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
-brew install safe-agentic
+brew install berth
 ```
 
 From source:
 
 ```bash
 open https://github.com/apple/container/releases
-git clone git@github.com:0x666c6f/safe-agentic.git
-cd safe-agentic
+git clone git@github.com:0x666c6f/berth.git
+cd berth
 make build-all
 export PATH="$PWD/bin:$PATH"
 ```
@@ -71,31 +71,31 @@ export PATH="$PWD/bin:$PATH"
 ## First run
 
 ```bash
-safe-ag setup
-safe-ag diagnose
+berth setup
+berth diagnose
 ```
 
-`safe-ag setup` starts Apple container, creates the machine, reapplies hardening, and builds the local image.
-It may ask for macOS administrator approval to enable IP forwarding and load a `com.apple/safe-agentic` PF NAT anchor for Apple vmnet and nested Docker egress.
+`berth setup` starts Apple container, creates the machine, reapplies hardening, and builds the local image.
+It may ask for macOS administrator approval to enable IP forwarding and load a `com.apple/berth` PF NAT anchor for Apple vmnet and nested Docker egress.
 
 ## First agent
 
 Public repo:
 
 ```bash
-safe-ag spawn claude --repo https://github.com/myorg/myrepo.git
+berth spawn claude --repo https://github.com/myorg/myrepo.git
 ```
 
 Private repo:
 
 ```bash
-safe-ag spawn claude --ssh --repo git@github.com:myorg/myrepo.git
+berth spawn claude --ssh --repo git@github.com:myorg/myrepo.git
 ```
 
 With an immediate task:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --ssh \
   --repo git@github.com:myorg/myrepo.git \
   --prompt "Fix the failing CI tests"
@@ -104,18 +104,18 @@ safe-ag spawn claude \
 ## Daily commands
 
 ```bash
-safe-ag list
-safe-ag attach --latest
-safe-ag peek --latest
-safe-ag logs --latest
-safe-ag diff --latest
-safe-ag output --latest
-safe-ag review --latest
-safe-ag pr-review
-safe-ag pr-fix
-safe-ag stop --latest
-safe-ag cleanup --auth
-safe-ag tui
+berth list
+berth attach --latest
+berth peek --latest
+berth logs --latest
+berth diff --latest
+berth output --latest
+berth review --latest
+berth pr-review
+berth pr-fix
+berth stop --latest
+berth cleanup --auth
+berth tui
 ```
 
 ## Common workflows
@@ -123,27 +123,27 @@ safe-ag tui
 Single-agent loop:
 
 ```bash
-safe-ag spawn claude --ssh --reuse-auth --repo git@github.com:org/api.git \
+berth spawn claude --ssh --reuse-auth --repo git@github.com:org/api.git \
   --prompt "Fix the flaky test suite"
 
-safe-ag peek --latest
-safe-ag diff --latest
-safe-ag review --latest
-safe-ag pr --latest --title "fix: stabilize test suite"
+berth peek --latest
+berth diff --latest
+berth review --latest
+berth pr --latest --title "fix: stabilize test suite"
 ```
 
 Parallel fleet:
 
 ```bash
-safe-ag fleet fleet.yaml
-safe-ag tui
+berth fleet fleet.yaml
+berth tui
 ```
 
 Staged pipeline:
 
 ```bash
-safe-ag pipeline pipeline.yaml
-safe-ag pipeline pipeline.yaml --dry-run
+berth pipeline pipeline.yaml
+berth pipeline pipeline.yaml --dry-run
 ```
 
 ## Safety model
@@ -172,7 +172,7 @@ If you only need a public repo and a prompt, do not add flags you do not need.
 Hard local policy can deny risky spawn modes before any network, worktree, or container is created:
 
 ```toml
-# ~/.safe-ag/rules.toml or .safe-ag/rules.toml
+# ~/.berth/rules.toml or .berth/rules.toml
 [allow]
 docker_modes = ["off"]
 networks = ["managed"]
@@ -196,8 +196,8 @@ seed_auth = false
 
 ## Notes
 
-- containers persist after the agent exits; `safe-ag attach` will restart stopped containers when needed
-- `safe-ag cleanup` keeps auth volumes by default; use `safe-ag cleanup --auth` for full reset
-- `SAFE_AGENTIC_VM_NAME` lets you point the CLI at a different Apple container machine
-- `SAFE_AGENTIC_CONFIG_HOME` / `SAFE_AGENTIC_STATE_HOME` relocate safe-agentic files without changing `HOME`
-- `safe-ag-tui` is a separate binary; `safe-ag tui` is the normal entrypoint
+- containers persist after the agent exits; `berth attach` will restart stopped containers when needed
+- `berth cleanup` keeps auth volumes by default; use `berth cleanup --auth` for full reset
+- `BERTH_VM_NAME` lets you point the CLI at a different Apple container machine
+- `BERTH_CONFIG_HOME` / `BERTH_STATE_HOME` relocate berth files without changing `HOME`
+- `berth-tui` is a separate binary; `berth tui` is the normal entrypoint

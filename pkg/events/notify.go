@@ -16,7 +16,7 @@ import (
 // Notify target kinds. A target is written by the user as "kind" or
 // "kind:value" (e.g. "terminal", "slack:https://…", "command:/path",
 // "system"). The whole comma-separated list is persisted base64 in the
-// safe-agentic.notify-b64 container label and reconstructed with
+// berth.notify-b64 container label and reconstructed with
 // ParseNotifyTargets.
 const (
 	TargetTerminal = "terminal"
@@ -87,12 +87,12 @@ type SystemNotification struct {
 	Sound     string // macOS sound name; empty = silent
 }
 
-// Title renders the notification title, e.g. "safe-ag: agent-foo".
+// Title renders the notification title, e.g. "berth: agent-foo".
 func (n SystemNotification) Title() string {
 	if n.Container == "" {
-		return "safe-ag"
+		return "berth"
 	}
-	return "safe-ag: " + n.Container
+	return "berth: " + n.Container
 }
 
 // TerminalNotifierArgs builds the argv for the terminal-notifier binary.
@@ -225,7 +225,7 @@ func Dispatch(targets []NotifyTarget, note SystemNotification, out io.Writer) er
 // so the script can react without argument parsing.
 func notifyCommandEnv(note SystemNotification) []string {
 	return append(os.Environ(),
-		"SAFE_AG_CONTAINER="+note.Container,
-		"SAFE_AG_MESSAGE="+note.Message,
+		"BERTH_CONTAINER="+note.Container,
+		"BERTH_MESSAGE="+note.Message,
 	)
 }

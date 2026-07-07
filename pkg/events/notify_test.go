@@ -161,10 +161,10 @@ func TestSoundForStatus(t *testing.T) {
 }
 
 func TestSystemNotificationTitle(t *testing.T) {
-	if got := (SystemNotification{Container: "agent-foo"}).Title(); got != "safe-ag: agent-foo" {
+	if got := (SystemNotification{Container: "agent-foo"}).Title(); got != "berth: agent-foo" {
 		t.Errorf("Title() = %q", got)
 	}
-	if got := (SystemNotification{}).Title(); got != "safe-ag" {
+	if got := (SystemNotification{}).Title(); got != "berth" {
 		t.Errorf("Title() with no container = %q", got)
 	}
 }
@@ -176,7 +176,7 @@ func TestTerminalNotifierArgs(t *testing.T) {
 	if args[0] != "terminal-notifier" {
 		t.Errorf("expected terminal-notifier binary, got %q", args[0])
 	}
-	if !strings.Contains(joined, "-title safe-ag: agent-foo") {
+	if !strings.Contains(joined, "-title berth: agent-foo") {
 		t.Errorf("missing title: %q", joined)
 	}
 	if !strings.Contains(joined, "-message is blocked") {
@@ -203,7 +203,7 @@ func TestOsascriptArgs(t *testing.T) {
 	if !strings.HasPrefix(script, "display notification ") {
 		t.Errorf("script should start with display notification: %q", script)
 	}
-	if !strings.Contains(script, `with title "safe-ag: agent-foo"`) {
+	if !strings.Contains(script, `with title "berth: agent-foo"`) {
 		t.Errorf("missing title in script: %q", script)
 	}
 	if !strings.Contains(script, `sound name "Glass"`) {
@@ -279,7 +279,7 @@ func TestDispatch(t *testing.T) {
 	if gotCmd != "/n.sh" {
 		t.Errorf("command = %q", gotCmd)
 	}
-	if !strings.Contains(gotCmdEnv, "SAFE_AG_CONTAINER=agent-foo") {
+	if !strings.Contains(gotCmdEnv, "BERTH_CONTAINER=agent-foo") {
 		t.Errorf("command env missing container: %q", gotCmdEnv)
 	}
 }
@@ -329,7 +329,7 @@ func TestNotifySystemDispatch(t *testing.T) {
 	if len(captured) == 0 || captured[0] != "osascript" {
 		t.Fatalf("expected osascript dispatch, captured %v", captured)
 	}
-	if !strings.Contains(captured[2], "safe-ag: agent-x") {
+	if !strings.Contains(captured[2], "berth: agent-x") {
 		t.Errorf("dispatched script missing title: %q", captured[2])
 	}
 }

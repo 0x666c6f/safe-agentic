@@ -102,28 +102,28 @@ jobs:
       - name: Build universal binaries
         if: steps.version.outputs.skip != 'true'
         run: |
-          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o safe-ag-amd64 ./cmd/safe-ag
-          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o safe-ag-arm64 ./cmd/safe-ag
-          lipo -create -output safe-ag safe-ag-amd64 safe-ag-arm64
-          rm safe-ag-amd64 safe-ag-arm64
-          chmod +x safe-ag
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o berth-amd64 ./cmd/berth
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o berth-arm64 ./cmd/berth
+          lipo -create -output berth berth-amd64 berth-arm64
+          rm berth-amd64 berth-arm64
+          chmod +x berth
 
-          GOOS=darwin GOARCH=amd64 go build -o safe-ag-tui-amd64 ./tui
-          GOOS=darwin GOARCH=arm64 go build -o safe-ag-tui-arm64 ./tui
-          lipo -create -output safe-ag-tui safe-ag-tui-amd64 safe-ag-tui-arm64
-          rm safe-ag-tui-amd64 safe-ag-tui-arm64
-          chmod +x safe-ag-tui
+          GOOS=darwin GOARCH=amd64 go build -o berth-tui-amd64 ./tui
+          GOOS=darwin GOARCH=arm64 go build -o berth-tui-arm64 ./tui
+          lipo -create -output berth-tui berth-tui-amd64 berth-tui-arm64
+          rm berth-tui-amd64 berth-tui-arm64
+          chmod +x berth-tui
 
       - name: Package tarball
         if: steps.version.outputs.skip != 'true'
         id: package
         run: |
           version="${{ steps.version.outputs.version }}"
-          staging="safe-agentic-${version}"
+          staging="berth-${version}"
           mkdir -p "$staging"/{bin,config,templates,vm}
 
-          cp safe-ag safe-ag-tui "$staging/bin/"
-          cp bin/safe-ag-claude bin/safe-ag-codex "$staging/bin/"
+          cp berth berth-tui "$staging/bin/"
+          cp bin/berth-claude bin/berth-codex "$staging/bin/"
           cp bin/agent-session.sh bin/repo-url.sh "$staging/bin/"
 
           cp -R config/. "$staging/config/"
@@ -132,7 +132,7 @@ jobs:
 
           cp Dockerfile entrypoint.sh package.json package-lock.json op-env.sh "$staging/"
 
-          tarball="safe-agentic-${version}-darwin-universal.tar.gz"
+          tarball="berth-${version}-darwin-universal.tar.gz"
           tar -czf "$tarball" "$staging"
           sha256=$(shasum -a 256 "$tarball" | awk '{print $1}')
 
@@ -163,15 +163,15 @@ jobs:
         run: |
           version="${{ steps.version.outputs.version }}"
           sha256="${{ steps.package.outputs.sha256 }}"
-          url="https://github.com/0x666c6f/safe-agentic/releases/download/${version}/safe-agentic-${version}-darwin-universal.tar.gz"
+          url="https://github.com/0x666c6f/berth/releases/download/${version}/berth-${version}-darwin-universal.tar.gz"
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/0x666c6f/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
-          cat > Formula/safe-agentic.rb << FORMULA
-          class SafeAgentic < Formula
+          cat > Formula/berth.rb << FORMULA
+          class Berth < Formula
             desc "Isolated environment for running AI coding agents safely"
-            homepage "https://github.com/0x666c6f/safe-agentic"
+            homepage "https://github.com/0x666c6f/berth"
             url "${url}"
             sha256 "${sha256}"
             version "${version#v}"
@@ -179,22 +179,22 @@ jobs:
 
             def install
               libexec.install Dir["*"]
-              bin.install_symlink libexec/"bin"/"safe-ag"
-              bin.install_symlink libexec/"bin"/"safe-ag-tui"
-              bin.install_symlink libexec/"bin"/"safe-ag-claude"
-              bin.install_symlink libexec/"bin"/"safe-ag-codex"
+              bin.install_symlink libexec/"bin"/"berth"
+              bin.install_symlink libexec/"bin"/"berth-tui"
+              bin.install_symlink libexec/"bin"/"berth-claude"
+              bin.install_symlink libexec/"bin"/"berth-codex"
             end
 
             test do
-              assert_match "safe-agentic", shell_output("\#{bin}/safe-ag --version")
+              assert_match "berth", shell_output("\#{bin}/berth --version")
             end
           end
           FORMULA
 
-          sed -i '' 's/^          //' Formula/safe-agentic.rb
+          sed -i '' 's/^          //' Formula/berth.rb
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/safe-agentic.rb
-          git commit -m "safe-agentic ${version}"
+          git add Formula/berth.rb
+          git commit -m "berth ${version}"
           git push

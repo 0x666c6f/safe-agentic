@@ -1,6 +1,6 @@
 # Threat Model
 
-This page is the short version of what safe-agentic is trying to defend and what it is not trying to defend.
+This page is the short version of what berth is trying to defend and what it is not trying to defend.
 
 ## Protected well
 
@@ -25,8 +25,8 @@ By default the Apple container machine is created with `--home-mount none`: **th
 
 Apple's `container` provides no way to mount a single host directory into a machine — the only host-sharing knob is `--home-mount ro|rw|none`. So supporting `--worktree` (which needs a host git worktree bind-mounted into the agent container) requires sharing the home directory. This is **opt-in** and off by default:
 
-- `safe-ag setup --enable-worktrees` (or `safe-ag config set defaults.worktrees_mount true`) sets the machine to `home-mount=rw`.
-- `vm/setup.sh` then bind-mounts **only** the worktrees root (`~/.safe-ag/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, **detaches** the rest of the home share (lazy unmount), and tmpfs-masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`.
+- `berth setup --enable-worktrees` (or `berth config set defaults.worktrees_mount true`) sets the machine to `home-mount=rw`.
+- `vm/setup.sh` then bind-mounts **only** the worktrees root (`~/.berth/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, **detaches** the rest of the home share (lazy unmount), and tmpfs-masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`.
 - Agent containers only ever bind-mount a per-agent subdirectory of `/worktrees` into `/workspace`, so an agent never sees `/Users` or the rest of your home.
 
 **What this protects, and what it does not:**
@@ -34,11 +34,11 @@ Apple's `container` provides no way to mount a single host directory into a mach
 - Against the *agent* (the untrusted party): the agent is confined to its Docker container and only receives `/worktrees/<name>`. It cannot reach the rest of your home. This is unchanged from the default posture.
 - Against a *VM-level* compromise (VM-root, or a Docker escape to the machine): weaker than the default. Because `home-mount=rw` shares the whole home with the machine at the virtiofs level, a sufficiently privileged actor inside the VM could re-mount the home share and reach host files. The detach + mask raise the bar (the guest-side mount is removed, not merely hidden), but the hypervisor-level share still exists. With `home-mount=none` it does not exist at all.
 
-**Guidance:** leave the worktree mount disabled unless you need it. When enabled, keep secrets, credentials, and unrelated projects out of the worktrees root — treat everything under it as visible to the VM. `safe-ag diagnose` reports whether the mount is enabled and flags the weakened posture; `safe-ag setup --disable-worktrees` restores `home-mount=none`.
+**Guidance:** leave the worktree mount disabled unless you need it. When enabled, keep secrets, credentials, and unrelated projects out of the worktrees root — treat everything under it as visible to the VM. `berth diagnose` reports whether the mount is enabled and flags the weakened posture; `berth setup --disable-worktrees` restores `home-mount=none`.
 
 ## Not the goal
 
-safe-agentic does not attempt to limit what the agent does inside its own workspace once you have given it a task.
+berth does not attempt to limit what the agent does inside its own workspace once you have given it a task.
 
 If the agent is malicious or simply wrong, it can still:
 - edit repo files

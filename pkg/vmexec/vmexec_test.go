@@ -155,7 +155,7 @@ func TestFakeExecutor_RunStreaming_ReturnsErrorForConfiguredPrefix(t *testing.T)
 }
 
 func TestMachineExecutor_RunStreaming_ErrorWhenVMNotFound(t *testing.T) {
-	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+	e := &MachineExecutor{VMName: "berth-test-nonexistent-vm-12345"}
 	var buf bytes.Buffer
 	if err := e.RunStreaming(context.Background(), &buf, "echo", "hello"); err == nil {
 		t.Error("expected error when VM does not exist, got nil")
@@ -163,10 +163,10 @@ func TestMachineExecutor_RunStreaming_ErrorWhenVMNotFound(t *testing.T) {
 }
 
 func TestMachineExecutor_BuildArgs(t *testing.T) {
-	e := &MachineExecutor{VMName: "safe-agentic"}
+	e := &MachineExecutor{VMName: "berth"}
 	args := e.buildArgs("docker", "ps")
 
-	expected := []string{"machine", "run", "-n", "safe-agentic", "-u", "root", "--", "/usr/local/bin/safe-ag-exec", "docker", "cHM="}
+	expected := []string{"machine", "run", "-n", "berth", "-u", "root", "--", "/usr/local/bin/berth-exec", "docker", "cHM="}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
 	}
@@ -282,7 +282,7 @@ func TestFakeExecutor_CommandsMatching_RunInteractiveIncluded(t *testing.T) {
 
 func TestMachineExecutor_Run_ErrorWhenVMNotFound(t *testing.T) {
 	// Use a VM name that does not exist; container will exit non-zero.
-	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+	e := &MachineExecutor{VMName: "berth-test-nonexistent-vm-12345"}
 	ctx := context.Background()
 	_, err := e.Run(ctx, "echo", "hello")
 	if err == nil {
@@ -293,7 +293,7 @@ func TestMachineExecutor_Run_ErrorWhenVMNotFound(t *testing.T) {
 func TestMachineExecutor_RunInteractive_ErrorWhenVMNotFound(t *testing.T) {
 	// Use a VM name that does not exist; container will exit non-zero.
 	// RunInteractive connects stdio, so this only tests the error return path.
-	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+	e := &MachineExecutor{VMName: "berth-test-nonexistent-vm-12345"}
 	err := e.RunInteractive("echo", "hello")
 	if err == nil {
 		t.Error("expected error when VM does not exist, got nil")
@@ -301,32 +301,32 @@ func TestMachineExecutor_RunInteractive_ErrorWhenVMNotFound(t *testing.T) {
 }
 
 func TestMachineExecutor_Run_SuccessWithRealVM(t *testing.T) {
-	// This test requires the "safe-agentic" Apple container machine to be running.
+	// This test requires the "berth" Apple container machine to be running.
 	// Skip if the VM is not available.
-	e := &MachineExecutor{VMName: "safe-agentic"}
+	e := &MachineExecutor{VMName: "berth"}
 	ctx := context.Background()
-	out, err := e.Run(ctx, "echo", "safe-agentic-test-ok")
+	out, err := e.Run(ctx, "echo", "berth-test-ok")
 	if err != nil {
-		t.Skipf("safe-agentic VM not available, skipping: %v", err)
+		t.Skipf("berth VM not available, skipping: %v", err)
 	}
 	got := strings.TrimSpace(string(out))
-	if got != "safe-agentic-test-ok" {
+	if got != "berth-test-ok" {
 		t.Errorf("unexpected output: %q", got)
 	}
 }
 
 func TestBuildInteractiveArgs(t *testing.T) {
-	got := BuildInteractiveArgs("safe-agentic", "docker", "exec", "-it", "agent-x", "tmux", "attach", "-t", "safe-agentic")
+	got := BuildInteractiveArgs("berth", "docker", "exec", "-it", "agent-x", "tmux", "attach", "-t", "berth")
 	want := []string{
-		"machine", "run", "--interactive", "--tty", "-n", "safe-agentic", "-u", "root",
-		"--", "/usr/local/bin/safe-ag-exec", "docker",
+		"machine", "run", "--interactive", "--tty", "-n", "berth", "-u", "root",
+		"--", "/usr/local/bin/berth-exec", "docker",
 		"ZXhlYw==",         // exec
 		"LWl0",             // -it
 		"YWdlbnQteA==",     // agent-x
 		"dG11eA==",         // tmux
 		"YXR0YWNo",         // attach
 		"LXQ=",             // -t
-		"c2FmZS1hZ2VudGlj", // safe-agentic
+		"YmVydGg=", // berth
 	}
 	if len(got) != len(want) {
 		t.Fatalf("len: got %d want %d\n%v", len(got), len(want), got)

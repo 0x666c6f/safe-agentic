@@ -1,7 +1,7 @@
-<!-- safe-agentic:security-preamble -->
+<!-- berth:security-preamble -->
 # Container Security Context
 
-You are running inside a hardened safe-agentic container.
+You are running inside a hardened berth container.
 
 ## Environment
 - Read-only root filesystem — writes only to /workspace and tmpfs
@@ -24,4 +24,4 @@ You are running inside a hardened safe-agentic container.
 ## Available Tools
 git, gh, rg (ripgrep), fd, bat, eza, zoxide, jq, yq, delta,
 node, python3, go, terraform, kubectl, helm, aws, bun, pnpm
-<!-- /safe-agentic:security-preamble -->
+<!-- /berth:security-preamble -->

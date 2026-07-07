@@ -16,8 +16,8 @@ import (
 )
 
 const defaultResumeCWD = "/workspace"
-const tmuxSessionName = "safe-agentic"
-const cliBinaryName = "safe-ag"
+const tmuxSessionName = "berth"
+const cliBinaryName = "berth"
 
 var cliBinary = resolveCLIBinary()
 
@@ -50,7 +50,7 @@ func machineRunArgs(args ...string) []string {
 	if len(args) == 0 {
 		return base
 	}
-	wrapped := []string{"/usr/local/bin/safe-ag-exec", args[0]}
+	wrapped := []string{"/usr/local/bin/berth-exec", args[0]}
 	for _, arg := range args[1:] {
 		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
 	}
@@ -270,7 +270,7 @@ func parseSessionMeta(data []byte) (sessionMeta, error) {
 }
 
 func containerUsesTmux(name string) bool {
-	out, err := execVM("docker", "inspect", "--format", "{{index .Config.Labels \"safe-agentic.terminal\"}}", name)
+	out, err := execVM("docker", "inspect", "--format", "{{index .Config.Labels \"berth.terminal\"}}", name)
 	return err == nil && strings.TrimSpace(string(out)) == "tmux"
 }
 
@@ -532,8 +532,8 @@ if best_file:
 }
 
 func inspectLogContext(name string) (string, string, string, bool) {
-	repo := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.repo-display"}}`)
-	agentType := inspectLogLabel(name, `{{index .Config.Labels "safe-agentic.agent-type"}}`)
+	repo := inspectLogLabel(name, `{{index .Config.Labels "berth.repo-display"}}`)
+	agentType := inspectLogLabel(name, `{{index .Config.Labels "berth.agent-type"}}`)
 	configDir := logConfigDir(strings.TrimSpace(agentType))
 	createdOut, _ := execVM("docker", "inspect", "--format", "{{.Created}}", name)
 	stateOut, _ := execVM("docker", "inspect", "--format", "{{.State.Status}}", name)
@@ -785,7 +785,7 @@ func (ac *Actions) Diff() {
 	}()
 }
 
-// showSideBySideDiff suspends the TUI and renders `safe-ag diff --side-by-side`
+// showSideBySideDiff suspends the TUI and renders `berth diff --side-by-side`
 // (delta, run inside the container) in the restored terminal, piped through a
 // pager so its ANSI colours display correctly — something the tview overlay
 // cannot do.
@@ -903,7 +903,7 @@ func (ac *Actions) SpawnNew() {
 }
 
 // Steer opens a small input overlay and sends the entered text into the
-// selected agent's tmux session via `safe-ag steer`.
+// selected agent's tmux session via `berth steer`.
 func (ac *Actions) Steer() {
 	agent := ac.selectedOrWarn()
 	if agent == nil {
@@ -912,12 +912,12 @@ func (ac *Actions) Steer() {
 	ShowSteerForm(ac.app, agent.Name)
 }
 
-// VMStart shells out to `safe-ag vm start` to recover an unreachable VM,
+// VMStart shells out to `berth vm start` to recover an unreachable VM,
 // suspending the TUI while it runs (like the other interactive shell-outs),
 // then forcing an immediate re-poll on return.
 func (ac *Actions) VMStart() {
 	ac.app.SuspendAndRun(func() {
-		fmt.Println("Running 'safe-ag vm start'...")
+		fmt.Println("Running 'berth vm start'...")
 		cmd := newCLICmd("vm", "start")
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -1334,7 +1334,7 @@ func (ac *Actions) Audit() {
 	}()
 }
 
-// Timeline shows recent safe-agentic events.
+// Timeline shows recent berth events.
 func (ac *Actions) Timeline() {
 	ac.showCommandOverlay("timeline", "Timeline", "Loading timeline...", "No timeline events yet")
 }
@@ -1408,7 +1408,7 @@ func (ac *Actions) Pipeline(pipelinePath string) {
 	}()
 }
 
-// Action runs a configured safe-ag action in the selected agent.
+// Action runs a configured berth action in the selected agent.
 func (ac *Actions) Action(actionName string) {
 	actionName = strings.TrimSpace(actionName)
 	if actionName == "" {
@@ -1510,7 +1510,7 @@ func (ac *Actions) CreatePR() {
 
 	// Check SSH label first (needed for push)
 	sshLabel, err := execVM("docker", "inspect", "--format",
-		`{{index .Config.Labels "safe-agentic.ssh"}}`, name)
+		`{{index .Config.Labels "berth.ssh"}}`, name)
 	if err != nil || !sshLabelAllowsPush(string(sshLabel)) {
 		ac.app.footer.ShowStatus(fmt.Sprintf("%s was not spawned with --ssh; push requires SSH", name), true)
 		return

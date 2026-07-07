@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/validate"
+	"github.com/0x666c6f/berth/pkg/validate"
 	"github.com/BurntSushi/toml"
 )
 
@@ -89,19 +89,19 @@ var keyAliases = map[string]string{
 	"git.author_email":                     "git.author_email",
 	"git.committer_name":                   "git.committer_name",
 	"git.committer_email":                  "git.committer_email",
-	"SAFE_AGENTIC_DEFAULT_CPUS":            "defaults.cpus",
-	"SAFE_AGENTIC_DEFAULT_MEMORY":          "defaults.memory",
-	"SAFE_AGENTIC_DEFAULT_PIDS_LIMIT":      "defaults.pids_limit",
-	"SAFE_AGENTIC_DEFAULT_SSH":             "defaults.ssh",
-	"SAFE_AGENTIC_DEFAULT_DOCKER":          "defaults.docker",
-	"SAFE_AGENTIC_DEFAULT_DOCKER_SOCKET":   "defaults.docker_socket",
-	"SAFE_AGENTIC_DEFAULT_REUSE_AUTH":      "defaults.reuse_auth",
-	"SAFE_AGENTIC_DEFAULT_REUSE_GH_AUTH":   "defaults.reuse_gh_auth",
-	"SAFE_AGENTIC_DEFAULT_SEED_AUTH":       "defaults.seed_auth",
-	"SAFE_AGENTIC_DEFAULT_NETWORK":         "defaults.network",
-	"SAFE_AGENTIC_DEFAULT_IDENTITY":        "defaults.identity",
-	"SAFE_AGENTIC_DEFAULT_WORKTREES_DIR":   "defaults.worktrees_dir",
-	"SAFE_AGENTIC_DEFAULT_WORKTREES_MOUNT": "defaults.worktrees_mount",
+	"BERTH_DEFAULT_CPUS":            "defaults.cpus",
+	"BERTH_DEFAULT_MEMORY":          "defaults.memory",
+	"BERTH_DEFAULT_PIDS_LIMIT":      "defaults.pids_limit",
+	"BERTH_DEFAULT_SSH":             "defaults.ssh",
+	"BERTH_DEFAULT_DOCKER":          "defaults.docker",
+	"BERTH_DEFAULT_DOCKER_SOCKET":   "defaults.docker_socket",
+	"BERTH_DEFAULT_REUSE_AUTH":      "defaults.reuse_auth",
+	"BERTH_DEFAULT_REUSE_GH_AUTH":   "defaults.reuse_gh_auth",
+	"BERTH_DEFAULT_SEED_AUTH":       "defaults.seed_auth",
+	"BERTH_DEFAULT_NETWORK":         "defaults.network",
+	"BERTH_DEFAULT_IDENTITY":        "defaults.identity",
+	"BERTH_DEFAULT_WORKTREES_DIR":   "defaults.worktrees_dir",
+	"BERTH_DEFAULT_WORKTREES_MOUNT": "defaults.worktrees_mount",
 	"GIT_AUTHOR_NAME":                      "git.author_name",
 	"GIT_AUTHOR_EMAIL":                     "git.author_email",
 	"GIT_COMMITTER_NAME":                   "git.committer_name",
@@ -124,23 +124,23 @@ func Defaults() Config {
 }
 
 func UserDir() string {
-	return safeAgDir("SAFE_AGENTIC_CONFIG_HOME")
+	return berthDir("BERTH_CONFIG_HOME")
 }
 
-func safeAgDir(envKey string) string {
+func berthDir(envKey string) string {
 	if base := os.Getenv(envKey); base != "" {
-		return filepath.Join(base, ".safe-ag")
+		return filepath.Join(base, ".berth")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-			fmt.Fprintf(os.Stderr, "[safe-ag] warning: resolve home dir: %v; using %s\n", err, filepath.Join(cwd, ".safe-ag"))
-			return filepath.Join(cwd, ".safe-ag")
+			fmt.Fprintf(os.Stderr, "[berth] warning: resolve home dir: %v; using %s\n", err, filepath.Join(cwd, ".berth"))
+			return filepath.Join(cwd, ".berth")
 		}
-		fmt.Fprintf(os.Stderr, "[safe-ag] warning: resolve home dir: %v; using /.safe-ag\n", err)
-		return filepath.Join(string(os.PathSeparator), ".safe-ag")
+		fmt.Fprintf(os.Stderr, "[berth] warning: resolve home dir: %v; using /.berth\n", err)
+		return filepath.Join(string(os.PathSeparator), ".berth")
 	}
-	return filepath.Join(home, ".safe-ag")
+	return filepath.Join(home, ".berth")
 }
 
 func ConfigPath() string {
@@ -160,18 +160,18 @@ func CronPath() string {
 }
 
 func StateDir() string {
-	if base := os.Getenv("SAFE_AGENTIC_STATE_HOME"); base != "" {
-		return filepath.Join(base, ".safe-ag", "state")
+	if base := os.Getenv("BERTH_STATE_HOME"); base != "" {
+		return filepath.Join(base, ".berth", "state")
 	}
 	return filepath.Join(UserDir(), "state")
 }
 
-// WorktreesDir returns the host directory that safe-agentic mounts into the VM
+// WorktreesDir returns the host directory that berth mounts into the VM
 // for managed git worktrees. Everything under this directory is exposed to the
 // VM at the stable mount point /worktrees; nothing else on the host is. It must
 // live under the invoking user's home directory because the Apple container
 // machine can only mount the user's home. Precedence: defaults.worktrees_dir in
-// config.toml, then the default ~/.safe-ag/worktrees.
+// config.toml, then the default ~/.berth/worktrees.
 func WorktreesDir() string {
 	if cfg, err := LoadDefaults(ConfigPath()); err == nil && cfg.Defaults.WorktreesDir != "" {
 		return cfg.Defaults.WorktreesDir

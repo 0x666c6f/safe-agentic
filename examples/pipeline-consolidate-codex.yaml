@@ -5,13 +5,13 @@
 # This pipeline fetches those branches, consolidates, fixes, and creates a PR.
 #
 # Usage:
-#   safe-ag pipeline examples/pipeline-consolidate-codex.yaml
+#   berth pipeline examples/pipeline-consolidate-codex.yaml
 
 name: consolidate-and-fix-codex
 steps:
   - name: consolidate-fix-pr
     type: claude
-    repo: git@github.com:0x666c6f/safe-agentic.git
+    repo: git@github.com:0x666c6f/berth.git
     ssh: true
     reuse_auth: true
     auto_trust: true

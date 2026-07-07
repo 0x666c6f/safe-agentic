@@ -1,9 +1,9 @@
 # Terminal UI
 
-`safe-ag tui` is the fastest way to see all agents at once.
+`berth tui` is the fastest way to see all agents at once.
 
 ```bash
-safe-ag tui
+berth tui
 ```
 
 ## What it shows
@@ -67,7 +67,7 @@ Press `n` to open the spawn form. It lets you set:
 - Docker socket access
 - git identity
 
-The spawn form starts from `~/.safe-ag/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. If the final spawn would enable SSH, shared auth, host auth seeding, AWS credentials, Docker, or Docker socket access, the footer asks for `y/n` confirmation before launch. The spawned agent is launched in background mode; reconnect from the table when ready.
+The spawn form starts from `~/.berth/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. If the final spawn would enable SSH, shared auth, host auth seeding, AWS credentials, Docker, or Docker socket access, the footer asks for `y/n` confirmation before launch. The spawned agent is launched in background mode; reconnect from the table when ready.
 
 ## File transfer
 

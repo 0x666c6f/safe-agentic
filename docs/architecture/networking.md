@@ -1,11 +1,11 @@
 # Networking
 
-Networking is one of the main safety controls in safe-agentic.
+Networking is one of the main safety controls in berth.
 
 ## Default mode
 
 By default, each agent gets a managed Docker bridge network.
-The VM setup pins each managed bridge interface to a `sa*` name so the `SAFE_AGENTIC_EGRESS` iptables chain can apply default egress guardrails.
+The VM setup pins each managed bridge interface to a `bt*` name so the `BERTH_EGRESS` iptables chain can apply default egress guardrails.
 
 Intent:
 - isolate agents from each other
@@ -16,7 +16,7 @@ Intent:
 ## Custom network
 
 ```bash
-safe-ag spawn claude --network my-net --repo ...
+berth spawn claude --network my-net --repo ...
 ```
 
 Use this only when you intentionally want different connectivity behavior.
@@ -30,11 +30,11 @@ Tradeoff:
 For especially untrusted work, use an internal Docker network:
 
 ```bash
-safe-ag vm ssh
+berth vm ssh
 docker network create --internal agent-isolated
 exit
 
-safe-ag spawn claude --network agent-isolated --repo https://github.com/org/repo.git
+berth spawn claude --network agent-isolated --repo https://github.com/org/repo.git
 ```
 
 ## SSH forwarding and networking

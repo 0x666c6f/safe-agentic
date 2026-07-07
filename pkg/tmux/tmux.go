@@ -6,18 +6,18 @@ import (
 	"os"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"golang.org/x/term"
 )
 
-const defaultSessionName = "safe-agentic"
+const defaultSessionName = "berth"
 
 var stdinIsTerminal = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func SessionName() string {
-	if n := os.Getenv("SAFE_AGENTIC_TMUX_SESSION_NAME"); n != "" {
+	if n := os.Getenv("BERTH_TMUX_SESSION_NAME"); n != "" {
 		return n
 	}
 	return defaultSessionName

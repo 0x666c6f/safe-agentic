@@ -1,15 +1,15 @@
 # Pipeline: review matrix -> reconcile -> fix -> PR
 #
-# Inspired by the richer Claude PR review workflow, but encoded as a safe-agentic
+# Inspired by the richer Claude PR review workflow, but encoded as a berth
 # pipeline that both Claude and Codex can run. Each review category uses one
 # shared review branch so the Claude and Codex passes publish side-by-side.
 #
 # Usage:
-#   safe-ag pipeline examples/pipeline-double-review-reconcile.yaml
+#   berth pipeline examples/pipeline-double-review-reconcile.yaml
 
 name: double-review-reconcile
 defaults:
-  repo: git@github.com:0x666c6f/safe-agentic.git
+  repo: git@github.com:0x666c6f/berth.git
   ssh: true
   reuse_auth: true
   auto_trust: true

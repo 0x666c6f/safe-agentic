@@ -12,7 +12,7 @@ func TestPrepareCreatesWorktreeAndCopiesIncludes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := initRepo(t)
-	if err := os.WriteFile(filepath.Join(repo, ".safe-aginclude"), []byte("ignored.env\nnested/*.local\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".berthinclude"), []byte("ignored.env\nnested/*.local\n"), 0o600); err != nil {
 		t.Fatalf("write include file: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "ignored.env"), []byte("TOKEN=test\n"), 0o600); err != nil {
@@ -30,12 +30,12 @@ func TestPrepareCreatesWorktreeAndCopiesIncludes(t *testing.T) {
 		RepoRoot:      repo,
 		ContainerName: "agent-claude-test",
 		Path:          path,
-		Branch:        "safe-ag/test",
+		Branch:        "berth/test",
 	})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
-	if wt.Path != path || wt.Branch != "safe-ag/test" {
+	if wt.Path != path || wt.Branch != "berth/test" {
 		t.Fatalf("worktree = %#v", wt)
 	}
 	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
@@ -78,12 +78,12 @@ func TestPrepareDryRunDoesNotCreatePath(t *testing.T) {
 
 func TestPrepareReportsBranchConflict(t *testing.T) {
 	repo := initRepo(t)
-	runGit(t, repo, "branch", "safe-ag/conflict")
+	runGit(t, repo, "branch", "berth/conflict")
 	_, err := Prepare(Options{
 		RepoRoot:      repo,
 		ContainerName: "agent-claude-conflict",
 		Path:          filepath.Join(t.TempDir(), "conflict"),
-		Branch:        "safe-ag/conflict",
+		Branch:        "berth/conflict",
 	})
 	if err == nil || !strings.Contains(err.Error(), "git worktree add") {
 		t.Fatalf("Prepare() error = %v, want git worktree add branch conflict", err)
@@ -114,7 +114,7 @@ func TestCopyIncludesRejectsEscapesAndSymlinks(t *testing.T) {
 	if err := os.MkdirAll(wt, 0o755); err != nil {
 		t.Fatalf("mkdir wt: %v", err)
 	}
-	include := filepath.Join(repo, ".safe-aginclude")
+	include := filepath.Join(repo, ".berthinclude")
 	if err := os.WriteFile(include, []byte("../outside\n"), 0o600); err != nil {
 		t.Fatalf("write include: %v", err)
 	}
@@ -164,7 +164,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 }
 
 func TestVMPath(t *testing.T) {
-	root := "/home/u/.safe-ag/worktrees"
+	root := "/home/u/.berth/worktrees"
 	cases := []struct {
 		name    string
 		host    string
@@ -175,8 +175,8 @@ func TestVMPath(t *testing.T) {
 		{"root itself", root, "/worktrees", false},
 		{"nested", root + "/org/repo", "/worktrees/org/repo", false},
 		{"outside tmp", "/tmp/elsewhere", "", true},
-		{"sibling prefix escape", "/home/u/.safe-ag/worktrees-evil", "", true},
-		{"parent", "/home/u/.safe-ag", "", true},
+		{"sibling prefix escape", "/home/u/.berth/worktrees-evil", "", true},
+		{"parent", "/home/u/.berth", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestDefaultPathUnderRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	got := DefaultPath("agent-claude-x")
-	want := filepath.Join(home, ".safe-ag", "worktrees", "agent-claude-x")
+	want := filepath.Join(home, ".berth", "worktrees", "agent-claude-x")
 	if got != want {
 		t.Fatalf("DefaultPath = %q, want %q", got, want)
 	}

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { html as diffHtml } from "diff2html";
 import type { ColorSchemeType } from "diff2html/lib/types";
 import "diff2html/bundles/css/diff2html.min.css";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import { useStore } from "../store";
 import { errText } from "../types";
 

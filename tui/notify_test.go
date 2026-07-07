@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/0x666c6f/safe-agentic/pkg/events"
+	"github.com/0x666c6f/berth/pkg/events"
 )
 
 func newTestNotifier() *stateNotifier {
@@ -147,13 +147,13 @@ func TestNotifierDisabledFiresNothing(t *testing.T) {
 
 func TestNotifyEnabledEnvToggle(t *testing.T) {
 	for _, off := range []string{"off", "0", "false", "no", "OFF"} {
-		t.Setenv("SAFE_AG_TUI_NOTIFY", off)
+		t.Setenv("BERTH_TUI_NOTIFY", off)
 		if notifyEnabled() {
-			t.Fatalf("SAFE_AG_TUI_NOTIFY=%q should disable", off)
+			t.Fatalf("BERTH_TUI_NOTIFY=%q should disable", off)
 		}
 	}
-	t.Setenv("SAFE_AG_TUI_NOTIFY", "")
+	t.Setenv("BERTH_TUI_NOTIFY", "")
 	if !notifyEnabled() {
-		t.Fatal("unset SAFE_AG_TUI_NOTIFY should default to enabled")
+		t.Fatal("unset BERTH_TUI_NOTIFY should default to enabled")
 	}
 }

@@ -2,8 +2,8 @@
 # To update: docker pull ubuntu:24.04 && docker inspect --format='{{index .RepoDigests 0}}' ubuntu:24.04
 FROM ubuntu:24.04@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b
 
-LABEL app=safe-agentic
-LABEL maintainer="safe-agentic"
+LABEL app=berth
+LABEL maintainer="berth"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
@@ -253,12 +253,12 @@ RUN if id -u agent >/dev/null 2>&1; then \
  && usermod -g agent -G "" agent \
  && printf 'agent:100000:65536\n' >> /etc/subuid \
  && printf 'agent:100000:65536\n' >> /etc/subgid \
- && install -m 0755 -d /usr/local/lib/safe-agentic /workspace /opt/agent-cli \
+ && install -m 0755 -d /usr/local/lib/berth /workspace /opt/agent-cli \
  && chown -R 1000:1000 /workspace /home/agent /opt/agent-cli
 
-COPY --chmod=644 bin/repo-url.sh /usr/local/lib/safe-agentic/repo-url.sh
-COPY --chmod=644 config/security-preamble.md /usr/local/lib/safe-agentic/security-preamble.md
-COPY --chmod=755 bin/agent-session.sh /usr/local/lib/safe-agentic/agent-session.sh
+COPY --chmod=644 bin/repo-url.sh /usr/local/lib/berth/repo-url.sh
+COPY --chmod=644 config/security-preamble.md /usr/local/lib/berth/security-preamble.md
+COPY --chmod=755 bin/agent-session.sh /usr/local/lib/berth/agent-session.sh
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER agent

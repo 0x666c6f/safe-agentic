@@ -3,7 +3,7 @@ import { Bell, Bot, CircleDollarSign, Ellipsis, FolderGit2, Workflow } from "luc
 import { useStore, statusFor, orderAgents } from "../store";
 import { StatusDot } from "./StatusDot";
 import { QuotaBar } from "./QuotaBar";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import type { Agent, View } from "../types";
 
 type MenuState = { agent: Agent; x: number; y: number } | null;
@@ -173,7 +173,7 @@ export function Sidebar() {
     <aside className="flex h-full w-64 flex-col border-r border-neutral-800 bg-neutral-900 text-neutral-200">
       {/* Header: brand + New agent */}
       <div className="flex items-center gap-2 px-4 pb-2 pt-3">
-        <span className="text-sm font-semibold tracking-tight text-neutral-300">Safe Agentic</span>
+        <span className="text-sm font-semibold tracking-tight text-neutral-300">Berth</span>
         {needs > 0 && (
           <span className="rounded-full bg-yellow-500/20 px-1.5 text-xs text-yellow-400" title={`${needs} need you`}>{needs}</span>
         )}

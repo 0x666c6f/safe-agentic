@@ -10,8 +10,8 @@ inputs:
     required: true
     infer: pr
 examples:
-  - safe-ag pr-fix
-  - safe-ag pr-fix 16
+  - berth pr-fix
+  - berth pr-fix 16
 tags:
   - review
   - pr

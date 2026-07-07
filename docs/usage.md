@@ -9,46 +9,46 @@ If you want the raw reference pages instead:
 ## Setup and maintenance
 
 ```bash
-safe-ag setup
-safe-ag update
-safe-ag update --quick
-safe-ag update --full
-safe-ag diagnose
-safe-ag vm start
-safe-ag vm stop
-safe-ag vm ssh
+berth setup
+berth update
+berth update --quick
+berth update --full
+berth diagnose
+berth vm start
+berth vm stop
+berth vm ssh
 ```
 
 ## Spawn and connect
 
 ```bash
-safe-ag spawn <claude|codex|shell> ...
-safe-ag spawn claude --worktree --name task-name   # requires one-time: safe-ag setup --enable-worktrees
-safe-ag run <repo...> [prompt]
-safe-ag attach <name>
-safe-ag attach --latest
-safe-ag steer --latest "continue, but keep the change smaller"
-safe-ag profile run reviewer "focus security only"
+berth spawn <claude|codex|shell> ...
+berth spawn claude --worktree --name task-name   # requires one-time: berth setup --enable-worktrees
+berth run <repo...> [prompt]
+berth attach <name>
+berth attach --latest
+berth steer --latest "continue, but keep the change smaller"
+berth profile run reviewer "focus security only"
 ```
 
 Use `spawn` when you want explicit control. Use `run` for a quick single-task session.
-Use `profile run` for repeatable roles from `~/.safe-ag/agents/*.toml` or `.safe-ag/agents/*.toml`.
+Use `profile run` for repeatable roles from `~/.berth/agents/*.toml` or `.berth/agents/*.toml`.
 
 ## See what the agent is doing
 
 ```bash
-safe-ag list
-safe-ag peek <name>
-safe-ag logs <name>
-safe-ag search "error text"
-safe-ag summary <name>
-safe-ag output <name>
-safe-ag diff <name>
-safe-ag review <name>
-safe-ag review-comments list <name>
-safe-ag timeline
-safe-ag inbox
-safe-ag server --stdio
+berth list
+berth peek <name>
+berth logs <name>
+berth search "error text"
+berth summary <name>
+berth output <name>
+berth diff <name>
+berth review <name>
+berth review-comments list <name>
+berth timeline
+berth inbox
+berth server --stdio
 ```
 
 Typical meaning:
@@ -65,83 +65,83 @@ Typical meaning:
 ## Manage containers
 
 ```bash
-safe-ag stop <name>
-safe-ag stop --latest
-safe-ag stop --all
-safe-ag cleanup
-safe-ag cleanup --auth
-safe-ag sessions <name> [dest]
+berth stop <name>
+berth stop --latest
+berth stop --all
+berth cleanup
+berth cleanup --auth
+berth sessions <name> [dest]
 ```
 
 ## Workflow helpers
 
 ```bash
-safe-ag checkpoint create <name> [label]
-safe-ag checkpoint list <name>
-safe-ag checkpoint restore <name> <ref>
+berth checkpoint create <name> [label]
+berth checkpoint list <name>
+berth checkpoint restore <name> <ref>
 
-safe-ag todo add <name> "text"
-safe-ag todo list <name>
-safe-ag todo check <name> <index>
-safe-ag todo uncheck <name> <index>
+berth todo add <name> "text"
+berth todo list <name>
+berth todo check <name> <index>
+berth todo uncheck <name> <index>
 
-safe-ag retry <name> [--feedback "..."]
-safe-ag steer <name> "address the failing test only"
-safe-ag handoff <name> --to-worktree   # worktree commands need: safe-ag setup --enable-worktrees
-safe-ag handoff <name> --to-local ./workspace-copy
-safe-ag worktree snapshot <name> "before cleanup"
-safe-ag worktree restore <name> stash@{0}
-safe-ag worktree cleanup --dry-run
-safe-ag workspace stage <name> src/app.go
-safe-ag workspace revert <name> src/app.go --yes
-safe-ag workspace stage-patch <name> selected.patch
-safe-ag workspace revert-patch <name> selected.patch --yes
-safe-ag pr <name> [--title ... --base ...]
-safe-ag browser capture http://localhost:3000 --mode auto --annotation "checkout flow"
+berth retry <name> [--feedback "..."]
+berth steer <name> "address the failing test only"
+berth handoff <name> --to-worktree   # worktree commands need: berth setup --enable-worktrees
+berth handoff <name> --to-local ./workspace-copy
+berth worktree snapshot <name> "before cleanup"
+berth worktree restore <name> stash@{0}
+berth worktree cleanup --dry-run
+berth workspace stage <name> src/app.go
+berth workspace revert <name> src/app.go --yes
+berth workspace stage-patch <name> selected.patch
+berth workspace revert-patch <name> selected.patch --yes
+berth pr <name> [--title ... --base ...]
+berth browser capture http://localhost:3000 --mode auto --annotation "checkout flow"
 ```
 
 ## Auth and config
 
 ```bash
-safe-ag config show
-safe-ag config get <key>
-safe-ag config set <key> <value>
-safe-ag config reset <key>
+berth config show
+berth config get <key>
+berth config set <key> <value>
+berth config reset <key>
 
 # hard spawn guards
-$EDITOR ~/.safe-ag/rules.toml
+$EDITOR ~/.berth/rules.toml
 
-safe-ag action list
-safe-ag action run test --latest
+berth action list
+berth action run test --latest
 
-safe-ag template list
-safe-ag template show <name>
-safe-ag template create <name>
+berth template list
+berth template show <name>
+berth template create <name>
 
-safe-ag mcp-login <service> [container]
-safe-ag aws-refresh <name> [profile]
+berth mcp-login <service> [container]
+berth aws-refresh <name> [profile]
 ```
 
 ## Fleet and pipelines
 
 ```bash
-safe-ag fleet manifest.yaml
-safe-ag fleet manifest.yaml --dry-run
-safe-ag fleet status
+berth fleet manifest.yaml
+berth fleet manifest.yaml --dry-run
+berth fleet status
 
-safe-ag pipeline pipeline.yaml
-safe-ag pipeline pipeline.yaml --dry-run
-safe-ag pipeline inspect review
-safe-ag pipeline render review
-safe-ag pipeline validate review
-safe-ag pr-review
-safe-ag pr-fix
+berth pipeline pipeline.yaml
+berth pipeline pipeline.yaml --dry-run
+berth pipeline inspect review
+berth pipeline render review
+berth pipeline validate review
+berth pr-review
+berth pr-fix
 ```
 
 ## TUI
 
 ```bash
-safe-ag tui
+berth tui
 ```
 
 ## High-signal examples
@@ -149,7 +149,7 @@ safe-ag tui
 Private repo, reusable auth:
 
 ```bash
-safe-ag spawn codex \
+berth spawn codex \
   --ssh \
   --reuse-auth \
   --reuse-gh-auth \
@@ -159,7 +159,7 @@ safe-ag spawn codex \
 Background run with a prompt:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --background \
   --ssh \
   --repo git@github.com:org/repo.git \
@@ -169,7 +169,7 @@ safe-ag spawn claude \
 Infrastructure session:
 
 ```bash
-safe-ag spawn claude \
+berth spawn claude \
   --ssh \
   --aws my-profile \
   --repo git@github.com:org/infra.git \
@@ -179,6 +179,6 @@ safe-ag spawn claude \
 Parallel review:
 
 ```bash
-safe-ag fleet examples/fleet-review-and-fix.yaml
-safe-ag pipeline examples/pipeline-consolidate-and-fix.yaml
+berth fleet examples/fleet-review-and-fix.yaml
+berth pipeline examples/pipeline-consolidate-and-fix.yaml
 ```

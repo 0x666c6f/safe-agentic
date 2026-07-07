@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0x666c6f/safe-agentic/app/internal/emit"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/app/internal/emit"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
 func waitFor(t *testing.T, cond func() bool) {
@@ -80,7 +80,7 @@ func TestPollerEmitsStats(t *testing.T) {
 func TestPollerEnrichesLabelsCached(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tUp 1 minute\n")
-	fake.SetResponse("docker inspect", `{"safe-agentic.prompt":"fix the bug","safe-agentic.max-cost":"2.50"}`)
+	fake.SetResponse("docker inspect", `{"berth.prompt":"fix the bug","berth.max-cost":"2.50"}`)
 	rec := &emit.Recorder{}
 	p := NewPoller(fake, rec, 20*time.Millisecond)
 	p.Start()

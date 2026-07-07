@@ -1,8 +1,8 @@
-site_name: safe-agentic
+site_name: berth
 site_description: Run AI coding agents inside a hardened VM and per-agent containers
-site_url: https://0x666c6f.github.io/safe-agentic/
-repo_url: https://github.com/0x666c6f/safe-agentic
-repo_name: 0x666c6f/safe-agentic
+site_url: https://0x666c6f.github.io/berth/
+repo_url: https://github.com/0x666c6f/berth
+repo_name: 0x666c6f/berth
 
 theme:
   name: material
@@ -77,4 +77,4 @@ extra_css:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/0x666c6f/safe-agentic
+      link: https://github.com/0x666c6f/berth

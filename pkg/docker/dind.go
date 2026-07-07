@@ -3,7 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"time"
 )
@@ -14,7 +14,7 @@ const (
 )
 
 func DinDContainerName(containerName string) string {
-	return "safe-agentic-docker-" + containerName
+	return "berth-docker-" + containerName
 }
 
 func DinDSocketVolume(containerName string) string {
@@ -60,9 +60,9 @@ func StartDinDRuntime(ctx context.Context, exec vmexec.Executor, containerName, 
 		"--tmpfs", "/tmp:rw,nosuid,size=512m",
 		"--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", socketVol, dockerInternalSocketDir),
 		"--mount", fmt.Sprintf("type=volume,src=%s,dst=/var/lib/docker", dataVol),
-		"--label", "app=safe-agentic",
-		"--label", "safe-agentic.type=docker-runtime",
-		"--label", fmt.Sprintf("safe-agentic.parent=%s", containerName),
+		"--label", "app=berth",
+		"--label", "berth.type=docker-runtime",
+		"--label", fmt.Sprintf("berth.parent=%s", containerName),
 		"--entrypoint", "dockerd",
 		image,
 		"--host", "unix://" + dockerInternalSocketPath,
@@ -98,7 +98,7 @@ func RemoveDinDRuntime(ctx context.Context, exec vmexec.Executor, containerName 
 
 func CleanupAllDinD(ctx context.Context, exec vmexec.Executor) error {
 	// List containers with docker-runtime label, then remove each individually.
-	out, _ := exec.Run(ctx, "docker", "ps", "-aq", "--filter", "label=safe-agentic.type=docker-runtime")
+	out, _ := exec.Run(ctx, "docker", "ps", "-aq", "--filter", "label=berth.type=docker-runtime")
 	ids := strings.TrimSpace(string(out))
 	if ids != "" {
 		for _, id := range strings.Split(ids, "\n") {
@@ -109,7 +109,7 @@ func CleanupAllDinD(ctx context.Context, exec vmexec.Executor) error {
 		}
 	}
 	// List volumes with docker-runtime label, then remove each individually.
-	out, _ = exec.Run(ctx, "docker", "volume", "ls", "-q", "--filter", "label=safe-agentic.type=docker-runtime")
+	out, _ = exec.Run(ctx, "docker", "volume", "ls", "-q", "--filter", "label=berth.type=docker-runtime")
 	vols := strings.TrimSpace(string(out))
 	if vols != "" {
 		for _, v := range strings.Split(vols, "\n") {

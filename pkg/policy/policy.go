@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/berth/pkg/config"
 	"github.com/BurntSushi/toml"
 )
 
@@ -228,7 +228,7 @@ func findNearestProjectRules(userPath string) string {
 	}
 	userPath = filepath.Clean(userPath)
 	for {
-		candidate := filepath.Join(cwd, ".safe-ag", "rules.toml")
+		candidate := filepath.Join(cwd, ".berth", "rules.toml")
 		if filepath.Clean(candidate) != userPath {
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate

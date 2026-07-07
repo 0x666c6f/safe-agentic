@@ -1,4 +1,4 @@
 interface:
-  display_name: "Setup Safe Agentic"
-  short_description: "Set up or rebuild safe-agentic"
-  default_prompt: "Use $agent-setup to set up, rebuild, or troubleshoot the safe-agentic environment."
+  display_name: "Setup Berth"
+  short_description: "Set up or rebuild berth"
+  default_prompt: "Use $agent-setup to set up, rebuild, or troubleshoot the berth environment."

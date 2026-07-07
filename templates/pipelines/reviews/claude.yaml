@@ -10,8 +10,8 @@ inputs:
     required: true
     infer: pr
 examples:
-  - safe-ag pr-review claude
-  - safe-ag pr-review claude 16
+  - berth pr-review claude
+  - berth pr-review claude 16
 tags:
   - review
   - pr

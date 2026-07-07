@@ -5,17 +5,17 @@ This page is about container lifecycle after a session has been spawned.
 ## List and inspect
 
 ```bash
-safe-ag list
-safe-ag status --all
-safe-ag peek --latest
-safe-ag logs --latest
-safe-ag search "error text"
-safe-ag summary --latest
-safe-ag output --latest
-safe-ag diff --latest
-safe-ag review-comments list --latest
-safe-ag timeline
-safe-ag inbox
+berth list
+berth status --all
+berth peek --latest
+berth logs --latest
+berth search "error text"
+berth summary --latest
+berth output --latest
+berth diff --latest
+berth review-comments list --latest
+berth timeline
+berth inbox
 ```
 
 Use:
@@ -34,23 +34,23 @@ Use:
 ## Attach and resume
 
 ```bash
-safe-ag attach api-refactor
-safe-ag attach --latest
-safe-ag steer --latest "continue with the smallest fix"
+berth attach api-refactor
+berth attach --latest
+berth steer --latest "continue with the smallest fix"
 ```
 
 Behavior:
 - if the container is running, this attaches to tmux
-- if it is stopped, safe-agentic restarts it first
+- if it is stopped, berth restarts it first
 - detach without stopping: `Ctrl-b d`
 - use `steer` to send a follow-up message without opening a terminal
 
 ## Stop and remove
 
 ```bash
-safe-ag stop api-refactor
-safe-ag stop --latest
-safe-ag stop --all
+berth stop api-refactor
+berth stop --latest
+berth stop --all
 ```
 
 `stop` removes:
@@ -61,8 +61,8 @@ safe-ag stop --all
 ## Cleanup
 
 ```bash
-safe-ag cleanup
-safe-ag cleanup --auth
+berth cleanup
+berth cleanup --auth
 ```
 
 Difference:
@@ -74,15 +74,15 @@ Difference:
 Push files into a container:
 
 ```bash
-container machine run -n safe-agentic -u root -- docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
-container machine run -n safe-agentic -u root -- docker cp ./dist/. api-refactor:/workspace/dist
+container machine run -n berth -u root -- docker cp ./report.txt api-refactor:/workspace/tmp/report.txt
+container machine run -n berth -u root -- docker cp ./dist/. api-refactor:/workspace/dist
 ```
 
 Export session history:
 
 ```bash
-safe-ag sessions api-refactor
-safe-ag sessions --latest ~/tmp/agent-sessions
+berth sessions api-refactor
+berth sessions --latest ~/tmp/agent-sessions
 ```
 
 ## Container lifecycle
@@ -98,7 +98,7 @@ Containers are intentionally persistent until you stop or clean them up.
 ## TUI
 
 ```bash
-safe-ag tui
+berth tui
 ```
 
 Use these when you want:

@@ -19,7 +19,7 @@ func writeTemp(t *testing.T, content string) string {
 
 func writeProfile(t *testing.T, dir, name, content string) string {
 	t.Helper()
-	profileDir := filepath.Join(dir, ".safe-ag", "agents")
+	profileDir := filepath.Join(dir, ".berth", "agents")
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
 		t.Fatalf("mkdir profile dir: %v", err)
 	}

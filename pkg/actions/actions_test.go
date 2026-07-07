@@ -24,8 +24,8 @@ command = "golangci-lint run"
 	if err := os.WriteFile(projectPath, []byte(`
 [actions.test]
 description = "project test"
-command = "go test ./cmd/safe-ag"
-cwd = "cmd/safe-ag"
+command = "go test ./cmd/berth"
+cwd = "cmd/berth"
 `), 0o600); err != nil {
 		t.Fatalf("write project actions: %v", err)
 	}
@@ -41,7 +41,7 @@ cwd = "cmd/safe-ag"
 	if !ok {
 		t.Fatal("missing test action")
 	}
-	if action.Description != "project test" || action.Command != "go test ./cmd/safe-ag" || action.CWD != "cmd/safe-ag" {
+	if action.Description != "project test" || action.Command != "go test ./cmd/berth" || action.CWD != "cmd/berth" {
 		t.Fatalf("project override not applied: %#v", action)
 	}
 	if action.Source != projectPath {

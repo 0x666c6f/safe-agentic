@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { AgentService } from "../../bindings/github.com/0x666c6f/berth/app/internal/svc";
 import { useStore } from "../store";
 import { errText } from "../types";
 
-// `safe-ag cost --history` emits an aggregate summary (Period / Since / Spawns /
+// `berth cost --history` emits an aggregate summary (Period / Since / Spawns /
 // Containers), NOT a per-agent (name, tokens, $) breakdown — per-session cost
 // "requires live container access" and isn't in this output. So there's nothing
 // per-agent to click through to; we parse the "key: value" lines into a tidy

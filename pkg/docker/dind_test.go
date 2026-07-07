@@ -2,15 +2,15 @@ package docker
 
 import (
 	"context"
-	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"github.com/0x666c6f/berth/pkg/vmexec"
 	"strings"
 	"testing"
 )
 
 func TestDinDContainerName(t *testing.T) {
 	name := DinDContainerName("agent-claude-abc")
-	if name != "safe-agentic-docker-agent-claude-abc" {
-		t.Errorf("expected safe-agentic-docker-agent-claude-abc, got %s", name)
+	if name != "berth-docker-agent-claude-abc" {
+		t.Errorf("expected berth-docker-agent-claude-abc, got %s", name)
 	}
 }
 
@@ -29,7 +29,7 @@ func TestDinDDataVolume(t *testing.T) {
 }
 
 func TestAppendDinDAccess(t *testing.T) {
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	AppendDinDAccess(cmd, "agent-claude-abc")
 	cmdStr := strings.Join(cmd.Build(), " ")
 	if !strings.Contains(cmdStr, "DOCKER_HOST=unix://"+dockerInternalSocketPath) {
@@ -47,7 +47,7 @@ func TestAppendDinDAccess(t *testing.T) {
 func TestAppendHostDockerSocket(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c stat -c %g /var/run/docker.sock", "999")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendHostDockerSocket(context.Background(), fake, cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -67,7 +67,7 @@ func TestAppendHostDockerSocket(t *testing.T) {
 func TestAppendHostDockerSocket_Error(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetError("bash -c stat -c %g /var/run/docker.sock", "stat failed")
-	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	err := AppendHostDockerSocket(context.Background(), fake, cmd)
 	if err == nil {
 		t.Fatal("expected error")
@@ -80,7 +80,7 @@ func TestAppendHostDockerSocket_Error(t *testing.T) {
 func TestStartDinDRuntime(t *testing.T) {
 	fake := vmexec.NewFake()
 	// Simulate docker exec succeeding on first try (waitForDinD)
-	fake.SetResponse("docker exec safe-agentic-docker-agent-claude-abc docker info", "ok")
+	fake.SetResponse("docker exec berth-docker-agent-claude-abc docker info", "ok")
 	err := StartDinDRuntime(context.Background(), fake, "agent-claude-abc", "agent-claude-abc-net", "docker:dind")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -94,7 +94,7 @@ func TestStartDinDRuntime(t *testing.T) {
 	if !strings.Contains(cmdStr, "--privileged") {
 		t.Errorf("missing --privileged in DinD run: %s", cmdStr)
 	}
-	if !strings.Contains(cmdStr, "safe-agentic-docker-agent-claude-abc") {
+	if !strings.Contains(cmdStr, "berth-docker-agent-claude-abc") {
 		t.Errorf("missing DinD container name: %s", cmdStr)
 	}
 }
