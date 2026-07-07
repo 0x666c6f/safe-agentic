@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `--network api-only` mode so an agent keeps access to the Anthropic API (and the git host it clones from) through a VM-side allowlisting proxy, while the container's own internet egress is default-dropped — so a malicious file in the workspace cannot phone home, exfiltrate, DNS-tunnel, or reach C2.
+**Goal:** Add a `--network api-only` mode so an agent keeps access to the Anthropic API (and the git host it clones from) through a VM-side allowlisting proxy, while the container's own internet egress is default-dropped — so a malicious file in the workspace cannot open an arbitrary socket or resolve arbitrary DNS. This is not a complete phone-home block: the model conversation itself and the allowlisted GitHub clone path remain reachable and are real, if narrow, residual channels (see docs/security.md for the full analysis).
 
 **Architecture:** api-only containers attach to a managed bridge whose interface name uses a distinct `bti` prefix. `vm/setup.sh` runs a `tinyproxy` instance in the VM (allowlist, default-deny) and prepends one `iptables` rule that REJECTs *all* forwarded egress from `bti+` interfaces. The container reaches the proxy over the host-gateway address (an INPUT-path packet, unaffected by the FORWARD-chain drop) via injected `HTTPS_PROXY`/`HTTP_PROXY` env. All external DNS and direct sockets from the container are dropped; only the proxy, resolving names VM-side, can reach the network, and only for allowlisted hosts.
 
@@ -542,7 +542,7 @@ Expected: no output.
 
 - [ ] **Step 3: Document the mode in docs/security.md**
 
-Add a row/paragraph to the security posture section describing api-only: what it blocks (direct internet, external DNS, C2, bulk exfil), what still leaks (the model conversation itself — low-bandwidth, logged in session history), and the allowlist contents. State plainly that this is the recommended mode for analyzing untrusted files, and that it is **not** a malware detonation sandbox (see Known Limitations).
+Add a row/paragraph to the security posture section describing api-only: what it blocks (direct internet, container-side DNS resolution), the residual channels that remain (the model conversation itself, and the allowlisted GitHub clone path — a real pull channel, push-exfil only with write creds), and the allowlist contents. State plainly that this is the recommended mode for analyzing untrusted files, and that it is **not** a malware detonation sandbox (see Known Limitations).
 
 - [ ] **Step 4: Document in docs/architecture.md**
 
@@ -622,10 +622,19 @@ Expected: non-zero / 403 (proxy denies non-allowlisted host).
 
 - [ ] **Step 4: Prove external DNS and direct sockets are dropped**
 
+An explicit-resolver probe alone doesn't prove the real DNS-tunnel vector is closed — that vector is the container's *default* resolver path, not a resolver an attacker has to name explicitly. Probe both.
+
 ```bash
-./bin/berth vm ssh -- 'docker exec <container> sh -c "nslookup api.anthropic.com 8.8.8.8; echo dns=$?"'
+./bin/berth vm ssh -- 'docker exec <container> sh -c "nslookup api.anthropic.com 8.8.8.8; echo dns-explicit=$?"'
 ```
 Expected: failure/timeout (external DNS to 8.8.8.8 is a forwarded packet → dropped).
+
+```bash
+./bin/berth vm ssh -- 'docker exec <container> sh -c "nslookup evil.example.com; echo dns-default=$?; getent hosts evil.example.com; echo getent=$?"'
+```
+Expected: both fail (the container's default resolver path — no explicit server — must be blocked too; this is the actual DNS-tunnel vector).
+
+**Caveat:** if the container's configured nameserver resolves to something VM-local (e.g. Docker's embedded DNS at `127.0.0.11`), that query could still be answered without ever hitting `FORWARD` and the `bti+` REJECT — which would mean the DNS-block claim in the docs is false and needs revisiting. Confirm the default-resolver probe above actually fails before treating "DNS blocked" as proven.
 
 ```bash
 ./bin/berth vm ssh -- 'docker exec <container> sh -c "curl -sS -m 8 https://api.anthropic.com/v1/models -o /dev/null; echo direct-api=$?"'

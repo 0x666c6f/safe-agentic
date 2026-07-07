@@ -1059,6 +1059,18 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	}
 	check("Host egress NAT (ip.forwarding)", forwarding, egressDetail)
 
+	// 5b. Report api-only egress enforcement posture (bti+ REJECT rule +
+	// tinyproxy). Best-effort: a probe error just reports not-active, it
+	// doesn't fail diagnose.
+	if dockerErr == nil {
+		gap := apiOnlyEnforcementGap(ctx, vmRunner)
+		detail := ""
+		if gap != "" {
+			detail = gap + " — run: berth vm start to (re-)provision it"
+		}
+		check("api-only egress enforcement", gap == "", detail)
+	}
+
 	// 6. Report the worktree-mount posture. Disabled (home-mount=none) is the
 	// default and the strongest isolation; enabling it trades that for --worktree.
 	worktreesEnabled := config.WorktreesMountEnabled()

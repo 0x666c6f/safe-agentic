@@ -16,6 +16,7 @@ import (
 	"github.com/0x666c6f/berth/pkg/events"
 	"github.com/0x666c6f/berth/pkg/inject"
 	"github.com/0x666c6f/berth/pkg/labels"
+	"github.com/0x666c6f/berth/pkg/policy"
 	"github.com/0x666c6f/berth/pkg/tmux"
 	"github.com/0x666c6f/berth/pkg/vmexec"
 
@@ -752,6 +753,15 @@ func applyReconstructedLabels(opts *SpawnOpts, getLabel func(string) string) {
 	opts.Notify = decodeB64Value(getLabel(labels.NotifyB64))
 	opts.OnComplete = decodeB64Value(getLabel(labels.OnCompleteB64))
 	opts.OnFail = decodeB64Value(getLabel(labels.OnFailB64))
+	// Restore only the modes whose label value is a valid --network value.
+	// managed is the default (leave opts.Network == "") and custom networks
+	// aren't reconstructable from a label alone.
+	switch getLabel(labels.NetworkMode) {
+	case policy.NetworkAPIOnly:
+		opts.Network = policy.NetworkAPIOnly
+	case policy.NetworkNone:
+		opts.Network = policy.NetworkNone
+	}
 }
 
 func applyReconstructedAuth(opts *SpawnOpts, authType, ghAuth string) {

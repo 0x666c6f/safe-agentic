@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/0x666c6f/berth/pkg/docker"
+	"github.com/0x666c6f/berth/pkg/policy"
 	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
@@ -592,6 +593,8 @@ func TestSpawnAPIOnlyInjectsProxy(t *testing.T) {
 		"--add-host berth-proxy:host-gateway",
 		"HTTPS_PROXY=http://berth-proxy:8119",
 		"HTTP_PROXY=http://berth-proxy:8119",
+		"https_proxy=http://berth-proxy:8119",
+		"NO_PROXY=localhost,127.0.0.1,::1",
 		"NODE_USE_ENV_PROXY=1",
 		"BERTH_NETWORK_MODE=api-only",
 	} {
@@ -612,5 +615,73 @@ func TestSpawnManagedDoesNotInjectProxy(t *testing.T) {
 	})
 	if strings.Contains(strings.Join(cmd.Build(), " "), "HTTPS_PROXY") {
 		t.Error("managed mode must not inject a proxy")
+	}
+}
+
+// ─── requireAPIOnlyEnforcement (fail-closed VM enforcement check) ──────────────
+
+func TestRequireAPIOnlyEnforcement_ActiveEnforcementPasses(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-N BERTH_EGRESS\n-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	// pgrep -x tinyproxy default (unset) succeeds with empty output — set
+	// explicitly for clarity.
+	fake.SetResponse("pgrep -x tinyproxy", "123\n")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil", err)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_MissingIptablesRuleFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-P BERTH_EGRESS ACCEPT\n")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
+	if err == nil {
+		t.Fatal("expected error when VM lacks the bti+ REJECT rule, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_TinyproxyNotRunningFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	fake.SetError("pgrep -x tinyproxy", "no process found")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
+	if err == nil {
+		t.Fatal("expected error when tinyproxy is not running, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_ManagedModeSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkManaged}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil for managed mode", err)
+	}
+	if cmds := fake.CommandsMatching("iptables -S BERTH_EGRESS"); len(cmds) != 0 {
+		t.Errorf("managed mode should not probe iptables, got %v", cmds)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_DryRunSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, true); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil for dry-run", err)
+	}
+	if cmds := fake.CommandsMatching("iptables -S BERTH_EGRESS"); len(cmds) != 0 {
+		t.Errorf("dry-run should not probe iptables, got %v", cmds)
 	}
 }

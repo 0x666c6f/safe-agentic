@@ -338,6 +338,12 @@ as_root iptables -C DOCKER-USER -j BERTH_EGRESS >/dev/null 2>&1 \
 # api-only bridges (bti*): drop ALL forwarded egress. The only reachable path
 # is the VM-local proxy (host-gateway), which is INPUT-path, not FORWARD, so it
 # is unaffected by this rule. This kills direct internet, external DNS, and C2.
+#
+# ORDERING INVARIANT: this rule MUST stay the FIRST rule appended to
+# BERTH_EGRESS, before any '-i bt+' rule below. '-i bt+' prefix-matches
+# 'bti*' interfaces too (bti is bt + i), so a managed bt+ allow placed ahead
+# of this REJECT would silently let api-only traffic out on 22/80/443 —
+# fail-open for the one mode meant to be locked down. Do not reorder.
 as_root iptables -A BERTH_EGRESS -i 'bti+' -j REJECT
 as_root iptables -A BERTH_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 for cidr in \

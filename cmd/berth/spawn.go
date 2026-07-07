@@ -263,6 +263,12 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
+	// Fail closed BEFORE any docker run: an api-only spawn on a VM that predates
+	// this feature must refuse to launch rather than silently fall through to
+	// full internet (see requireAPIOnlyEnforcement).
+	if err := requireAPIOnlyEnforcement(ctx, exec, resolved, opts.DryRun); err != nil {
+		return err
+	}
 	if err := prepareSpawnResourceLimits(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
@@ -449,6 +455,34 @@ func requireSpawnHostEgress(opts SpawnOpts, cfg config.Config) error {
 	return withExitCode(exitInfra, fmt.Errorf("host egress NAT is off; VM has no internet egress. Run `berth vm start` and approve the macOS administrator prompt, then retry"))
 }
 
+// apiOnlyEnforcementGap probes the VM for the two conditions api-only egress
+// depends on (the BERTH_EGRESS bti+ REJECT rule and a running tinyproxy) and
+// returns a short description of what's missing, or "" if both are active.
+// Shared by the spawn-time fail-closed guard and `berth diagnose`.
+func apiOnlyEnforcementGap(ctx context.Context, exec vmexec.Executor) string {
+	rules, err := exec.Run(ctx, "iptables", "-S", "BERTH_EGRESS")
+	if err != nil || !strings.Contains(string(rules), "-i bti+") {
+		return "missing BERTH_EGRESS bti+ drop rule"
+	}
+	if _, err := exec.Run(ctx, "pgrep", "-x", "tinyproxy"); err != nil {
+		return "tinyproxy egress proxy not running"
+	}
+	return ""
+}
+
+// requireAPIOnlyEnforcement fails closed if the VM lacks the iptables bti+ drop
+// rule or the egress proxy, so an api-only spawn never silently gets full
+// internet on a VM that predates this feature. Only checked for api-only mode.
+func requireAPIOnlyEnforcement(ctx context.Context, exec vmexec.Executor, resolved spawnResolved, dryRun bool) error {
+	if dryRun || resolved.NetworkMode != policy.NetworkAPIOnly {
+		return nil
+	}
+	if gap := apiOnlyEnforcementGap(ctx, exec); gap != "" {
+		return withExitCode(exitInfra, fmt.Errorf("api-only egress enforcement is not active in the VM (%s). Your VM predates this feature. Run `berth vm start` to re-provision, then retry", gap))
+	}
+	return nil
+}
+
 func validateResolvedSpawn(resolved spawnResolved) error {
 	if err := validate.MemoryLimit(resolved.Memory); err != nil {
 		return err
@@ -615,9 +649,15 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	if resolved.NetworkMode == policy.NetworkAPIOnly {
 		cmd.AddFlag("--add-host", "berth-proxy:host-gateway")
 		const proxyURL = "http://berth-proxy:8119"
+		const noProxy = "localhost,127.0.0.1,::1"
 		cmd.AddEnv("HTTPS_PROXY", proxyURL)
 		cmd.AddEnv("HTTP_PROXY", proxyURL)
-		cmd.AddEnv("NO_PROXY", "localhost,127.0.0.1,::1")
+		cmd.AddEnv("NO_PROXY", noProxy)
+		// Lowercase variants too: some tools (curl, Python requests) only read
+		// the lowercase form.
+		cmd.AddEnv("https_proxy", proxyURL)
+		cmd.AddEnv("http_proxy", proxyURL)
+		cmd.AddEnv("no_proxy", noProxy)
 		cmd.AddEnv("NODE_USE_ENV_PROXY", "1")
 	}
 	cmd.AddEnv("BERTH_NETWORK_MODE", resolved.NetworkMode)
