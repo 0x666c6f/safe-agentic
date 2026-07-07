@@ -91,6 +91,8 @@ seed_auth = false
 
 **api-only is not a malware detonation sandbox.** It narrows network blast radius for static analysis; it does not sandbox execution. Treat all file content as untrusted data and never execute it. SSH clone doesn't work in this mode (port 22 is dropped) — use an HTTPS repo URL.
 
+**Known limitation — container startup window.** A brief window at container startup was observed once (immediately after re-provisioning the VM) where direct egress succeeded before the bridge drop was fully effective; it did not reproduce on later spawns. The DNS blackhole narrows any such window (a hostname can't be resolved without a working resolver), and the agent does not process untrusted file content during init. If you require provably-zero egress from the first instant, treat this as an open gap pending root-cause rather than a guarantee.
+
 ### The worktree mount trade-off
 
 By default the machine is created with `--home-mount none`: the host home is never shared with the VM, so even a VM-root compromise or Docker escape cannot reach host files.
