@@ -5,6 +5,7 @@ site/
 /berth
 bin/berth
 bin/berth-tui
+bin/detonate
 .DS_Store
 .claude/worktrees/
 

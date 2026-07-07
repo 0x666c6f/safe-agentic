@@ -115,6 +115,10 @@ The manifest (per-file sha256, size, and relative path) is written to the append
 
 The sha256 manifest is computed from one read of the host files and the tar stream mounted into the container is a second, separate read; the manifest assumes the source is quiescent during ingestion. A source actively mutating while ingest runs could make the manifest and the mounted bytes diverge.
 
+### Detonation is a separate, higher-privilege tool
+
+Everything above is static — files are inspected, never executed. Actually *running* a live sample belongs to [`detonate`](guide/detonate.md), a deliberately separate binary from `berth`, kept out of it so live-malware execution can never blur berth's blast-radius boundary. It only runs samples inside an isolated, no-uplink VM it re-validates as isolated immediately before every boot, and it fails closed — refusing rather than faking success — without an operator-provisioned immutable golden VM, isolated network, and gateway. Treat it as a distinct, explicitly-invoked, higher-privilege operation from berth's static triage, not an extension of it.
+
 ### The worktree mount trade-off
 
 By default the machine is created with `--home-mount none`: the host home is never shared with the VM, so even a VM-root compromise or Docker escape cannot reach host files.

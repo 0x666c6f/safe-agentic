@@ -1,4 +1,4 @@
-.PHONY: build build-all build-tui build-app install test validate-skills clean
+.PHONY: build build-all build-tui build-app build-detonate install test validate-skills clean
 
 VERSION ?= dev
 
@@ -11,7 +11,10 @@ build-tui:
 build-app:
 	$(MAKE) -C app build
 
-build-all: build build-tui
+build-detonate:
+	go build -o bin/detonate ./cmd/detonate
+
+build-all: build build-tui build-detonate
 
 install: build build-tui
 	cp bin/berth /usr/local/bin/berth
@@ -26,4 +29,4 @@ validate-skills:
 	go run ./tools/validate-skills
 
 clean:
-	rm -f bin/berth bin/berth-tui
+	rm -f bin/berth bin/berth-tui bin/detonate
