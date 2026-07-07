@@ -8,6 +8,7 @@ const (
 	GHAuth        = "berth.gh-auth"
 	SeedAuth      = "berth.seed-auth"
 	NetworkMode   = "berth.network-mode"
+	Forensic      = "berth.forensic"
 	DockerMode    = "berth.docker"
 	Resources     = "berth.resources"
 	Prompt        = "berth.prompt"

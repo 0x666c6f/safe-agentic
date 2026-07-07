@@ -762,6 +762,7 @@ func applyReconstructedLabels(opts *SpawnOpts, getLabel func(string) string) {
 	case policy.NetworkNone:
 		opts.Network = policy.NetworkNone
 	}
+	opts.Forensic = getLabel(labels.Forensic) == "true"
 }
 
 func applyReconstructedAuth(opts *SpawnOpts, authType, ghAuth string) {

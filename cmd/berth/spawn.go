@@ -739,6 +739,7 @@ func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnR
 	cmd.AddLabel(labels.SeedAuth, fmt.Sprintf("%v", opts.SeedAuth))
 	cmd.AddLabel(labels.RepoDisplay, repourl.DisplayLabel(opts.Repos))
 	cmd.AddLabel(labels.NetworkMode, resolved.NetworkMode)
+	cmd.AddLabel(labels.Forensic, fmt.Sprintf("%v", opts.Forensic))
 	cmd.AddLabel(labels.Resources, fmt.Sprintf("cpu=%s,mem=%s,pids=%d", resolved.CPUs, resolved.Memory, resolved.PIDsLimit))
 	cmd.AddLabel(labels.Terminal, "tmux")
 	if resolved.WorktreePath != "" {
