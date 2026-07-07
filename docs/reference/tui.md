@@ -276,6 +276,6 @@ Deleting rows also show spinner frames from the internal animation ticker.
 Use this page when you need exact interaction details.
 
 Use the higher-level guides when you need:
-- [Managing Agents](../guide/managing.md) for container lifecycle
-- [Workflow](../guide/workflow.md) for review/retry/PR flow
-- [Command Map](../usage.md) for CLI task routing
+- [Monitor & Manage](../guide/managing.md) for container lifecycle
+- [Review & Ship](../guide/workflow.md) for review/retry/PR flow
+- [CLI reference](cli.md) for command details

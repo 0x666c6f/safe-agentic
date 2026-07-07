@@ -1,13 +1,13 @@
-# Fleet and Pipelines
+# Fleets & Pipelines
 
-Use a fleet when you want parallel agents. Use a pipeline when you want staged execution.
+Multi-agent orchestration from YAML manifests. Use a **fleet** for parallel independent agents, a **pipeline** for staged execution with dependencies, and a **judge stage** to fan out candidates and crown a winner.
 
-## Fleet
+## Fleet — parallel fan-out
 
 ```bash
 berth fleet fleet.yaml
-berth fleet fleet.yaml --dry-run
-berth fleet status
+berth fleet fleet.yaml --dry-run     # resolved spawn commands, no launch
+berth fleet status                   # progress of the running fleet
 ```
 
 Minimal fleet:
@@ -26,17 +26,14 @@ agents:
     prompt: "Fix lint errors"
 ```
 
-Fleet behavior:
-- all agents are spawned from one manifest
-- they share a fleet label/volume context
-- they run in parallel
-- `--dry-run` shows the resolved spawn commands without launching anything
+All agents spawn from one manifest, run in parallel, and share a fleet label plus an optional shared `/fleet` volume for cross-agent scratch.
 
-## Pipeline
+## Pipeline — staged execution
 
 ```bash
 berth pipeline pipeline.yaml
-berth pipeline pipeline.yaml --dry-run
+berth pipeline pipeline.yaml --dry-run       # print the stage-order plan
+berth pipeline pipeline.yaml --background    # run detached
 ```
 
 Minimal pipeline:
@@ -56,74 +53,75 @@ steps:
     depends_on: run-tests
 ```
 
-Pipeline behavior:
-- steps are normalized into stages
-- stages with satisfied dependencies run
-- model-expanded stages are supported
-- sub-pipelines are supported
+Steps normalize into stages; a stage runs once its dependencies are satisfied. Pipelines also support `models: [...]` fan-out (duplicate a stage per agent engine) and nested sub-pipelines. Unsupported control fields (`retry`, `on_failure`, `when`, `outputs`) are rejected instead of silently ignored.
 
-## Common manifest fields
+### Saved pipelines
 
-| Field | Meaning |
+```bash
+berth pipeline list                  # saved pipelines in ~/.berth/pipelines/
+berth pipeline show review
+berth pipeline create review
+berth pipeline review --repo git@github.com:org/repo.git --var topic=security
+berth pipeline validate review       # check without running
+berth pipeline render review         # fully resolved YAML
+```
+
+## Judge stages — best-of-N
+
+A stage with a `judge` block picks the single best result among candidate runs instead of spawning its own agent: it collects each candidate's working-tree diff and final message, runs a one-shot Claude judge, and records a strict-JSON verdict.
+
+```yaml
+name: judge-fanout
+defaults:
+  repo: ${repo}
+  ssh: true
+  reuse_auth: true
+  auto_trust: true
+steps:
+  - name: implement                # fan out across engines → 2 candidates
+    models: [claude, codex]
+    prompt: "${task}\n\nYou are candidate ${model}. Commit focused, tested changes."
+  - name: pick-winner
+    judge:
+      criteria: "correctness and tests first, then minimal diff"
+      auto_pr: true                # open a PR from the winner
+      base: main
+    depends_on: implement
+```
+
+Rules that matter:
+
+- a judge must depend on stages producing **at least two** candidates (via `models: [...]` or multiple `agents:` in one stage)
+- a judge stage carries no `prompt`/`repo`/`type`/etc. of its own
+- `auto_pr` requires candidates spawned with `reuse_gh_auth: true` (the PR helper pushes over HTTPS)
+
+Verdicts persist to `~/.berth/state/judge/`. Full field-by-field schema: [Manifests reference](../reference/manifests.md).
+
+## Vars, profiles, defaults
+
+- `${key}` placeholders resolve from `--var key=value`; `${repo}` falls back to the current checkout's `origin`
+- `defaults:` applies to every agent/stage; per-agent fields override it
+- `profile: <name>` pulls a [saved agent profile](configuration.md#agent-profiles); manifest fields override profile fields
+
+The full manifest schema (every field, type, default) lives in the [Manifests reference](../reference/manifests.md).
+
+## Choosing between them
+
+| Shape | Reach for |
 |---|---|
-| `name` | human-readable agent/stage name |
-| `profile` | profile name from `~/.berth/agents/*.toml` or `.berth/agents/*.toml` |
-| `type` | `claude` or `codex` |
-| `repo` / `repos` | one or many repos |
-| `prompt` | task |
-| `template`, `template_vars` | prompt template and variables |
-| `instructions`, `instructions_file` | extra agent instructions |
-| `ssh` | SSH forwarding |
-| `reuse_auth` | shared Claude/Codex auth |
-| `reuse_gh_auth` | shared `gh` auth |
-| `seed_auth` | copy host Claude/Codex auth into this session |
-| `ephemeral_auth` | force per-session auth |
-| `docker` | DinD access |
-| `docker_socket` | direct VM Docker socket access |
-| `allow_setup_scripts` | allow repo-provided `berth.json` setup hooks |
-| `aws` | AWS profile |
-| `network` | custom Docker network |
-| `memory`, `cpus`, `pids_limit` | resource limits |
-| `max_cost`, `notify`, `on_exit`, `on_complete`, `on_fail` | metadata and callbacks |
-| `background` | spawn without attach |
-| `auto_trust` | skip trust prompt |
+| independent tasks, wall-clock speed | fleet |
+| later work depends on earlier output | pipeline |
+| parallel analysis feeding a consolidation stage | pipeline with fan-in `depends_on` |
+| multiple attempts, ship the best one | pipeline with a judge stage |
 
-Profiles can be used in `defaults` or per agent. Manifest fields override profile fields.
-
-Pipeline-only fields:
-
-| Field | Meaning |
-|---|---|
-| `depends_on` | dependency edge |
-| `models` | duplicate a stage across models |
-| `pipeline` | nested pipeline file |
-
-Unsupported control fields such as `retry`, `on_failure`, `when`, and `outputs` are rejected for now instead of being silently ignored.
-
-## Real examples
+## Runnable examples
 
 ```bash
 berth fleet examples/fleet-review-and-fix.yaml
 berth pipeline examples/pipeline-consolidate-and-fix.yaml
 berth pipeline examples/pipeline-double-review-reconcile.yaml
+berth pipeline examples/pipeline-judge-fanout.yaml
 berth pipeline examples/pipeline-display-nested.yaml --dry-run
 ```
 
-## Choosing between them
-
-Use a fleet when:
-- tasks are independent
-- you want wall-clock speed from parallelism
-
-Use a pipeline when:
-- later work depends on earlier output
-- you need stage ordering
-
-Use both when:
-- parallel review or analysis feeds a later consolidation/fix stage
-
-The `examples/pipeline-double-review-reconcile.yaml` example shows a richer version:
-- category-specific review branches
-- both Claude and Codex contributing reports to the same branch per category
-- a final Codex reconciliation/fix/PR stage
-- the reconciled report goes into the PR description, not a committed `REVIEW-RECONCILED.md` file
+See [`examples/README.md`](https://github.com/0x666c6f/berth/blob/main/examples/README.md) for walkthroughs. For one-shot PR review/fix without writing a manifest, use [`berth pr-review` / `berth pr-fix`](workflow.md#one-shot-pr-review-workflows).

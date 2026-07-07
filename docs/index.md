@@ -10,21 +10,21 @@ hide:
 
 # Sandbox coding agents without handing them your host
 
-Launch Claude Code and Codex inside a hardened Apple container machine, with one isolated container per agent and risky capabilities kept opt-in.
+Run Claude Code and Codex inside a hardened Apple container machine, one isolated container per agent. Everything risky — SSH, shared auth, AWS, Docker — stays off until you opt in.
 
 <div class="landing-terminal" markdown="1">
 
 ```bash
-open https://github.com/apple/container/releases
 brew tap 0x666c6f/tap
 brew install berth
 berth setup
+berth run https://github.com/org/repo.git "Fix the failing CI tests"
 ```
 
 </div>
 
-[Get Started](quickstart.md){ .md-button .md-button--primary }
-[Command Map](usage.md){ .md-button }
+[Get Started](install.md){ .md-button .md-button--primary }
+[Quickstart](quickstart.md){ .md-button }
 [GitHub](https://github.com/0x666c6f/berth){ .md-button }
 
 <div class="landing-meta">
@@ -37,63 +37,63 @@ berth setup
 
 <div class="landing-callout" markdown="1">
 
-`berth` is a sandbox runner for autonomous coding agents. It is not an editor policy layer pretending to be isolation.
+`berth` is a sandbox runner for autonomous coding agents. The container is the boundary — not an editor permission dialog.
 
+</div>
+
+## Pick your surface
+
+<div class="landing-panel-grid">
+  <a class="landing-panel" href="reference/cli/">
+    <span class="landing-panel-kicker">CLI</span>
+    <strong>Spawn, steer, review, and ship from the terminal. Scriptable end to end.</strong>
+    <code>berth spawn claude --repo ...</code>
+  </a>
+  <a class="landing-panel" href="guide/tui/">
+    <span class="landing-panel-kicker">TUI</span>
+    <strong>A k9s-style dashboard: every agent, live state, keyboard-first actions.</strong>
+    <code>berth tui</code>
+  </a>
+  <a class="landing-panel" href="guide/app/">
+    <span class="landing-panel-kicker">Desktop app</span>
+    <strong>Native macOS app with embedded terminals, diff review, and notifications.</strong>
+    <code>make -C app bundle</code>
+  </a>
+  <a class="landing-panel" href="guide/fleet/">
+    <span class="landing-panel-kicker">Orchestrate</span>
+    <strong>Fleets for parallel fan-out, pipelines for staged work, judges to pick winners.</strong>
+    <code>berth pipeline review.yaml</code>
+  </a>
 </div>
 
 ## Start with the page that matches the job
 
 <div class="grid cards" markdown>
 
--   :material-rocket-launch-outline: __First successful run__
+-   :material-download-outline: __Install & set up__
 
-    Install the toolchain, harden the VM, spawn an agent, inspect the session.
+    Install the toolchain, create the hardened VM, build the agent image.
 
-    [Open Quickstart](quickstart.md)
+    [Installation](install.md)
 
--   :material-console-network-outline: __Daily command map__
+-   :material-rocket-launch-outline: __First agent in five minutes__
 
-    Jump straight to the command you need for setup, attach, diff, retry, or PR flow.
+    Spawn an agent, watch it work, review the diff, clean up.
 
-    [Open Command Map](usage.md)
+    [Quickstart](quickstart.md)
 
--   :material-source-fork: __Parallel and staged workflows__
+-   :material-source-branch: __Daily loop__
 
-    Use fleet manifests, pipelines, retries, and TUI tooling for multi-agent work.
+    Spawn, monitor, steer, review, and open PRs — the full working cycle.
 
-    [Open Fleet Guide](guide/fleet.md)
+    [Guides](guide/spawning.md)
 
--   :material-shield-lock-outline: __Architecture and security__
+-   :material-shield-lock-outline: __Trust boundaries__
 
-    Understand trust boundaries, default isolation, and every flag that widens access.
+    What the sandbox protects, what each opt-in flag widens, and why.
 
-    [Open Security Model](security.md)
+    [Security](security.md)
 
-</div>
-
-## What you can do with it
-
-<div class="landing-panel-grid">
-  <a class="landing-panel" href="guide/spawning/">
-    <span class="landing-panel-kicker">Spawn</span>
-    <strong>Launch Claude Code, Codex, or a shell in an isolated container.</strong>
-    <code>berth spawn codex --repo ...</code>
-  </a>
-  <a class="landing-panel" href="guide/workflow/">
-    <span class="landing-panel-kicker">Review</span>
-    <strong>Peek at output, diff the workspace, review changes, then open a PR.</strong>
-    <code>berth peek --latest</code>
-  </a>
-  <a class="landing-panel" href="guide/fleet/">
-    <span class="landing-panel-kicker">Orchestrate</span>
-    <strong>Run fleets and pipelines for fan-out review, staged fixes, and consolidation.</strong>
-    <code>berth fleet manifest.yaml</code>
-  </a>
-  <a class="landing-panel" href="guide/tui/">
-    <span class="landing-panel-kicker">Observe</span>
-    <strong>Use the TUI to monitor live sessions without dropping into Docker.</strong>
-    <code>berth tui</code>
-  </a>
 </div>
 
 ## Defaults that matter
@@ -109,7 +109,7 @@ berth setup
   </div>
   <div class="landing-default">
     <strong>Container rootfs</strong>
-    <span>read-only by default</span>
+    <span>read-only</span>
   </div>
   <div class="landing-default">
     <strong>Linux caps</strong>
@@ -121,9 +121,11 @@ berth setup
   </div>
   <div class="landing-default">
     <strong>Docker access</strong>
-    <span>off until explicitly requested</span>
+    <span>off until <code>--docker</code></span>
   </div>
 </div>
+
+Full posture and every widener: [Security](security.md).
 
 ## Common flows
 
@@ -138,9 +140,10 @@ berth setup
     berth peek --latest
     berth diff --latest
     berth review --latest
+    berth pr --latest
     ```
 
-=== "Parallel review"
+=== "Parallel fleet"
 
     ```bash
     berth fleet examples/fleet-review-and-fix.yaml
@@ -153,12 +156,19 @@ berth setup
     berth pipeline examples/pipeline-consolidate-and-fix.yaml
     ```
 
+=== "Scheduled run"
+
+    ```bash
+    berth cron add nightly-review "daily 06:00" \
+      pipeline review --repo git@github.com:org/repo.git
+    berth cron daemon
+    ```
+
 ## Read in this order
 
-1. [Quickstart](quickstart.md): install, setup, first successful run
-2. [Command Map](usage.md): shortest path to the right command
-3. [Workflow](guide/workflow.md): diff, retry, review, PR flow
-4. [Fleet and Pipelines](guide/fleet.md): orchestration and manifests
-5. [Codex App Parity Roadmap](roadmap/codex-app-parity.md): UX roadmap and implementation tracks
-6. [Architecture](architecture.md): how the boundary layers fit together
-7. [Security](security.md): defaults, wideners, and threat model
+1. [Installation](install.md) — toolchain, VM, image
+2. [Quickstart](quickstart.md) — first successful run
+3. [Spawning Agents](guide/spawning.md) — repos, auth, prompts, resources
+4. [Review & Ship](guide/workflow.md) — diff, steer, review, PR
+5. [Fleets & Pipelines](guide/fleet.md) — orchestration at scale
+6. [Architecture](architecture.md) & [Security](security.md) — how the boundaries work

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ 'assets/brand/apple-touch-icon-180.png' | url }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ page.title | default(config.site_name) }} — berth">
+  <meta property="og:description" content="{{ config.site_description }}">
+  <meta property="og:image" content="{{ config.site_url }}assets/brand/berth-social-preview-1280x640.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{{ config.site_url }}assets/brand/berth-social-preview-1280x640.png">
+{% endblock %}

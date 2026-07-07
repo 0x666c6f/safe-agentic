@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to this project are documented here. Releases are automated — see [Commit Style & Releases](CLAUDE.md#commit-style--releases).
+Release notes since v0.2.0 are published on [GitHub Releases](https://github.com/0x666c6f/berth/releases), generated automatically from conventional commits — see [Commit Style & Releases](CLAUDE.md#commit-style--releases).
+
+The entries below predate the rename from safe-agentic to berth (v1.0.0) and are kept as historical record; the old repo URLs redirect.
 
 ## [v0.1.1](https://github.com/0x666c6f/safe-agentic/releases/tag/v0.1.1) — 2026-04-10
 

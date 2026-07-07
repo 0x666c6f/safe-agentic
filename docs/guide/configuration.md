@@ -1,69 +1,43 @@
 # Configuration
 
-Configuration falls into four buckets:
-- persistent defaults
-- templates
-- policy rules
-- actions
-- pipelines
-- auth helpers
-- VM/image maintenance
+Everything berth reads from disk: persistent defaults, hard policy rules, prompt templates, agent profiles, actions, and where all of it lives.
 
 ## Config home
 
-Path:
-
-```bash
+```text
 ~/.berth/
+├── config.toml      # persistent defaults (berth config)
+├── rules.toml       # hard policy limits
+├── templates/       # custom prompt templates
+├── agents/          # agent profiles (*.toml)
+├── actions.toml     # named workspace commands
+├── pipelines/       # saved pipelines
+├── cron.json        # scheduled jobs (berth cron)
+└── state/           # audit log, events, judge verdicts, browser captures
 ```
 
-Layout:
+Projects can carry their own `.berth/` directory (`rules.toml`, `actions.toml`, `agents/`) plus a `berth.json` with optional setup scripts and a `.berthinclude` list for [worktrees](worktrees.md).
+
+Relocate the tree without changing `HOME`:
 
 ```bash
-~/.berth/config.toml
-~/.berth/rules.toml
-~/.berth/templates/
-~/.berth/actions.toml
-~/.berth/pipelines/
-~/.berth/cron.json
-~/.berth/state/
+BERTH_CONFIG_HOME=/tmp/berth-home berth list   # config + state
+BERTH_STATE_HOME=/tmp/berth-state              # state separately (defaults to config home)
 ```
 
-For isolated harnesses, set `BERTH_CONFIG_HOME` to relocate this tree
-without changing `HOME` for host tools:
+Migrating from safe-agentic? See [Installation](../install.md#migrating-from-safe-agentic).
+
+## Persistent defaults — `berth config`
 
 ```bash
-BERTH_CONFIG_HOME=/tmp/berth-home berth list
+berth config keys                     # every key with current + default value
+berth config show
+berth config get defaults.memory
+berth config set defaults.memory 16g
+berth config reset defaults.memory
 ```
 
-State files can be relocated separately with `BERTH_STATE_HOME`.
-When unset, state stays under the config home.
-
-### Migrating from safe-agentic
-
-berth is the renamed safe-agentic. The config home moved from `~/.safe-ag` to
-`~/.berth` (same layout, so a plain move migrates everything), env vars from
-`SAFE_AGENTIC_*` to `BERTH_*`, and the VM name from `safe-agentic` to `berth`:
-
-```bash
-brew uninstall safe-agentic && brew install 0x666c6f/tap/berth
-mv ~/.safe-ag ~/.berth        # merge instead if ~/.berth already exists
-berth setup                   # creates the new VM and image
-container machine stop safe-agentic && container machine rm safe-agentic
-```
-
-If `defaults.worktrees_dir` in `config.toml` points at a path under
-`~/.safe-ag`, update it after the move.
-
-## Preferences file
-
-Path:
-
-```bash
-~/.berth/config.toml
-```
-
-Format:
+`~/.berth/config.toml`:
 
 ```toml
 version = 1
@@ -71,54 +45,28 @@ version = 1
 [defaults]
 memory = "16g"
 cpus = "8"
+ssh = false
 reuse_auth = false
 reuse_gh_auth = false
 seed_auth = false
-ssh = false
 docker = false
 docker_socket = false
 network = "my-net"
 identity = "Your Name <you@example.com>"
 ```
 
-These defaults apply to `berth spawn` and `berth run`.
-
-Risk-widening defaults still have per-command opt-outs:
+These apply to `berth spawn` and `berth run`. Risk-widening defaults keep per-session opt-outs:
 
 ```bash
 berth spawn claude --no-ssh --no-reuse-auth --repo https://github.com/org/repo.git
-berth spawn claude --no-docker --no-reuse-gh-auth --no-seed-auth --repo https://github.com/org/repo.git
 berth spawn claude --ephemeral-auth --repo https://github.com/org/repo.git
 ```
 
-Use `--ephemeral-auth` or `--no-reuse-auth` to override `reuse_auth = true` for one session. Use `--no-seed-auth` to override `seed_auth = true`.
-
-## `berth config`
-
-```bash
-berth config show
-berth config get defaults.memory
-berth config set defaults.memory 16g
-berth config set defaults.identity "Your Name <you@example.com>"
-berth config reset defaults.memory
-```
-
-Legacy env-style keys still work as aliases for `get`, `set`, and `reset`.
-
 ## Policy rules
 
-Policy rules are hard spawn-time guards. They are checked after defaults are applied and before berth creates networks, worktrees, or containers.
+Hard spawn-time guards, checked after defaults are applied and **before** berth creates networks, worktrees, or containers. Unlike config defaults, no flag can override them.
 
-Locations:
-
-```bash
-~/.berth/rules.toml
-.berth/rules.toml
-```
-
-User rules and the nearest project rules both apply. Project rules cannot weaken user rules.
-
-Example:
+Locations: `~/.berth/rules.toml` (user) and `.berth/rules.toml` (project). Both apply; project rules cannot weaken user rules.
 
 ```toml
 [allow]
@@ -134,48 +82,28 @@ setup_scripts = false
 
 Absent keys mean no extra restriction. Boolean `false` denies that capability when a spawn would enable it.
 
-Common use:
-
-```toml
-[allow]
-docker_modes = ["off"]
-networks = ["managed"]
-ssh = false
-reuse_auth = false
-seed_auth = false
-```
-
 ## Templates
 
+Reusable prompts with `${var}` placeholders:
+
 ```bash
-berth template list
+berth template list                   # built-in + user templates
 berth template show security-audit
-berth template create backend-audit
+berth template create backend-audit  # starter .md, opens $EDITOR
+berth template render security-audit --var area=payments
 ```
 
-Use templates at spawn time:
+Use at spawn time:
 
 ```bash
-berth spawn claude --repo ... --template security-audit
 berth spawn claude --repo ... --template security-audit --var area=payments
 ```
 
-If `--repo` is omitted, `berth` tries to infer `${repo}` from the current checkout's `origin` remote.
+`${repo}` is inferred from the current checkout's `origin` when `--repo` is omitted.
 
 ## Agent profiles
 
-Profiles are reusable spawn presets for roles you run often.
-
-Locations:
-
-```bash
-~/.berth/agents/*.toml
-.berth/agents/*.toml
-```
-
-Project profiles override user profiles with the same filename or `name`.
-
-Example:
+Reusable spawn presets for roles you run often. Locations: `~/.berth/agents/*.toml` and `.berth/agents/*.toml` (project wins on name collision).
 
 ```toml
 agent_type = "codex"
@@ -188,8 +116,6 @@ reuse_gh_auth = true
 background = true
 ```
 
-Run:
-
 ```bash
 berth profile list
 berth profile show reviewer
@@ -197,20 +123,11 @@ berth profile run reviewer "focus auth code"
 berth profile run reviewer --dry-run
 ```
 
+Profiles also plug into fleet/pipeline manifests via `profile:` — see [Manifests](../reference/manifests.md).
+
 ## Actions
 
-Actions are named commands you can run inside an agent workspace. They mirror Codex app local actions while keeping execution inside the berth container.
-
-Locations:
-
-```bash
-~/.berth/actions.toml
-.berth/actions.toml
-```
-
-Project actions override user actions with the same name.
-
-Example:
+Named commands you can run inside an agent workspace (Codex-app-style local actions, executed in the container). Locations: `~/.berth/actions.toml` and `.berth/actions.toml`.
 
 ```toml
 [actions.test]
@@ -222,73 +139,43 @@ command = "npm run lint"
 cwd = "frontend"
 ```
 
-Run:
-
 ```bash
 berth action list
 berth action run test --latest
 berth action run frontend-lint my-agent
 ```
 
-## Pipelines
+## Scheduled jobs
 
-```bash
-berth pipeline list
-berth pipeline show review
-berth pipeline create review
-berth pipeline review --repo git@github.com:org/repo.git
-berth pipeline review --repo git@github.com:org/repo.git --var topic=security
-```
+`~/.berth/cron.json` is managed by `berth cron add/list/remove/...` — see [Automation](automation.md#scheduled-runs-berth-cron).
 
 ## Auth helpers
 
-MCP auth:
-
 ```bash
-berth mcp-login linear
-berth mcp-login notion
-berth mcp-login linear <container>
-```
-
-AWS refresh:
-
-```bash
-berth aws-refresh --latest
+berth mcp-login linear                # MCP OAuth inside the newest agent
+berth mcp-login notion <container>
+berth aws-refresh --latest            # re-inject fresh AWS credentials
 berth aws-refresh api-refactor my-profile
 ```
 
 ## VM and image maintenance
 
 ```bash
-berth setup
-berth update
-berth update --quick
-berth update --full
-berth vm start
+berth setup             # first run; safe to re-run
+berth update            # rebuild image (cached) / --quick / --full
+berth vm start          # start VM + re-apply hardening and NAT
 berth vm stop
-berth vm ssh
-berth diagnose
+berth vm ssh            # debug shell in the VM
+berth diagnose          # health-check VM, egress, image, worktree posture
 ```
 
-Use:
-- `setup` for first run
-- `update` after Dockerfile/image changes
-- `vm start` if the VM was stopped and you want hardening re-applied
-- `diagnose` to check VM/image readiness and spot risky spawn defaults before you launch agents
+## Environment variables
 
-## Advanced environment variables
+| Variable | Effect |
+|---|---|
+| `BERTH_VM_NAME` | point the CLI at a different Apple container machine |
+| `BERTH_CONFIG_HOME` | relocate `~/.berth` |
+| `BERTH_STATE_HOME` | relocate state files separately |
+| `BERTH_SERVER_TOKEN` | bearer token for [`berth server --listen`](automation.md#machine-readable-state-berth-server) |
 
-```bash
-BERTH_VM_NAME=berth-alt
-BERTH_CONFIG_HOME=/tmp/berth-home
-BERTH_STATE_HOME=/tmp/berth-state
-```
-
-`BERTH_VM_NAME` points the CLI at a different Apple container machine.
-`BERTH_CONFIG_HOME` and `BERTH_STATE_HOME` relocate berth
-files while keeping the process `HOME` intact for host tools.
-
-Useful for:
-- isolated testing
-- dedicated work VMs
-- integration harnesses
+Useful for isolated testing, dedicated work VMs, and integration harnesses.

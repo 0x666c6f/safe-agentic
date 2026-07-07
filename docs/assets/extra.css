@@ -1,3 +1,7 @@
+/* berth docs theme — navy / amber / cream brand system.
+   Dark scheme: cream ink on navy. Light scheme: navy ink on cream.
+   The landing hero stays navy in both schemes (self-contained brand tile). */
+
 @font-face {
   font-family: "FKGrotesk";
   src: url("./fonts/FKGrotesk.ttf") format("truetype");
@@ -17,8 +21,9 @@
   font-display: swap;
 }
 
-:root,
-[data-md-color-scheme="slate"] {
+/* ---------- Brand tokens (scheme-independent) ---------- */
+
+:root {
   --berth-navy-900: #0C1424;
   --berth-navy-700: #14213C;
   --berth-navy-500: #1B2A4A;
@@ -28,12 +33,21 @@
   --berth-amber: #F5A623;
   --berth-amber-bright: #FFBE55;
   --berth-amber-soft: #FFD9A0;
+  --berth-amber-deep: #D98E12;
+  --berth-amber-ink: #A96A00;
 
   --md-text-font: "FKGrotesk";
   --md-code-font: "FKGrotesk SemiMono";
+}
+
+/* ---------- Dark scheme (slate): cream ink on navy ---------- */
+
+[data-md-color-scheme="slate"] {
+  color-scheme: dark;
+
   --md-primary-fg-color: var(--berth-amber);
   --md-primary-fg-color--light: var(--berth-amber-bright);
-  --md-primary-fg-color--dark: #D98E12;
+  --md-primary-fg-color--dark: var(--berth-amber-deep);
   --md-accent-fg-color: var(--berth-amber-bright);
   --md-accent-fg-color--transparent: rgba(245, 166, 35, 0.14);
   --md-primary-bg-color: var(--berth-cream);
@@ -62,40 +76,94 @@
   --md-shadow-z2: 0 0.3rem 1rem rgba(0, 0, 0, 0.22), 0 0 0.05rem rgba(0, 0, 0, 0.32);
   --md-shadow-z3: 0 0.8rem 2rem rgba(0, 0, 0, 0.28), 0 0 0.05rem rgba(0, 0, 0, 0.4);
 
+  --bt-heading: var(--berth-cream);
   --bt-border: rgba(255, 255, 255, 0.09);
   --bt-border-strong: rgba(245, 166, 35, 0.34);
   --bt-panel-bg: rgba(20, 33, 60, 0.78);
   --bt-panel-bg-strong: rgba(27, 42, 74, 0.94);
-  --bt-hero-bg:
-    radial-gradient(circle at 18% 24%, rgba(245, 166, 35, 0.14), transparent 24%),
-    radial-gradient(circle at 82% 22%, rgba(94, 129, 192, 0.2), transparent 18%),
-    linear-gradient(180deg, rgba(20, 33, 60, 0.98), rgba(10, 17, 31, 0.98));
+  --bt-header-bg: rgba(10, 17, 31, 0.94);
+  --bt-search-bg: rgba(20, 33, 60, 0.92);
+  --bt-kicker: var(--berth-amber-bright);
+  --bt-body-glow: radial-gradient(circle at top right, rgba(245, 166, 35, 0.08), transparent 28%);
   --bt-shadow: 0 30px 90px rgba(0, 0, 0, 0.34);
 }
 
-[data-md-color-scheme="slate"] {
-  color-scheme: dark;
+/* ---------- Light scheme (default): navy ink on cream ---------- */
+
+[data-md-color-scheme="default"] {
+  color-scheme: light;
+
+  --md-primary-fg-color: var(--berth-amber);
+  --md-primary-fg-color--light: var(--berth-amber-bright);
+  --md-primary-fg-color--dark: var(--berth-amber-deep);
+  --md-accent-fg-color: var(--berth-amber-deep);
+  --md-accent-fg-color--transparent: rgba(217, 142, 18, 0.14);
+  --md-primary-bg-color: var(--berth-navy-500);
+  --md-default-bg-color: var(--berth-cream);
+  --md-default-bg-color--light: rgba(247, 245, 240, 0.88);
+  --md-default-bg-color--lighter: rgba(247, 245, 240, 0.56);
+  --md-default-bg-color--lightest: rgba(27, 42, 74, 0.03);
+  --md-default-fg-color: rgba(20, 33, 60, 0.92);
+  --md-default-fg-color--light: rgba(20, 33, 60, 0.66);
+  --md-default-fg-color--lighter: rgba(20, 33, 60, 0.32);
+  --md-default-fg-color--lightest: rgba(20, 33, 60, 0.1);
+  --md-code-fg-color: var(--berth-navy-500);
+  --md-code-bg-color: #EDE9DF;
+  --md-code-bg-color--light: rgba(237, 233, 223, 0.72);
+  --md-code-bg-color--lighter: rgba(237, 233, 223, 0.44);
+  --md-typeset-a-color: var(--berth-amber-ink);
+  --md-typeset-table-color: rgba(27, 42, 74, 0.12);
+  --md-typeset-table-color--light: rgba(27, 42, 74, 0.04);
+  --md-admonition-bg-color: #FFFDF8;
+  --md-footer-bg-color: var(--berth-navy-500);
+  --md-footer-bg-color--dark: var(--berth-navy-900);
+  --md-footer-fg-color: var(--berth-cream);
+  --md-footer-fg-color--light: rgba(247, 245, 240, 0.72);
+  --md-footer-fg-color--lighter: rgba(247, 245, 240, 0.5);
+
+  --bt-heading: var(--berth-navy-500);
+  --bt-border: rgba(27, 42, 74, 0.14);
+  --bt-border-strong: rgba(217, 142, 18, 0.5);
+  --bt-panel-bg: #FFFDF8;
+  --bt-panel-bg-strong: #FFFFFF;
+  --bt-header-bg: rgba(247, 245, 240, 0.92);
+  --bt-search-bg: rgba(255, 255, 255, 0.9);
+  --bt-kicker: var(--berth-amber-ink);
+  --bt-body-glow: radial-gradient(circle at top right, rgba(245, 166, 35, 0.1), transparent 28%);
+  --bt-shadow: 0 30px 90px rgba(27, 42, 74, 0.18);
 }
 
+/* ---------- Chrome ---------- */
+
 body {
-  background:
-    radial-gradient(circle at top right, rgba(245, 166, 35, 0.08), transparent 28%),
-    var(--berth-navy-900);
+  background: var(--bt-body-glow), var(--md-default-bg-color);
 }
 
 .md-header,
 .md-tabs {
-  background: rgba(10, 17, 31, 0.94);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--bt-header-bg);
+  color: var(--md-default-fg-color);
+  border-bottom: 1px solid var(--bt-border);
   backdrop-filter: blur(18px);
 }
 
+.md-header__title,
+.md-header__topic {
+  color: var(--md-default-fg-color);
+}
+
 .md-search__form {
-  background: rgba(20, 33, 60, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bt-search-bg);
+  border: 1px solid var(--bt-border);
+}
+
+.md-search__input {
+  color: var(--md-default-fg-color);
 }
 
 .md-search__input::placeholder,
+.md-search__icon,
+.md-header__button,
 .md-nav__title,
 .md-nav__item .md-nav__link,
 .md-tabs__link {
@@ -106,19 +174,21 @@ body {
 .md-tabs__link:hover,
 .md-nav__link:is(:focus, :hover),
 .md-nav__link--active {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
 }
+
+/* ---------- Typography ---------- */
 
 .md-typeset h1,
 .md-typeset h2 {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
   font-weight: 300;
   letter-spacing: -0.03em;
 }
 
 .md-typeset h3,
 .md-typeset h4 {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
 }
 
 .md-typeset h5,
@@ -149,36 +219,38 @@ body {
 .md-typeset .md-button--primary:hover {
   background: var(--berth-amber-bright);
   border-color: var(--berth-amber-bright);
+  color: var(--berth-navy-500);
 }
 
 .md-typeset .md-button:not(.md-button--primary) {
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: var(--bt-border);
   color: var(--md-default-fg-color);
 }
 
 .md-typeset .md-button:not(.md-button--primary):hover {
   border-color: var(--bt-border-strong);
-  color: var(--berth-cream);
+  color: var(--bt-heading);
+  background: transparent;
 }
 
 .md-typeset code {
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 .md-typeset pre > code {
-  border-radius: 18px;
+  border-radius: 16px;
 }
 
 .md-typeset .tabbed-set {
   border: 1px solid var(--bt-border);
-  border-radius: 22px;
-  background: rgba(16, 27, 49, 0.72);
+  border-radius: 20px;
+  background: var(--md-code-bg-color--light);
   overflow: hidden;
 }
 
 .md-typeset .tabbed-labels {
   padding: 0.2rem 0.5rem 0;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--md-default-bg-color--lightest);
 }
 
 .md-typeset .tabbed-labels > label {
@@ -186,16 +258,31 @@ body {
 }
 
 .md-typeset .tabbed-set > input:checked + label {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
 }
+
+.md-typeset table:not([class]) th {
+  white-space: nowrap;
+}
+
+.md-typeset table:not([class]) td:first-child {
+  white-space: nowrap;
+  font-family: var(--md-code-font-family);
+  font-size: 0.82rem;
+}
+
+/* ---------- Landing hero (navy in both schemes) ---------- */
 
 .landing-hero {
   position: relative;
   margin: -0.8rem 0 2.5rem;
   padding: 2.7rem 1.4rem 1.35rem;
-  border: 1px solid var(--bt-border);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 28px;
-  background: var(--bt-hero-bg);
+  background:
+    radial-gradient(circle at 18% 24%, rgba(245, 166, 35, 0.14), transparent 24%),
+    radial-gradient(circle at 82% 22%, rgba(94, 129, 192, 0.2), transparent 18%),
+    linear-gradient(180deg, rgba(20, 33, 60, 0.98), rgba(10, 17, 31, 0.98));
   box-shadow: var(--bt-shadow);
   overflow: hidden;
 }
@@ -246,7 +333,7 @@ body {
 .landing-hero p {
   max-width: 46rem;
   margin-bottom: 1rem;
-  color: var(--md-default-fg-color--light);
+  color: rgba(247, 245, 240, 0.72);
   font-size: 1.06rem;
   line-height: 1.7;
 }
@@ -270,7 +357,8 @@ body {
   border-radius: 18px;
 }
 
-.landing-terminal code {
+.landing-terminal pre > code {
+  background: transparent;
   color: var(--berth-amber-soft);
   font-size: 0.85rem;
 }
@@ -278,6 +366,16 @@ body {
 .landing-hero .md-button {
   margin: 0.4rem 0.55rem 0.4rem 0;
   padding: 0.84em 1.16em;
+}
+
+.landing-hero .md-button:not(.md-button--primary) {
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(247, 245, 240, 0.88);
+}
+
+.landing-hero .md-button:not(.md-button--primary):hover {
+  border-color: rgba(245, 166, 35, 0.42);
+  color: var(--berth-cream);
 }
 
 .landing-meta {
@@ -292,17 +390,19 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.02);
-  color: var(--md-default-fg-color--light);
+  color: rgba(247, 245, 240, 0.66);
   font-size: 0.75rem;
 }
+
+/* ---------- Landing sections (scheme-aware) ---------- */
 
 .landing-callout {
   margin: 0 0 2rem;
   padding: 1rem 1.1rem;
-  border: 1px solid rgba(245, 166, 35, 0.12);
+  border: 1px solid var(--bt-border);
   border-left: 3px solid var(--berth-amber);
   border-radius: 18px;
-  background: rgba(20, 33, 60, 0.74);
+  background: var(--bt-panel-bg);
   color: var(--md-default-fg-color--light);
 }
 
@@ -337,7 +437,7 @@ body {
 }
 
 .landing-panel-kicker {
-  color: var(--berth-amber-bright);
+  color: var(--bt-kicker);
   font-size: 0.74rem;
   font-weight: 500;
   letter-spacing: 0.12em;
@@ -345,7 +445,7 @@ body {
 }
 
 .landing-panel strong {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
   font-size: 1.02rem;
   font-weight: 400;
   line-height: 1.5;
@@ -354,9 +454,9 @@ body {
 .landing-panel code {
   width: fit-content;
   padding: 0.3rem 0.55rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--berth-amber-soft);
+  border-radius: 8px;
+  background: var(--md-code-bg-color);
+  color: var(--md-code-fg-color);
   font-size: 0.74rem;
 }
 
@@ -378,7 +478,7 @@ body {
 }
 
 .landing-default strong {
-  color: var(--berth-cream);
+  color: var(--bt-heading);
   font-size: 0.95rem;
   font-weight: 400;
 }
@@ -403,15 +503,7 @@ body {
   margin-top: 0.2rem;
 }
 
-.md-typeset table:not([class]) th {
-  white-space: nowrap;
-}
-
-.md-typeset table:not([class]) td:first-child {
-  white-space: nowrap;
-  font-family: var(--md-code-font-family);
-  font-size: 0.82rem;
-}
+/* ---------- Responsive ---------- */
 
 @media screen and (max-width: 76.1875em) {
   .landing-hero {

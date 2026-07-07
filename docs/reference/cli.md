@@ -127,7 +127,7 @@ Flags:
 | `--identity` | string | git identity in `Name <email>` form |
 | `--instructions` | string | task instructions |
 | `--instructions-file` | string | read instructions from a file |
-| `--max-cost` | string | kill if estimated cost exceeds this budget |
+| `--max-cost` | string | USD budget recorded on the container (advisory; surfaced by `summary`/`cost`, not enforced) |
 | `--memory` | string | memory limit, e.g. `8g` |
 | `--name` | string | explicit container name suffix |
 | `--no-docker` | bool | disable default Docker-in-Docker |
@@ -154,6 +154,7 @@ Flags:
 | `--worktree-branch` | string | branch name for `--worktree` |
 | `--worktree-include` | string | include file for ignored local files; default `.berthinclude` |
 | `--worktree-path` | string | destination path for `--worktree` |
+| `--yes` | bool | skip the host-side risk confirmation prompt |
 
 Worktree mode:
 
@@ -161,19 +162,9 @@ Worktree mode:
 berth spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
 ```
 
-`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `berth/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.berthinclude`.
+`--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `berth/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.berthinclude`. A `--worktree-path` outside the worktrees root is rejected before launch.
 
-**`--worktree` is opt-in and off by default.** Apple's `container` cannot mount an arbitrary host directory into a machine — the only host share is `--home-mount ro|rw|none`, and berth defaults to `none` (nothing shared, strongest isolation). To use `--worktree` you must enable the worktree mount:
-
-```bash
-berth setup --enable-worktrees      # or: berth config set defaults.worktrees_mount true && berth setup
-```
-
-This switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds *only* the worktrees root — `~/.berth/worktrees` by default, or `defaults.worktrees_dir` (must be under your home) — to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`. On spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the Docker bind. A `--worktree-path` outside the worktrees root is rejected before launch.
-
-Disable again with `berth setup --disable-worktrees` (restores `home-mount=none`). `berth setup` and `berth vm start` reconcile the machine to match the config in either direction; `berth diagnose` reports the current posture.
-
-**Security trade-off:** enabling the worktree mount **weakens the VM boundary**. `home-mount=rw` shares your whole home with the machine at the virtiofs level; berth detaches and masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home — the default `home-mount=none` shares nothing and cannot. Keep secrets and unrelated projects out of the worktrees root. See [Threat model](../security/threat-model.md).
+**`--worktree` is opt-in and off by default** — it requires `berth setup --enable-worktrees`, which deliberately weakens the VM boundary. How the mount works: [Worktrees guide](../guide/worktrees.md). Why it's a trade-off: [Security — threat model](../security.md#the-worktree-mount-trade-off).
 
 Spawn policy:
 
@@ -415,6 +406,23 @@ container stops — on a stopped ephemeral container `attach --resume` **refuses
 plain `berth attach <name>` or `berth retry` for a fresh run. Use
 `--reuse-auth` (a persistent named volume) if you want conversations to survive
 stops. `--resume` supports claude and codex agents only.
+
+## `config-sync`
+
+Usage:
+
+```bash
+berth config-sync <name|--latest> [--restart]
+```
+
+Pushes your current host Claude settings into an agent container. With `--restart`, the container restarts so the agent relaunches with the synced settings.
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--latest` | bool | target the latest container |
+| `--restart` | bool | restart the container to apply the synced settings now |
 
 ## `steer`
 
@@ -956,6 +964,14 @@ See `examples/pipeline-judge-fanout.yaml` for a complete runnable manifest.
 ## `config`
 
 Subcommands:
+
+### `config keys`
+
+```bash
+berth config keys
+```
+
+Lists every config key with its current and default value. Legacy env-style keys (`BERTH_*`) work as aliases for the canonical dotted form in `get`, `set`, and `reset`.
 
 ### `config show`
 

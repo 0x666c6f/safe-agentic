@@ -1,37 +1,110 @@
 # Architecture
 
-berth is a host-side sandbox runner.
-
-At a high level:
+berth is a host-side sandbox runner. Nothing agent-controlled runs on macOS itself:
 
 ```text
-macOS host
-  -> Apple container machine
-    -> Docker daemon
+macOS host (berth CLI / TUI / app)
+  -> Apple container machine "berth" (Alpine, hardened)
+    -> Docker daemon (userns-remap)
       -> one container per agent
 ```
+
+Design goals:
+
+- keep agent autonomy **inside** the sandbox — the boundary is the product
+- make dangerous capabilities explicit flags, never ambient defaults
+- keep the operational model simple enough for daily use
 
 ## Component map
 
 | Component | Role |
 |---|---|
 | `berth` | CLI entrypoint |
-| `berth-tui` | TUI entrypoint |
+| `berth-tui` | terminal dashboard |
+| `berth-app` | macOS desktop app (shells out to `berth`) |
 | `vm/setup.sh` | VM bootstrap and hardening |
 | `entrypoint.sh` | container boot and repo clone flow |
 | `cmd/berth` | command implementations |
+| `pkg/vmexec` | Apple container machine execution wrapper — all VM/Docker commands go through it |
 | `pkg/docker` | Docker runtime, network, volume, SSH helpers |
 | `pkg/fleet` | fleet and pipeline manifest parsing |
-| `pkg/vmexec` | Apple container machine execution wrapper |
+| `pkg/agentstate` | live agent-state classification (blocked/working/done/…) |
 
-## Design goals
+## The three isolation boundaries
 
-- keep agent autonomy inside the sandbox
-- make dangerous capabilities explicit flags, not ambient defaults
-- keep the operational model simple enough for daily use
+No single layer is perfect; the design assumes defense in depth.
 
-## Read next
+### 1. macOS host → Apple container machine
 
-- [Isolation Boundaries](architecture/isolation.md)
-- [Networking](architecture/networking.md)
-- [Container Internals](architecture/container.md)
+Keeps agent containers away from the host filesystem and process space.
+
+- dedicated Apple container machine, created with `--home-mount none` by default — **no host directory is shared with the VM at any level**
+- VM hardening from `vm/setup.sh`
+- blocked or overlaid macOS mount paths
+
+The only exception is the opt-in [worktree mount](guide/worktrees.md), which trades part of this boundary for local-checkout workflows.
+
+### 2. Apple container machine → container
+
+Limits what an agent can do even when it runs arbitrary commands.
+
+- read-only rootfs
+- `cap-drop ALL` + `no-new-privileges`
+- non-root runtime user, no sudo
+- resource limits (memory / CPU / PIDs)
+- Docker `userns-remap` in the VM
+
+### 3. Container → container
+
+Stops agents from becoming one shared trust domain.
+
+- managed per-agent bridge networks by default
+- per-agent workspaces and transient runtime state
+- no implicit shared auth unless you ask for it
+
+## Networking
+
+Each agent gets a dedicated managed Docker bridge. VM setup pins each managed bridge interface to a `bt*` name so the `BERTH_EGRESS` iptables chain can apply default guardrails: private/link-local/reserved ranges are blocked, normal TCP egress (22/80/443) is allowed.
+
+```bash
+berth spawn claude --network my-net --repo ...   # custom topology — you own the consequences
+```
+
+For especially untrusted work, use an internal (no-internet) network:
+
+```bash
+berth vm ssh
+docker network create --internal agent-isolated
+exit
+berth spawn claude --network agent-isolated --repo https://github.com/org/repo.git
+```
+
+`--ssh` changes **auth exposure, not topology**: it forwards an SSH agent socket into the container through a socat relay in the VM. The container gains signing/auth ability; the private key material stays in your host agent (or 1Password).
+
+!!! note "Host NAT"
+    VM egress relies on host PF NAT plus `net.inet.ip.forwarding=1`, applied during `berth setup`. A macOS reboot resets both — `berth vm start` re-applies them and `berth diagnose` flags missing egress.
+
+## Inside an agent container
+
+Three storage classes:
+
+| Area | Purpose |
+|---|---|
+| read-only rootfs | installed tools and baked config |
+| tmpfs mounts | transient writable runtime state |
+| Docker volumes | workspace, caches, optional shared auth |
+
+Startup flow:
+
+1. container starts; entrypoint prepares runtime config (SSH, git identity, injected host config)
+2. repos clone into `/workspace`
+3. repo setup hooks run only when `--allow-setup-scripts` was given
+4. a security preamble is injected into the agent's CLAUDE.md / AGENTS.md
+5. the agent launches inside tmux
+
+tmux is what makes the workflows practical: attach later, detach without killing the session, `peek` via pane capture, resume stopped containers.
+
+## Related
+
+- [Security](security.md) — the threat model behind these boundaries
+- [Worktrees](guide/worktrees.md) — the one deliberate boundary trade-off
