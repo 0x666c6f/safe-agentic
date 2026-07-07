@@ -135,7 +135,7 @@ func init() {
 	f.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Force Docker-in-Docker off even when your config defaults it on")
 	f.BoolVar(&spawnOpts.DockerSocket, "docker-socket", false, "Mount the host Docker socket into the container (broad access); off by default")
 	f.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Force host Docker socket off even when your config defaults it on")
-	f.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	f.StringVar(&spawnOpts.Network, "network", "", "Network mode: 'api-only' (allowlisted proxy egress, safe for untrusted files), a named Docker network like agent-isolated for no internet, or default dedicated bridge")
 	f.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
 	f.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
 	f.IntVar(&spawnOpts.PIDsLimit, "pids-limit", 0, "Max processes in the container; must be >= 64 (default 512)")
@@ -159,7 +159,7 @@ func init() {
 
 	rf := runCmd.Flags()
 	rf.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
-	rf.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	rf.StringVar(&spawnOpts.Network, "network", "", "Network mode: 'api-only' (allowlisted proxy egress, safe for untrusted files), a named Docker network like agent-isolated for no internet, or default dedicated bridge")
 	rf.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
 	rf.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
 	rf.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget in USD, recorded on the container (advisory — not yet enforced)")
@@ -612,6 +612,15 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 		PIDsLimit:       resolved.PIDsLimit,
 		WorkspaceSource: resolved.WorktreeVMPath,
 	})
+	if resolved.NetworkMode == policy.NetworkAPIOnly {
+		cmd.AddFlag("--add-host", "berth-proxy:host-gateway")
+		const proxyURL = "http://berth-proxy:8119"
+		cmd.AddEnv("HTTPS_PROXY", proxyURL)
+		cmd.AddEnv("HTTP_PROXY", proxyURL)
+		cmd.AddEnv("NO_PROXY", "localhost,127.0.0.1,::1")
+		cmd.AddEnv("NODE_USE_ENV_PROXY", "1")
+	}
+	cmd.AddEnv("BERTH_NETWORK_MODE", resolved.NetworkMode)
 	docker.AppendCacheMounts(cmd)
 	if opts.AutoTrust {
 		cmd.AddEnv("BERTH_AUTO_TRUST", "1")

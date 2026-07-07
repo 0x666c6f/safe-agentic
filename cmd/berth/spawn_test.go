@@ -567,3 +567,50 @@ func TestExecuteSpawnWorktreeRejectsStaleRoot(t *testing.T) {
 		t.Fatalf("worktree must not be created on a stale root, stat err=%v", err)
 	}
 }
+
+// buildSpawnRunCmdForTest renders the docker run command buildSpawnRunCmd would
+// produce, joined into a single string for substring assertions.
+func buildSpawnRunCmdForTest(t *testing.T, opts SpawnOpts, resolved spawnResolved) *docker.DockerRunCmd {
+	t.Helper()
+	return buildSpawnRunCmd(opts, resolved)
+}
+
+func TestSpawnAPIOnlyInjectsProxy(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{
+		AgentType: "claude",
+		Network:   "api-only",
+	}, spawnResolved{
+		ContainerName: "forensic1",
+		NetworkName:   "forensic1-net",
+		NetworkMode:   "api-only",
+		Memory:        "8g",
+		CPUs:          "4",
+		PIDsLimit:     512,
+	})
+	s := strings.Join(cmd.Build(), " ")
+	for _, want := range []string{
+		"--add-host berth-proxy:host-gateway",
+		"HTTPS_PROXY=http://berth-proxy:8119",
+		"HTTP_PROXY=http://berth-proxy:8119",
+		"NODE_USE_ENV_PROXY=1",
+		"BERTH_NETWORK_MODE=api-only",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("api-only run cmd missing %q\ngot: %s", want, s)
+		}
+	}
+}
+
+func TestSpawnManagedDoesNotInjectProxy(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{
+		AgentType: "claude",
+	}, spawnResolved{
+		ContainerName: "agent1",
+		NetworkName:   "agent1-net",
+		NetworkMode:   "managed",
+		Memory:        "8g", CPUs: "4", PIDsLimit: 512,
+	})
+	if strings.Contains(strings.Join(cmd.Build(), " "), "HTTPS_PROXY") {
+		t.Error("managed mode must not inject a proxy")
+	}
+}
