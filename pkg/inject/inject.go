@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -105,17 +106,35 @@ func ReadClaudeOAuthToken() (map[string]string, error) {
 }
 
 func extractClaudeAccessToken(secret string) string {
+	// The keychain item holds more than the account login these days: Claude
+	// Code stores MCP server OAuth grants under "mcpOAuth" in the same JSON,
+	// serialized before "claudeAiOauth". A first-match substring scan picks an
+	// MCP token (often empty) instead of the account token, so parse properly.
+	var payload struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal([]byte(secret), &payload); err == nil && payload.ClaudeAiOauth.AccessToken != "" {
+		return payload.ClaudeAiOauth.AccessToken
+	}
+	// Fallback for unparseable payloads: first NON-EMPTY accessToken.
+	rest := secret
 	const marker = `"accessToken":"`
-	start := strings.Index(secret, marker)
-	if start == -1 {
-		return ""
+	for {
+		start := strings.Index(rest, marker)
+		if start == -1 {
+			return ""
+		}
+		rest = rest[start+len(marker):]
+		end := strings.Index(rest, `"`)
+		if end == -1 {
+			return ""
+		}
+		if end > 0 {
+			return rest[:end]
+		}
 	}
-	start += len(marker)
-	end := strings.Index(secret[start:], `"`)
-	if end == -1 {
-		return ""
-	}
-	return secret[start : start+end]
 }
 
 // ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh

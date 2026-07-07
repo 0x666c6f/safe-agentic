@@ -127,6 +127,17 @@ func TestExtractClaudeAccessToken(t *testing.T) {
 	if got := extractClaudeAccessToken(`not-json`); got != "" {
 		t.Fatalf("extractClaudeAccessToken() = %q, want empty", got)
 	}
+	// Regression: Claude Code stores MCP OAuth grants in the same keychain
+	// item, serialized BEFORE claudeAiOauth and possibly with an empty
+	// accessToken — the account token must still win.
+	mcpFirst := `{"mcpOAuth":{"linear":{"accessToken":"","refreshToken":"r"}},"claudeAiOauth":{"accessToken":"account-tok","refreshToken":"refresh"}}`
+	if got := extractClaudeAccessToken(mcpFirst); got != "account-tok" {
+		t.Fatalf("extractClaudeAccessToken(mcpOAuth-first) = %q, want %q", got, "account-tok")
+	}
+	mcpNonEmpty := `{"mcpOAuth":{"linear":{"accessToken":"mcp-tok"}},"claudeAiOauth":{"accessToken":"account-tok"}}`
+	if got := extractClaudeAccessToken(mcpNonEmpty); got != "account-tok" {
+		t.Fatalf("extractClaudeAccessToken(mcp non-empty first) = %q, want %q", got, "account-tok")
+	}
 }
 
 func TestEncodeFileB64Roundtrip(t *testing.T) {
