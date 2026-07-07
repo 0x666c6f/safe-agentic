@@ -67,6 +67,11 @@ func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
 	mustSafeMountValue("mount destination", dst)
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
+func (d *DockerRunCmd) AddNamedVolumeRO(src, dst string) {
+	mustSafeMountValue("volume source", src)
+	mustSafeMountValue("mount destination", dst)
+	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s,readonly", src, dst))
+}
 func (d *DockerRunCmd) AddBindMount(src, dst string, readonly bool) {
 	mustSafeMountValue("bind source", src)
 	mustSafeMountValue("mount destination", dst)
