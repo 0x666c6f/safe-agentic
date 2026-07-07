@@ -591,6 +591,7 @@ func TestSpawnAPIOnlyInjectsProxy(t *testing.T) {
 	s := strings.Join(cmd.Build(), " ")
 	for _, want := range []string{
 		"--add-host berth-proxy:host-gateway",
+		"--dns 127.0.0.1",
 		"HTTPS_PROXY=http://berth-proxy:8119",
 		"HTTP_PROXY=http://berth-proxy:8119",
 		"https_proxy=http://berth-proxy:8119",

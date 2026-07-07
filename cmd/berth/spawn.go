@@ -648,6 +648,14 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	})
 	if resolved.NetworkMode == policy.NetworkAPIOnly {
 		cmd.AddFlag("--add-host", "berth-proxy:host-gateway")
+		// Blackhole external DNS: the container needs no resolver of its own
+		// (it reaches the proxy by /etc/hosts name, and the proxy resolves
+		// allowlisted targets VM-side). Docker's embedded resolver forwards
+		// upstream from the VM netns, bypassing the bti+ egress drop, so without
+		// this a malicious file could still tunnel/exfil over DNS. Pointing the
+		// upstream at container loopback (nothing listening) fails external
+		// lookups fast while /etc/hosts entries (berth-proxy) still resolve.
+		cmd.AddFlag("--dns", "127.0.0.1")
 		const proxyURL = "http://berth-proxy:8119"
 		const noProxy = "localhost,127.0.0.1,::1"
 		cmd.AddEnv("HTTPS_PROXY", proxyURL)
