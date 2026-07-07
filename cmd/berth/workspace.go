@@ -24,55 +24,100 @@ var workspaceCmd = &cobra.Command{
 var workspaceStageCmd = &cobra.Command{
 	Use:   "stage <agent|--latest> <path...>",
 	Short: "git add files inside an agent workspace",
-	Args:  cobra.MinimumNArgs(2),
+	Args:  workspaceMinArgs(1),
 	RunE:  runWorkspaceStage,
 }
 
 var workspaceUnstageCmd = &cobra.Command{
 	Use:   "unstage <agent|--latest> <path...>",
 	Short: "unstage files inside an agent workspace",
-	Args:  cobra.MinimumNArgs(2),
+	Args:  workspaceMinArgs(1),
 	RunE:  runWorkspaceUnstage,
 }
 
 var workspaceRevertCmd = &cobra.Command{
 	Use:   "revert <agent|--latest> <path...>",
 	Short: "discard file changes inside an agent workspace",
-	Args:  cobra.MinimumNArgs(2),
+	Args:  workspaceMinArgs(1),
 	RunE:  runWorkspaceRevert,
 }
 
 var workspaceStagePatchCmd = &cobra.Command{
 	Use:   "stage-patch <agent|--latest> <patch-file>",
 	Short: "stage selected hunks from a patch file",
-	Args:  cobra.ExactArgs(2),
+	Args:  workspaceExactArgs(1),
 	RunE:  runWorkspaceStagePatch,
 }
 
 var workspaceRevertPatchCmd = &cobra.Command{
 	Use:   "revert-patch <agent|--latest> <patch-file>",
 	Short: "revert selected hunks from a patch file",
-	Args:  cobra.ExactArgs(2),
+	Args:  workspaceExactArgs(1),
 	RunE:  runWorkspaceRevertPatch,
 }
 
 func init() {
 	workspaceRevertCmd.Flags().BoolVar(&workspaceYes, "yes", false, "Confirm destructive file revert")
 	workspaceRevertPatchCmd.Flags().BoolVar(&workspaceYes, "yes", false, "Confirm destructive patch revert")
+	for _, c := range []*cobra.Command{workspaceStageCmd, workspaceUnstageCmd, workspaceRevertCmd, workspaceStagePatchCmd, workspaceRevertPatchCmd} {
+		addLatestFlag(c)
+	}
 	workspaceCmd.AddCommand(workspaceStageCmd, workspaceUnstageCmd, workspaceRevertCmd, workspaceStagePatchCmd, workspaceRevertPatchCmd)
 	rootCmd.AddCommand(workspaceCmd)
 }
 
+// workspaceMinArgs requires n non-target args (paths), plus the agent name
+// unless --latest is set.
+func workspaceMinArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		need := n + 1
+		if latest, _ := cmd.Flags().GetBool("latest"); latest {
+			need = n
+		}
+		if len(args) < need {
+			return fmt.Errorf("requires an agent name (or --latest) and at least %d path(s)", n)
+		}
+		return nil
+	}
+}
+
+// workspaceExactArgs requires exactly n non-target args, plus the agent name
+// unless --latest is set.
+func workspaceExactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		need := n + 1
+		if latest, _ := cmd.Flags().GetBool("latest"); latest {
+			need = n
+		}
+		if len(args) != need {
+			return fmt.Errorf("requires an agent name (or --latest) and exactly %d argument(s)", n)
+		}
+		return nil
+	}
+}
+
 func runWorkspaceStage(cmd *cobra.Command, args []string) error {
-	return runWorkspaceGit(args[0], args[1:], []string{"git", "add", "--"})
+	target, paths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	return runWorkspaceGit(target, paths, []string{"git", "add", "--"})
 }
 
 func runWorkspaceUnstage(cmd *cobra.Command, args []string) error {
-	return runWorkspaceGit(args[0], args[1:], []string{"git", "restore", "--staged", "--"})
+	target, paths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	return runWorkspaceGit(target, paths, []string{"git", "restore", "--staged", "--"})
 }
 
 func runWorkspaceRevert(cmd *cobra.Command, args []string) error {
-	paths, err := cleanWorkspacePaths(args[1:])
+	target, rawPaths, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	paths, err := cleanWorkspacePaths(rawPaths)
 	if err != nil {
 		return err
 	}
@@ -83,22 +128,30 @@ func runWorkspaceRevert(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("revert cancelled")
 		}
 	}
-	return runWorkspaceGit(args[0], paths, []string{"git", "checkout", "--"})
+	return runWorkspaceGit(target, paths, []string{"git", "checkout", "--"})
 }
 
 func runWorkspaceStagePatch(cmd *cobra.Command, args []string) error {
-	return runWorkspacePatch(args[0], args[1], false, []string{"git", "apply", "--cached", "--whitespace=nowarn"})
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
+	return runWorkspacePatch(target, rest[0], false, []string{"git", "apply", "--cached", "--whitespace=nowarn"})
 }
 
 func runWorkspaceRevertPatch(cmd *cobra.Command, args []string) error {
+	target, rest, err := splitLatestTarget(cmd, args)
+	if err != nil {
+		return err
+	}
 	if !workspaceYes {
-		if ok, err := confirmWorkspaceRevert([]string{args[1]}); err != nil {
+		if ok, err := confirmWorkspaceRevert([]string{rest[0]}); err != nil {
 			return err
 		} else if !ok {
 			return fmt.Errorf("revert cancelled")
 		}
 	}
-	return runWorkspacePatch(args[0], args[1], true, []string{"git", "apply", "--reverse", "--whitespace=nowarn"})
+	return runWorkspacePatch(target, rest[0], true, []string{"git", "apply", "--reverse", "--whitespace=nowarn"})
 }
 
 func runWorkspaceGit(target string, rawPaths []string, gitArgs []string) error {

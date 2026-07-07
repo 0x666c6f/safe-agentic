@@ -1,6 +1,8 @@
 # berth container shell configuration
 
-# Zoxide
+# Zoxide (data dir on tmpfs — the rootfs and home are read-only)
+export _ZO_DATA_DIR=/tmp/zoxide
+mkdir -p "$_ZO_DATA_DIR" 2>/dev/null || true
 eval "$(zoxide init bash)"
 
 # Modern tool aliases
