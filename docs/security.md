@@ -101,6 +101,8 @@ The image pre-bakes a static-analysis tool set, since `api-only` blocks `apt`/`p
 
 `clamav` is deliberately excluded — its signature database needs network updates that `api-only` blocks, so a stale scanner would be dead weight rather than protection.
 
+`Dockerfile.forensic` layers `FROM berth:latest`, so build the base image first (`berth setup`, or `berth update`) before `berth update --forensic`. Its apt tools come from the same GPG-signed Ubuntu repos as the base image; `oletools` is version-pinned via pip, though its transitive Python dependencies are not hash-locked (on par with the base image's package installs, not stricter).
+
 This is static analysis, not detonation: the tools inspect file structure, strings, metadata, and embedded content without running anything. `api-only`'s network narrowing (above) does not sandbox execution — never execute or open the files under analysis.
 
 ### The worktree mount trade-off

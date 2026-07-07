@@ -1215,7 +1215,7 @@ Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
-| `--forensic` | bool | build the forensic tool image (`berth:forensic`) from `Dockerfile.forensic` |
+| `--forensic` | bool | build the forensic tool image (`berth:forensic`) from `Dockerfile.forensic`; requires the base `berth:latest` to exist first (`berth setup`) |
 | `--full` | bool | full rebuild without cache |
 | `--quick` | bool | bust only the AI CLI layer |
 
