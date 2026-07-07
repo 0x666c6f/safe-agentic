@@ -20,10 +20,12 @@ berth's forensic workflow. Safety model (non-negotiable, enforced in code):
   - Isolated network only. Every run re-validates an isolated, no-uplink
     network attachment immediately before boot. Anything else fails closed
     and Run is never invoked.
-  - No reuse. Each run clones a fresh VM from an immutable golden and is
-    destroyed after collection, or automatically on failure. There is no
-    restore, revert, or reuse verb: a clone that has touched a live sample
-    is never detonated again.
+  - No restore/reuse verb. Each run clones a fresh VM from an immutable
+    golden and is meant to be destroyed after collection, or automatically
+    on failure. There is no restore or revert verb — but nothing currently
+    blocks re-invoking run on an un-destroyed clone, so the operator MUST
+    always destroy a run after collect (or on any failure) rather than
+    relying on the tool to enforce it.
   - Offline inject. Samples are attached to the guest disk offline, before
     boot — never copied in over a live network path.
   - Benign-in-sandbox is not safe. A sample that behaves benignly inside the

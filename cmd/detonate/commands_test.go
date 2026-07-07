@@ -227,6 +227,40 @@ func TestRunRun_AutoDestroysOnRunError(t *testing.T) {
 	}
 }
 
+func TestRunRun_DestroyFailureIsNotReportedAsAutoDestroyed(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+	fake.SetRunErr("run-1", fmt.Errorf("boom"))
+	fake.SetDestroyErr("run-1", fmt.Errorf("tart: vm busy"))
+	t.Setenv("DETONATE_I_UNDERSTAND", "1")
+
+	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("runRun() error = nil, want the Run error surfaced")
+	}
+	if strings.Contains(err.Error(), "auto-destroyed") {
+		t.Errorf("error must not claim auto-destroyed when Destroy itself failed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "may still be running") {
+		t.Errorf("error must warn the VM may still be running: %v", err)
+	}
+
+	if !hasCall(fake.Log, "Run") || !hasCall(fake.Log, "Destroy") {
+		t.Fatalf("expected both Run and Destroy attempted, got: %+v", fake.Log)
+	}
+
+	entries := readAudit(t)
+	if len(entries) != 1 || entries[0].Action != "detonate-run" {
+		t.Fatalf("unexpected audit entries: %+v", entries)
+	}
+	if entries[0].Details["destroy_error"] == "" {
+		t.Error("audit entry missing destroy_error detail")
+	}
+	if entries[0].Details["auto_destroyed"] != "" {
+		t.Error("audit entry must not claim auto_destroyed=true when Destroy failed")
+	}
+}
+
 func TestRunRun_MissingGatewayFailsClosed(t *testing.T) {
 	setTempAuditPath(t)
 	fake := detonate.NewFakeRunner()

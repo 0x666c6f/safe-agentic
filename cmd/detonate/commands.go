@@ -232,11 +232,14 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 	if runErr != nil {
 		details["error"] = runErr.Error()
 		// Auto-destroy on any failure — best-effort, never masks runErr.
+		// Destroy failing here means a live-malware VM may still be up, so
+		// that outcome must never be reported as "(auto-destroyed)".
 		if dErr := r.Destroy(ctx, run); dErr != nil {
 			details["destroy_error"] = dErr.Error()
-		} else {
-			details["auto_destroyed"] = "true"
+			auditLog(run, "detonate-run", details)
+			return fmt.Errorf("detonation failed AND auto-destroy FAILED — VM %q may still be running; destroy it manually with 'detonate destroy %s': runErr=%w destroyErr=%w", run, run, runErr, dErr)
 		}
+		details["auto_destroyed"] = "true"
 		auditLog(run, "detonate-run", details)
 		return fmt.Errorf("detonation failed (auto-destroyed): %w", runErr)
 	}
@@ -306,11 +309,18 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 	if err != nil {
 		return fmt.Errorf("collect: %w", err)
 	}
+	// Hash every artifact even if one fails: Runner.Collect already copied
+	// them all to outDir, so an early return here would leave collected
+	// artifacts on disk with zero audit trail. Record what we could hash
+	// and surface the hash error after the audit entry is written.
 	lines := make([]string, 0, len(files))
+	var hashErr error
 	for _, f := range files {
 		hash, err := sha256File(f)
 		if err != nil {
-			return fmt.Errorf("hashing artifact %s: %w", f, err)
+			hashErr = fmt.Errorf("hashing artifact %s: %w", f, err)
+			lines = append(lines, "<error: "+err.Error()+">  "+f)
+			continue
 		}
 		lines = append(lines, hash+"  "+f)
 		fmt.Printf("%s  %s\n", hash, f)
@@ -319,7 +329,7 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 		"count":     strconv.Itoa(len(files)),
 		"artifacts": strings.Join(lines, "\n"),
 	})
-	return nil
+	return hashErr
 }
 
 // ─── destroy ────────────────────────────────────────────────────────────
