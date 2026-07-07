@@ -26,8 +26,8 @@ theme:
         name: Switch to dark mode
   features:
     - navigation.instant
-    - navigation.tabs
     - navigation.sections
+    - navigation.expand
     - navigation.top
     - navigation.footer
     - navigation.tracking
@@ -40,7 +40,7 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started:
+  - Introduction:
     - Installation: install.md
     - Quickstart: quickstart.md
   - Guides:
@@ -50,9 +50,10 @@ nav:
     - Worktrees: guide/worktrees.md
     - Fleets & Pipelines: guide/fleet.md
     - Automation: guide/automation.md
-    - Terminal UI: guide/tui.md
-    - Desktop App: guide/app.md
     - Configuration: guide/configuration.md
+  - Interfaces:
+    - Desktop App: guide/app.md
+    - Terminal UI: guide/tui.md
   - Reference:
     - CLI: reference/cli.md
     - TUI: reference/tui.md
@@ -79,6 +80,7 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
+  - pymdownx.keys
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:

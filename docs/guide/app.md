@@ -2,6 +2,11 @@
 
 `berth-app` is a native macOS app (Wails v3) for orchestrating berth agents when you want windows, notifications, and embedded terminals instead of a terminal multiplexer.
 
+<div class="bt-shot">
+  <img src="../../assets/screenshots/berth-app.png" alt="Berth desktop app — sidebar with running agents and an embedded terminal attached to a sandboxed container">
+  <div class="bt-shot-caption">Two sandboxed agents; the Terminal tab is attached to the selected container's tmux session</div>
+</div>
+
 ## What it gives you
 
 - **live sidebar** — every agent with its state: working / needs-you / review / failed
@@ -12,6 +17,16 @@
 - **command palette** (++cmd+k++), menubar agent counts, and native notifications carrying the agent's last message
 
 "Needs-you" detection comes from the same tmux pane classification and event classifier the CLI's `berth status` and `berth inbox` use — the app is a window onto the same state.
+
+## A typical session
+
+1. **Spawn** — hit ++cmd+k++ → "New agent" (or the `+ New agent` button), pick the repo, type the prompt, toggle SSH if the repo is private. The form starts from your `config.toml` defaults and asks for confirmation before enabling anything risky.
+2. **Work in parallel** — spawn a second and third agent the same way; the sidebar tracks each one's state live. ++cmd+1++…++cmd+9++ jumps between agents.
+3. **Get pulled in only when needed** — when an agent blocks on a question, its row flips to *needs-you*, the menubar count ticks up, and a native notification carries the agent's last message. Click through, answer in the embedded terminal (++cmd+t++), detach by just switching away — tmux keeps the session alive.
+4. **Review** — the Diff tab (++cmd+d++) shows the workspace diff; Output (++cmd+o++) the last message; Info (++cmd+i++) the config. Right-click the row for quick actions (stop, checkpoint, PR).
+5. **Ship or steer** — open a PR from the row actions, or type follow-up guidance straight into the terminal.
+
+The same agents remain fully drivable from the CLI while the app is open — `berth steer`, `berth diff`, `berth pr` all target the containers you see in the sidebar.
 
 ## Prerequisites
 

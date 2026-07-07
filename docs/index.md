@@ -4,171 +4,136 @@ hide:
   - toc
 ---
 
-<div class="landing-hero" markdown="1">
+<div class="bt-home" markdown="1">
 
-<p class="landing-eyebrow">berth</p>
+<div class="bt-hero" markdown="1">
 
-# Sandbox coding agents without handing them your host
+<div class="bt-hero-left" markdown="1">
 
-Run Claude Code and Codex inside a hardened Apple container machine, one isolated container per agent. Everything risky — SSH, shared auth, AWS, Docker — stays off until you opt in.
+# berth
 
-<div class="landing-terminal" markdown="1">
+<p class="bt-tagline">Run <strong>Claude Code</strong> and <strong>Codex</strong> in <strong>hardened sandboxes</strong> on macOS. One isolated container per agent — SSH, credentials, and Docker stay off until you opt in.</p>
+
+[Get started](install.md){ .md-button .md-button--primary }
+[Quickstart](quickstart.md){ .md-button }
+[GitHub](https://github.com/0x666c6f/berth){ .md-button }
+
+<div class="bt-chips">
+  <span><b>macOS</b> Apple container VM</span>
+  <span><b>isolation</b> container per agent</span>
+  <span><b>license</b> MIT</span>
+</div>
+
+</div>
+
+<div class="bt-install" markdown="1">
+<div class="bt-install-bar">Homebrew</div>
 
 ```bash
 brew tap 0x666c6f/tap
 brew install berth
 berth setup
-berth run https://github.com/org/repo.git "Fix the failing CI tests"
 ```
 
 </div>
 
-[Get Started](install.md){ .md-button .md-button--primary }
-[Quickstart](quickstart.md){ .md-button }
-[GitHub](https://github.com/0x666c6f/berth){ .md-button }
-
-<div class="landing-meta">
-  <span>macOS host</span>
-  <span>hardened Apple container machine</span>
-  <span>one container per agent</span>
 </div>
 
-</div>
-
-<div class="landing-callout" markdown="1">
-
-`berth` is a sandbox runner for autonomous coding agents. The container is the boundary — not an editor permission dialog.
-
-</div>
-
-## Pick your surface
-
-<div class="landing-panel-grid">
-  <a class="landing-panel" href="reference/cli/">
-    <span class="landing-panel-kicker">CLI</span>
-    <strong>Spawn, steer, review, and ship from the terminal. Scriptable end to end.</strong>
-    <code>berth spawn claude --repo ...</code>
+<div class="bt-grid">
+  <a class="bt-card" href="security/">
+    <h3>Isolated by default</h3>
+    <p>Read-only rootfs, <code>cap-drop ALL</code>, per-agent networks, three boundaries deep. Risky capabilities are explicit flags, never ambient.</p>
+    <span class="bt-more">Security model →</span>
   </a>
-  <a class="landing-panel" href="guide/tui/">
-    <span class="landing-panel-kicker">TUI</span>
-    <strong>A k9s-style dashboard: every agent, live state, keyboard-first actions.</strong>
-    <code>berth tui</code>
+  <a class="bt-card" href="guide/workflow/">
+    <h3>Built for the daily loop</h3>
+    <p>Peek, steer, diff, checkpoint, review, and open PRs — without ever attaching a debugger to your own laptop.</p>
+    <span class="bt-more">Review &amp; ship →</span>
   </a>
-  <a class="landing-panel" href="guide/app/">
-    <span class="landing-panel-kicker">Desktop app</span>
-    <strong>Native macOS app with embedded terminals, diff review, and notifications.</strong>
-    <code>make -C app bundle</code>
+  <a class="bt-card" href="guide/app/">
+    <h3>Three interfaces</h3>
+    <p>A scriptable CLI, a k9s-style TUI, and a native macOS app with embedded terminals and notifications.</p>
+    <span class="bt-more">Desktop app →</span>
   </a>
-  <a class="landing-panel" href="guide/fleet/">
-    <span class="landing-panel-kicker">Orchestrate</span>
-    <strong>Fleets for parallel fan-out, pipelines for staged work, judges to pick winners.</strong>
-    <code>berth pipeline review.yaml</code>
+  <a class="bt-card" href="guide/fleet/">
+    <h3>Fleet-scale</h3>
+    <p>Parallel fleets, dependency-ordered pipelines, judge stages that pick the best of N, scheduled runs.</p>
+    <span class="bt-more">Fleets &amp; pipelines →</span>
   </a>
 </div>
 
-## Start with the page that matches the job
+## Overview
 
-<div class="grid cards" markdown>
+<div class="bt-steps" markdown="1">
 
--   :material-download-outline: __Install & set up__
+<div class="bt-step" markdown="1">
 
-    Install the toolchain, create the hardened VM, build the agent image.
+**Spawn an agent.** Public repos need no flags; add `--ssh` for private ones.
 
-    [Installation](install.md)
-
--   :material-rocket-launch-outline: __First agent in five minutes__
-
-    Spawn an agent, watch it work, review the diff, clean up.
-
-    [Quickstart](quickstart.md)
-
--   :material-source-branch: __Daily loop__
-
-    Spawn, monitor, steer, review, and open PRs — the full working cycle.
-
-    [Guides](guide/spawning.md)
-
--   :material-shield-lock-outline: __Trust boundaries__
-
-    What the sandbox protects, what each opt-in flag widens, and why.
-
-    [Security](security.md)
+```bash
+berth spawn claude --ssh \
+  --repo git@github.com:org/api.git \
+  --prompt "Fix the failing CI tests"
+```
 
 </div>
 
-## Defaults that matter
+<div class="bt-step" markdown="1">
 
-<div class="landing-defaults">
-  <div class="landing-default">
-    <strong>SSH agent</strong>
-    <span>off until <code>--ssh</code></span>
-  </div>
-  <div class="landing-default">
-    <strong>Shared auth</strong>
-    <span>off until reuse flags</span>
-  </div>
-  <div class="landing-default">
-    <strong>Container rootfs</strong>
-    <span>read-only</span>
-  </div>
-  <div class="landing-default">
-    <strong>Linux caps</strong>
-    <span><code>cap-drop ALL</code></span>
-  </div>
-  <div class="landing-default">
-    <strong>Network</strong>
-    <span>dedicated managed bridge</span>
-  </div>
-  <div class="landing-default">
-    <strong>Docker access</strong>
-    <span>off until <code>--docker</code></span>
-  </div>
+**Watch it work — steer when needed.** Agents run in tmux inside their container; you never have to babysit a window.
+
+```bash
+berth status --latest     # blocked / working / done / idle
+berth peek --latest       # snapshot the live terminal
+berth steer --latest "Keep the fix narrow, add one regression test"
+```
+
 </div>
 
-Full posture and every widener: [Security](security.md).
+<div class="bt-step" markdown="1">
 
-## Common flows
+**Review and ship.** Inspect the diff, run a review pass, open the PR.
 
-=== "Single agent"
+```bash
+berth diff --latest
+berth review --latest
+berth pr --latest --title "fix: stabilize CI"
+```
 
-    ```bash
-    berth spawn claude \
-      --ssh \
-      --repo git@github.com:org/repo.git \
-      --prompt "Fix the failing CI tests"
+</div>
 
-    berth peek --latest
-    berth diff --latest
-    berth review --latest
-    berth pr --latest
-    ```
+</div>
 
-=== "Parallel fleet"
+## The desktop app
 
-    ```bash
-    berth fleet examples/fleet-review-and-fix.yaml
-    berth tui
-    ```
+Berth ships a native macOS app for orchestrating agents: a live sidebar with agent states (working / needs-you / review / failed), embedded terminals attached to each container's tmux session, diff review, a spawn form, timeline and cost views, a ⌘K command palette, and native notifications.
 
-=== "Staged pipeline"
+<div class="bt-shot">
+  <img src="assets/screenshots/berth-app.png" alt="Berth desktop app — sidebar with running agents and an embedded terminal attached to a sandboxed container">
+  <div class="bt-shot-caption">Berth.app — two sandboxed agents; embedded terminal attached to the container's tmux session</div>
+</div>
 
-    ```bash
-    berth pipeline examples/pipeline-consolidate-and-fix.yaml
-    ```
+Everything the app does shells out to the same `berth` CLI, so the app, the [TUI](guide/tui.md), and your terminal can drive the same agents interchangeably. [Desktop app guide →](guide/app.md)
 
-=== "Scheduled run"
+## Explore
 
-    ```bash
-    berth cron add nightly-review "daily 06:00" \
-      pipeline review --repo git@github.com:org/repo.git
-    berth cron daemon
-    ```
+<div class="bt-grid">
+  <a class="bt-card" href="install/">
+    <h3>Installation</h3>
+    <p>Toolchain, VM setup, migration from safe-agentic.</p>
+  </a>
+  <a class="bt-card" href="guide/spawning/">
+    <h3>Guides</h3>
+    <p>Spawning, managing, worktrees, automation, configuration.</p>
+  </a>
+  <a class="bt-card" href="reference/cli/">
+    <h3>Reference</h3>
+    <p>Every command and flag; TUI keys; manifest schema.</p>
+  </a>
+  <a class="bt-card" href="architecture/">
+    <h3>Concepts</h3>
+    <p>The three isolation boundaries and the threat model.</p>
+  </a>
+</div>
 
-## Read in this order
-
-1. [Installation](install.md) — toolchain, VM, image
-2. [Quickstart](quickstart.md) — first successful run
-3. [Spawning Agents](guide/spawning.md) — repos, auth, prompts, resources
-4. [Review & Ship](guide/workflow.md) — diff, steer, review, PR
-5. [Fleets & Pipelines](guide/fleet.md) — orchestration at scale
-6. [Architecture](architecture.md) & [Security](security.md) — how the boundaries work
+</div>
