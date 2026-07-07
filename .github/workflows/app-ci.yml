@@ -1,0 +1,31 @@
+name: app-ci
+on:
+  pull_request:
+    paths: ["app/**", "pkg/**", "go.mod", "go.sum"]
+  push:
+    branches: [main]
+    paths: ["app/**", "pkg/**", "go.mod", "go.sum"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install wails3
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.112
+      - name: Go tests
+        working-directory: app
+        run: go test ./...
+      - name: Frontend deps + tests
+        working-directory: app/frontend
+        run: npm ci && npx vitest run
+      - name: Build
+        working-directory: app
+        run: wails3 build

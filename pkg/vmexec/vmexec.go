@@ -58,6 +58,22 @@ func (e *MachineExecutor) buildArgsWithBase(base []string, args ...string) []str
 	return append(append(base, "--"), wrapped...)
 }
 
+// BuildInteractiveArgs returns the host argv (for exec.Command("container", args...))
+// that runs cmdArgs inside the VM through the safe-ag-exec relay with an
+// interactive TTY, regardless of whether the caller's stdin is a terminal
+// (GUI callers allocate their own PTY). Mirrors the executor's interactive path.
+func BuildInteractiveArgs(vmName string, cmdArgs ...string) []string {
+	base := []string{"machine", "run", "--interactive", "--tty", "-n", vmName, "-u", "root"}
+	if len(cmdArgs) == 0 {
+		return base
+	}
+	wrapped := []string{"/usr/local/bin/safe-ag-exec", cmdArgs[0]}
+	for _, arg := range cmdArgs[1:] {
+		wrapped = append(wrapped, base64.StdEncoding.EncodeToString([]byte(arg)))
+	}
+	return append(append(base, "--"), wrapped...)
+}
+
 func (e *MachineExecutor) Run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "container", e.buildArgs(args...)...)
 	var stdout, stderr bytes.Buffer

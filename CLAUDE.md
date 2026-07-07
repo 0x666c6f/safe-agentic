@@ -90,6 +90,7 @@ safe-ag-codex https://github.com/org/repo.git --dry-run
 # Management
 safe-ag list                     # shows running + stopped containers
 safe-ag tui                      # k9s-style interactive dashboard (build: make -C tui)
+# macOS desktop app (Wails v3): make -C app dev|build — see app/README.md
 safe-ag attach <name>            # reattach (restarts stopped containers)
 safe-ag stop <name|--all>        # stop + remove
 safe-ag cleanup                  # removes containers + managed networks (keeps auth)

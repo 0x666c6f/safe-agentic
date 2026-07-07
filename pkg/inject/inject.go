@@ -70,6 +70,43 @@ func ReadClaudeAuth(homeDir string) (map[string]string, error) {
 	return envs, nil
 }
 
+// ReadGHToken reads the host's GitHub CLI token and returns it as GH_TOKEN
+// (and GITHUB_TOKEN) so `gh auth setup-git` inside the container can
+// authenticate HTTPS git operations against private repos.
+func ReadGHToken() (map[string]string, error) {
+	envs := make(map[string]string)
+	if t := os.Getenv("GH_TOKEN"); t != "" {
+		envs["GH_TOKEN"] = t
+		envs["GITHUB_TOKEN"] = t
+		return envs, nil
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return envs, nil
+	}
+	token := strings.TrimSpace(string(out))
+	if token == "" {
+		return envs, nil
+	}
+	envs["GH_TOKEN"] = token
+	envs["GITHUB_TOKEN"] = token
+	return envs, nil
+}
+
+// ReadClaudeCredentialsFile reads ~/.claude/.credentials.json (the live OAuth
+// credential store) and returns it as SAFE_AGENTIC_CLAUDE_CREDS_B64. This is
+// the authoritative login for modern Claude Code; the keychain token below is
+// a fallback for hosts that store credentials only in the macOS keychain.
+func ReadClaudeCredentialsFile(configDir string) (map[string]string, error) {
+	envs := make(map[string]string)
+	data, err := os.ReadFile(filepath.Join(configDir, ".credentials.json"))
+	if err != nil {
+		return envs, nil
+	}
+	envs["SAFE_AGENTIC_CLAUDE_CREDS_B64"] = base64.StdEncoding.EncodeToString(data)
+	return envs, nil
+}
+
 func ReadClaudeOAuthToken() (map[string]string, error) {
 	envs := make(map[string]string)
 	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
@@ -77,31 +114,16 @@ func ReadClaudeOAuthToken() (map[string]string, error) {
 		return envs, nil
 	}
 
-	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-g")
-	out, err := cmd.CombinedOutput()
+	// -w prints the raw password to stdout with no escaping (the -g form
+	// hex-encodes JSON secrets, which broke extraction).
+	out, err := exec.Command("security", "find-generic-password",
+		"-s", "Claude Code-credentials", "-w").Output()
 	if err != nil {
 		return envs, nil
 	}
-
-	var secretLine string
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, `password: "`) {
-			secretLine = line
-			break
-		}
+	if accessToken := extractClaudeAccessToken(string(out)); accessToken != "" {
+		envs["CLAUDE_CODE_OAUTH_TOKEN"] = accessToken
 	}
-	if secretLine == "" {
-		return envs, nil
-	}
-
-	secret := strings.TrimPrefix(secretLine, `password: "`)
-	secret = strings.TrimSuffix(secret, `"`)
-
-	accessToken := extractClaudeAccessToken(secret)
-	if accessToken == "" {
-		return envs, nil
-	}
-	envs["CLAUDE_CODE_OAUTH_TOKEN"] = accessToken
 	return envs, nil
 }
 
@@ -118,8 +140,12 @@ func extractClaudeAccessToken(secret string) string {
 	if err := json.Unmarshal([]byte(secret), &payload); err == nil && payload.ClaudeAiOauth.AccessToken != "" {
 		return payload.ClaudeAiOauth.AccessToken
 	}
-	// Fallback for unparseable payloads: first NON-EMPTY accessToken.
+	// Fallback for unparseable payloads: scope to claudeAiOauth when present,
+	// then take the first non-empty accessToken.
 	rest := secret
+	if i := strings.Index(rest, `"claudeAiOauth"`); i != -1 {
+		rest = rest[i:]
+	}
 	const marker = `"accessToken":"`
 	for {
 		start := strings.Index(rest, marker)
@@ -286,9 +312,12 @@ func sanitizeCodexConfig(content, codexHome string, includeAgents bool) string {
 
 	var out []string
 	skip := false
+	scope := "" // "" = top-level, else current table name
+	hooksInScope := map[string]bool{}
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if table, ok := tomlTableName(trimmed); ok {
+			scope = table
 			skip = tableIsBlocked(table, blockedTables)
 		}
 		if skip {
@@ -300,7 +329,15 @@ func sanitizeCodexConfig(content, codexHome string, includeAgents bool) string {
 		if strings.HasPrefix(trimmed, "check_for_update_on_startup =") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "codex_hooks =") {
+		// codex renamed codex_hooks → hooks; a config carrying both (or the
+		// rewrite colliding with an existing hooks) yields a duplicate-key
+		// error that aborts codex. Rewrite codex_hooks → hooks, but emit at
+		// most one hooks key per scope (top-level or table).
+		if strings.HasPrefix(trimmed, "codex_hooks =") || strings.HasPrefix(trimmed, "hooks =") {
+			if hooksInScope[scope] {
+				continue
+			}
+			hooksInScope[scope] = true
 			out = append(out, strings.Replace(line, "codex_hooks", "hooks", 1))
 			continue
 		}

@@ -692,6 +692,11 @@ func appendGHAuth(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 	}
 	cmd.AddLabel(labels.GHAuth, "shared")
 	cmd.AddNamedVolume(docker.GHAuthVolumeName(opts.AgentType), "/home/agent/.config/gh")
+	// Seed the host's current gh token so `gh auth setup-git` can authenticate
+	// HTTPS clones of private repos — the shared volume alone is empty on
+	// first use and git can't read a username (exit 128).
+	envs, err := inject.ReadGHToken()
+	appendEnvMap(cmd, envs, err)
 }
 
 func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
@@ -709,6 +714,8 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 		envs, err := inject.ReadClaudeConfig(claudeDir)
 		appendEnvMap(cmd, envs, err)
 		if opts.SeedAuth {
+			envs, err = inject.ReadClaudeCredentialsFile(claudeDir)
+			appendEnvMap(cmd, envs, err)
 			envs, err = inject.ReadClaudeOAuthToken()
 			appendEnvMap(cmd, envs, err)
 			envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))

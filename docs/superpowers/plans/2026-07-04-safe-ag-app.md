@@ -165,7 +165,7 @@ git commit -m "feat(app): scaffold Wails v3 desktop app skeleton"
 **Interfaces:**
 - Consumes: nothing (pure functions).
 - Produces:
-  - `type Agent struct { Name, Type, Repo, SSH, Auth, GHAuth, Docker, NetworkMode, Fleet, Hierarchy, Status string; Running, Finished bool; Activity string; CPU, Memory, NetIO, PIDs string }`
+  - `type Agent struct { Name, Type, Repo, SSH, Auth, GHAuth, Docker, NetworkMode, Fleet, Hierarchy, Terminal, Status string; Running, Finished bool; Activity string; State, StateReason string; CPU, Memory, NetIO, PIDs string }` (State/StateReason filled by Task 3's probe; empty here)
   - `func PSFormat() string` — the exact `docker ps --format` template
   - `func ParsePS(data []byte) []Agent`
   - `func normalizeContainerStatus(raw string) (status string, running, finished bool)`
@@ -180,15 +180,15 @@ package poll
 import "testing"
 
 func TestParsePS(t *testing.T) {
-	line1 := "agent-claude-1\tclaude\torg/repo\ton\tper-container\toff\toff\tdedicated\tmyfleet\tpipeline/stage1\tUp 2 hours"
-	line2 := "agent-codex-2\tcodex\t\toff\t\toff\toff\t\t\t\tExited (0) 3 minutes ago"
+	line1 := "agent-claude-1\tclaude\torg/repo\ton\tper-container\toff\toff\tdedicated\tmyfleet\tpipeline/stage1\ttmux\tUp 2 hours"
+	line2 := "agent-codex-2\tcodex\t\toff\t\toff\toff\t\t\t\ttmux\tExited (0) 3 minutes ago"
 	agents := ParsePS([]byte(line1 + "\n" + line2 + "\n"))
 	if len(agents) != 2 {
 		t.Fatalf("want 2 agents, got %d", len(agents))
 	}
 	a := agents[0]
 	if a.Name != "agent-claude-1" || a.Type != "claude" || a.Repo != "org/repo" ||
-		a.Fleet != "myfleet" || a.Hierarchy != "pipeline/stage1" {
+		a.Fleet != "myfleet" || a.Hierarchy != "pipeline/stage1" || a.Terminal != "tmux" {
 		t.Fatalf("bad parse: %+v", a)
 	}
 	if !a.Running || a.Finished {
@@ -207,9 +207,9 @@ func TestParsePSSkipsMalformed(t *testing.T) {
 }
 
 func TestPSFormatFieldCount(t *testing.T) {
-	// 11 tab-separated template fields — must match ParsePS expectations.
-	if n := len(splitFormat(PSFormat())); n != 11 {
-		t.Fatalf("want 11 fields, got %d", n)
+	// 12 tab-separated template fields — must match ParsePS expectations.
+	if n := len(splitFormat(PSFormat())); n != 12 {
+		t.Fatalf("want 12 fields, got %d", n)
 	}
 }
 ```
@@ -221,7 +221,7 @@ Expected: FAIL — `undefined: ParsePS`
 
 - [ ] **Step 3: Implement**
 
-`app/internal/poll/agent.go` (format string is verbatim from `tui/poller.go` — 11 fields, tab-joined):
+`app/internal/poll/agent.go` (format string is verbatim from `tui/poller.go` on current main — 12 fields, tab-joined):
 
 ```go
 package poll
@@ -230,9 +230,10 @@ import "strings"
 
 type Agent struct {
 	Name, Type, Repo, SSH, Auth, GHAuth, Docker, NetworkMode string
-	Fleet, Hierarchy, Status                                 string
+	Fleet, Hierarchy, Terminal, Status                       string
 	Running, Finished                                        bool
 	Activity                                                 string // "Working" | "Idle" | "Stopped"
+	State, StateReason                                       string // agentstate: blocked/working/done/idle/exited/unknown (set by poller probe)
 	CPU, Memory, NetIO, PIDs                                 string
 }
 
@@ -248,6 +249,7 @@ func PSFormat() string {
 		`{{.Label "safe-agentic.network-mode"}}`,
 		`{{.Label "safe-agentic.fleet"}}`,
 		`{{.Label "safe-agentic.hierarchy"}}`,
+		`{{.Label "safe-agentic.terminal"}}`,
 		"{{.Status}}",
 	}, "\t")
 }
@@ -269,14 +271,14 @@ func ParsePS(data []byte) []Agent {
 	var agents []Agent
 	for _, line := range strings.Split(string(data), "\n") {
 		parts := strings.Split(line, "\t")
-		if len(parts) < 11 {
+		if len(parts) < 12 {
 			continue
 		}
-		status, running, finished := normalizeContainerStatus(parts[10])
+		status, running, finished := normalizeContainerStatus(parts[11])
 		a := Agent{
 			Name: parts[0], Type: parts[1], Repo: parts[2], SSH: parts[3],
 			Auth: parts[4], GHAuth: parts[5], Docker: parts[6], NetworkMode: parts[7],
-			Fleet: parts[8], Hierarchy: parts[9],
+			Fleet: parts[8], Hierarchy: parts[9], Terminal: parts[10],
 			Status: status, Running: running, Finished: finished,
 		}
 		a.Activity = "Stopped"
@@ -345,7 +347,7 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func TestPollerEmitsOnChangeOnly(t *testing.T) {
 	fake := vmexec.NewFake()
-	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\tUp 1 minute\n")
+	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tUp 1 minute\n")
 	rec := &emit.Recorder{}
 	p := NewPoller(fake, rec, 20*time.Millisecond)
 	p.Start()
@@ -358,7 +360,7 @@ func TestPollerEmitsOnChangeOnly(t *testing.T) {
 		t.Fatalf("want 1 emit on identical snapshots, got %d", n)
 	}
 	// Change output → one more emit.
-	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\tExited (0) now\n")
+	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tExited (0) now\n")
 	waitFor(t, func() bool { return len(rec.Named("agents.changed")) == 2 })
 }
 
@@ -565,18 +567,25 @@ func (p *Poller) mergeStats(ctx context.Context, agents []Agent) {
 
 (add `"encoding/json"` and `"strings"` to imports)
 
-`app/internal/poll/activity.go` — CPU delta probe, ported from `tui/poller.go` semantics (`pgrep` the agent binary, compare `/proc/<pid>/stat` utime+stime over 1s):
+`app/internal/poll/activity.go` — ported from `tui/poller.go` on current main: CPU delta probe (Activity) PLUS semantic state probe via `pkg/agentstate` (tmux pane capture → blocked/working/done/idle/exited). This is the app's "needs-you" source:
 
 ```go
 package poll
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
+	"github.com/0x666c6f/safe-agentic/pkg/agentstate"
+	"github.com/0x666c6f/safe-agentic/pkg/tmux"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
+
+// statePaneLines is how much of the live tmux pane the state probe inspects
+// (mirrors tui/poller.go).
+const statePaneLines = 40
 
 const probeScript = `pids=$(pgrep -x %s 2>/dev/null); [ -z "$pids" ] && echo idle && exit 0
 total() { t=0; for p in $pids; do s=$(awk '{print $14+$15}' /proc/$p/stat 2>/dev/null || echo 0); t=$((t+s)); done; echo $t; }
@@ -594,6 +603,8 @@ func probeActivities(ctx context.Context, exec vmexec.Executor, agents []Agent) 
 	var wg sync.WaitGroup
 	for i := range agents {
 		if !agents[i].Running {
+			agents[i].Activity = "Stopped"
+			setStoppedState(&agents[i])
 			continue
 		}
 		wg.Add(1)
@@ -604,9 +615,43 @@ func probeActivities(ctx context.Context, exec vmexec.Executor, agents []Agent) 
 			if err == nil && strings.Contains(string(out), "working") {
 				a.Activity = "Working"
 			}
+			probeAgentState(ctx, exec, a)
 		}(&agents[i])
 	}
 	wg.Wait()
+}
+
+// setStoppedState mirrors tui/poller.go: clean "Exited (0)" is done, anything
+// else a non-zero exit.
+func setStoppedState(a *Agent) {
+	if a.Finished {
+		a.State = string(agentstate.StateDone)
+		a.StateReason = "exited cleanly"
+		return
+	}
+	a.State = string(agentstate.StateExited)
+	a.StateReason = a.Status
+}
+
+// probeAgentState captures the running container's tmux pane and classifies it
+// with pkg/agentstate. Non-tmux terminal modes and unreadable panes report
+// working (mirrors tui/poller.go).
+func probeAgentState(ctx context.Context, exec vmexec.Executor, a *Agent) {
+	if a.Terminal != "" && a.Terminal != "tmux" {
+		a.State = string(agentstate.StateWorking)
+		a.StateReason = "running (" + a.Terminal + " mode, no tmux pane)"
+		return
+	}
+	out, err := exec.Run(ctx, "docker", "exec", a.Name, "tmux", "capture-pane",
+		"-t", tmux.SessionName(), "-p", "-S", fmt.Sprintf("-%d", statePaneLines))
+	if err != nil {
+		a.State = string(agentstate.StateWorking)
+		a.StateReason = "running (no tmux pane)"
+		return
+	}
+	res := agentstate.Detect(a.Type, strings.Split(string(out), "\n"))
+	a.State = res.State.String()
+	a.StateReason = res.Reason
 }
 ```
 
@@ -1524,9 +1569,10 @@ func TestTrayLabel(t *testing.T) {
 		{Name: "a", Running: true, Activity: "Working"},
 		{Name: "b", Running: true, Activity: "Idle"},
 		{Name: "c", Running: false},
+		{Name: "d", Running: true, Activity: "Idle", State: "blocked"},
 	}
 	needs := map[string]bool{"b": true}
-	if got := trayLabel(agents, needs); got != "🟢1 🟡1 ⚪0" {
+	if got := trayLabel(agents, needs); got != "🟢1 🟡2 ⚪0" {
 		t.Fatalf("label: %q", got)
 	}
 }
@@ -1766,7 +1812,7 @@ func trayLabel(agents []poll.Agent, needsYou map[string]bool) string {
 			continue
 		}
 		switch {
-		case needsYou[a.Name]:
+		case needsYou[a.Name] || a.State == "blocked":
 			needs++
 		case a.Activity == "Working":
 			working++
@@ -1931,7 +1977,8 @@ import type { Agent } from "./types";
 
 const agent = (over: Partial<Agent>): Agent => ({
   Name: "agent-x", Type: "claude", Repo: "", Fleet: "", Hierarchy: "",
-  Status: "Up", Running: true, Finished: false, Activity: "Idle",
+  Terminal: "tmux", Status: "Up", Running: true, Finished: false,
+  Activity: "Idle", State: "", StateReason: "",
   CPU: "", Memory: "", NetIO: "", PIDs: "", SSH: "", Auth: "", GHAuth: "",
   Docker: "", NetworkMode: "", ...over,
 });
@@ -1949,6 +1996,7 @@ describe("store", () => {
 
   it("statusFor precedence: needs-you > working > review > idle", () => {
     expect(statusFor(agent({ Activity: "Working" }), { "agent-x": true }, {})).toBe("needs-you");
+    expect(statusFor(agent({ State: "blocked" }), {}, {})).toBe("needs-you");
     expect(statusFor(agent({ Activity: "Working" }), {}, {})).toBe("working");
     expect(statusFor(agent({}), {}, { "agent-x": true })).toBe("review");
     expect(statusFor(agent({}), {}, {})).toBe("idle");
@@ -1978,7 +2026,8 @@ Expected: FAIL — cannot resolve `./store`
 ```ts
 export interface Agent {
   Name: string; Type: string; Repo: string; Fleet: string; Hierarchy: string;
-  Status: string; Running: boolean; Finished: boolean; Activity: string;
+  Terminal: string; Status: string; Running: boolean; Finished: boolean;
+  Activity: string; State: string; StateReason: string;
   CPU: string; Memory: string; NetIO: string; PIDs: string;
   SSH: string; Auth: string; GHAuth: string; Docker: string; NetworkMode: string;
 }
@@ -2002,7 +2051,7 @@ export function statusFor(
   reviewReady: Record<string, boolean>,
 ): AgentStatus {
   if (!a.Running) return a.Finished ? "stopped" : "failed";
-  if (needsYou[a.Name]) return "needs-you";
+  if (needsYou[a.Name] || a.State === "blocked") return "needs-you";
   if (a.Activity === "Working") return "working";
   if (reviewReady[a.Name]) return "review";
   return "idle";

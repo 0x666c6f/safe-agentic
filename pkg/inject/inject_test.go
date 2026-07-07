@@ -508,3 +508,11 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestSanitizeCodexConfigDedupsHooks(t *testing.T) {
+	in := "codex_hooks = true\nhooks = true\nmodel = \"gpt\"\n"
+	out := sanitizeCodexConfig(in, "", false)
+	if n := strings.Count(out, "hooks = true"); n != 1 {
+		t.Fatalf("want exactly 1 hooks key, got %d:\n%s", n, out)
+	}
+}

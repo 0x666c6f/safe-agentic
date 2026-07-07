@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -572,5 +574,24 @@ func TestResumeRetry_RunningNoSession_RefusesRelaunch(t *testing.T) {
 	}
 	if cmdsContain(exec.Log, "docker start") {
 		t.Error("must not restart an already-running container")
+	}
+}
+
+func TestPushClaudeConfigCommandShape(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"model":"opus"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	fake := vmexec.NewFake()
+	pushClaudeConfig(context.Background(), fake, "agent-x", true)
+	cmds := fake.CommandsMatching("docker exec agent-x bash -c")
+	if len(cmds) != 1 {
+		t.Fatalf("want 1 exec, got %d", len(cmds))
+	}
+	joined := strings.Join(cmds[0], " ")
+	want := base64.StdEncoding.EncodeToString([]byte(`{"model":"opus"}`))
+	if !strings.Contains(joined, want) || !strings.Contains(joined, "settings.host.json") {
+		t.Fatalf("bad push cmd: %s", joined)
 	}
 }

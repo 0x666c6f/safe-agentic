@@ -86,8 +86,19 @@ ensure_claude_config() {
     fi
   fi
 
+  # One-shot staged settings from `safe-ag config-sync --restart`: newer than
+  # the spawn-time env, consumed once so fresh spawns never inherit it.
+  local staged="$claude_dir/settings.host.json"
+  if [ -f "$staged" ]; then
+    cat "$staged" > "$claude_config" 2>/dev/null || true
+    rm -f "$staged"
+    return 0
+  fi
+
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
-    [ -f "$claude_config" ] && return 0
+    # Host settings.json is the source of truth: refresh on EVERY start so
+    # reused auth volumes pick up current preferences (output style, hooks,
+    # statusline). Auth (.claude.json / credentials) stays seed-only above.
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
@@ -107,8 +118,15 @@ ensure_claude_auth() {
   local auth_path="$claude_dir/.claude.json"
   local tmp_auth=""
 
+  mkdir -p "$claude_dir" 2>/dev/null || true
+  # Live OAuth credentials: refresh on EVERY start so a re-logged-in host
+  # replaces an expired token in a reused-auth volume. This IS the login.
+  if [ -n "${SAFE_AGENTIC_CLAUDE_CREDS_B64:-}" ] && [ -w "$claude_dir" ]; then
+    echo "$SAFE_AGENTIC_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null \
+      && chmod 600 "$claude_dir/.credentials.json" 2>/dev/null || true
+  fi
+
   [ -n "${SAFE_AGENTIC_CLAUDE_AUTH_B64:-}" ] || return 0
-  mkdir -p "$claude_dir" 2>/dev/null || return 0
   [ -w "$claude_dir" ] || return 0
   [ -f "$auth_path" ] && return 0
   tmp_auth=$(mktemp) || return 0
@@ -127,6 +145,32 @@ ensure_claude_support_files() {
   [ -n "${SAFE_AGENTIC_CLAUDE_SUPPORT_B64:-}" ] || return 0
   mkdir -p "$claude_dir" 2>/dev/null || return 0
   echo "$SAFE_AGENTIC_CLAUDE_SUPPORT_B64" | base64 -d | tar -xzf - -C "$claude_dir" 2>/dev/null || return 0
+  # The support tar loses the executable bit; Claude runs statusline/hooks
+  # scripts directly, so restore +x or the custom status line never shows.
+  chmod +x "$claude_dir/statusline-command.sh" 2>/dev/null || true
+  find "$claude_dir/hooks" -maxdepth 1 -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
+}
+
+# ensure_claude_onboarded marks onboarding complete in .claude.json so Claude
+# Code never shows the first-run theme/color picker inside the container.
+# Runs on EVERY start (not seed-only) because reused auth volumes were seeded
+# before this and keep prompting. Merges the key; never clobbers auth fields.
+ensure_claude_onboarded() {
+  local auth_path="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.claude.json"
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$auth_path" <<'PY' 2>/dev/null || true
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception:
+    d = {}
+if d.get("hasCompletedOnboarding") is True:
+    sys.exit(0)
+d["hasCompletedOnboarding"] = True
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump(d, open(p, "w"), indent=2)
+PY
 }
 
 inject_security_preamble() {
@@ -213,7 +257,11 @@ start_tmux_session() {
   local session_name="$1"
   shift
 
-  tmux new-session -d -s "$session_name" "$AGENT_SESSION_LIB" "$@"
+  # Give the detached session a concrete default size: with window-size
+  # manual (set in tmux.conf so the desktop app can drive the size), a
+  # session created with no client has an undefined 0x0 window and the tmux
+  # server dies. The app resizes to the real xterm size on attach.
+  tmux new-session -x 200 -y 50 -d -s "$session_name" "$AGENT_SESSION_LIB" "$@"
   tmux set-option -t "$session_name" history-limit "$TMUX_HISTORY_LIMIT" >/dev/null 2>&1 || true
 }
 
@@ -265,13 +313,17 @@ git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
-if command -v gh >/dev/null 2>&1 && [ -s /home/agent/.config/gh/hosts.yml ]; then
+# Wire gh auth into git for HTTPS clones of private repos. Runs when gh has a
+# hosts.yml OR a token env (GH_TOKEN, seeded from the host by --reuse-gh-auth):
+# gh's credential helper serves the token so `git clone https://github.com/…`
+# authenticates instead of prompting for a username (exit 128).
+if command -v gh >/dev/null 2>&1 && { [ -s /home/agent/.config/gh/hosts.yml ] || [ -n "${GH_TOKEN:-}" ]; }; then
   gh auth setup-git -h github.com >/dev/null 2>&1 || true
 fi
 case "${AGENT_TYPE:-}" in
-  claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  claude) ensure_claude_auth; ensure_claude_support_files; ensure_claude_config; ensure_claude_onboarded ;;
   codex)  ensure_codex_auth; ensure_codex_support_files; ensure_codex_config ;;
-  *)      ensure_codex_auth; ensure_codex_support_files; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config ;;
+  *)      ensure_codex_auth; ensure_codex_support_files; ensure_codex_config; ensure_claude_auth; ensure_claude_support_files; ensure_claude_config; ensure_claude_onboarded ;;
 esac
 
 # Claude Code expects ~/.claude.json at HOME root, but auth volume mounts at ~/.claude/
@@ -458,14 +510,10 @@ case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
     echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
-    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-      # Background mode: run directly, no tmux. Output goes to docker logs.
-      echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      agent_status=0
-      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
-      run_completion_callback "$agent_status"
-      exit "$agent_status"
-    fi
+    # Background mode runs inside tmux too: keeps the session attachable
+    # (safe-ag attach, desktop app terminals) and steer/peek functional,
+    # and makes the safe-agentic.terminal=tmux label truthful. Headless
+    # prompt runs behave identically — the session exits when the CLI does.
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else
@@ -508,13 +556,7 @@ case "$AGENT_TYPE" in
   codex)
     echo "[entrypoint] Launching Codex..."
     echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
-    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-      echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      agent_status=0
-      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
-      run_completion_callback "$agent_status"
-      exit "$agent_status"
-    fi
+    # Background mode runs inside tmux too (see claude arm).
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else
@@ -532,6 +574,26 @@ case "$AGENT_TYPE" in
         tmux send-keys -t "$TMUX_SESSION_NAME" Enter
       ) &
     fi
+    wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
+    agent_status=$(session_exit_code)
+    run_completion_callback "$agent_status"
+    exit "$agent_status"
+    ;;
+  shell)
+    echo "[entrypoint] Starting shell session in tmux."
+    echo "[entrypoint] All tools available. Repos in /workspace/."
+    # Shell sessions live in tmux like the AI agents: survives background
+    # spawns (bash keeps a pty), attachable from safe-ag attach and the
+    # desktop app, steer/peek work.
+    if [ "${#launch_args[@]}" -gt 0 ]; then
+      start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
+    else
+      start_tmux_session "$TMUX_SESSION_NAME"
+    fi
+    wait_for_tmux_session_start "$TMUX_SESSION_NAME" || {
+      echo "[entrypoint] tmux session failed to start" >&2
+      exit 1
+    }
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     agent_status=$(session_exit_code)
     run_completion_callback "$agent_status"

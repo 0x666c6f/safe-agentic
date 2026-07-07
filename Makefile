@@ -1,4 +1,4 @@
-.PHONY: build build-all build-tui install test validate-skills clean
+.PHONY: build build-all build-tui build-app install test validate-skills clean
 
 VERSION ?= dev
 
@@ -7,6 +7,9 @@ build:
 
 build-tui:
 	go build -o bin/safe-ag-tui ./tui
+
+build-app:
+	$(MAKE) -C app build
 
 build-all: build build-tui
 

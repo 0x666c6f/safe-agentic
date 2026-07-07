@@ -650,7 +650,7 @@ func runOutput(cmd *cobra.Command, args []string) error {
 		return runOutputGitMode(ctx, exec, name, wsCmd, running, label, gitCmd)
 	}
 	if outputJSON {
-		return runOutputJSONMode(ctx, exec, name)
+		return runOutputJSONMode(ctx, exec, name, wsCmd, running)
 	}
 	return runOutputDefaultMode(ctx, exec, name, running)
 }
@@ -684,16 +684,34 @@ func runOutputGitCommand(ctx context.Context, exec vmexec.Executor, name, wsCmd 
 	return runGitOnStoppedWorkspace(ctx, exec, name, gitCmd)
 }
 
-func runOutputJSONMode(ctx context.Context, exec vmexec.Executor, name string) error {
+func runOutputJSONMode(ctx context.Context, exec vmexec.Executor, name, wsCmd string, running bool) error {
 	statusOut, _ := exec.Run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", name)
-	result := map[string]string{
+	result := map[string]any{
 		"name":        name,
 		"status":      strings.TrimSpace(string(statusOut)),
 		"last_output": outputLastMessage(ctx, exec, name),
+		"files":       outputGitLines(ctx, exec, name, wsCmd, running, "git diff --name-only && git ls-files --others --exclude-standard"),
+		"commits":     outputGitLines(ctx, exec, name, wsCmd, running, "git log --oneline -20"),
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(result)
+}
+
+// outputGitLines runs a git command in the agent workspace and returns its
+// non-empty lines; nil on error (JSON consumers treat missing as unknown).
+func outputGitLines(ctx context.Context, exec vmexec.Executor, name, wsCmd string, running bool, gitCmd string) []string {
+	out, err := runOutputGitCommand(ctx, exec, name, wsCmd, running, gitCmd)
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 func outputLastMessage(ctx context.Context, exec vmexec.Executor, name string) string {

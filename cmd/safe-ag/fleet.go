@@ -125,6 +125,8 @@ var pipelineDryRun bool
 var pipelineBackground bool
 var pipelineManifestRepos []string
 var pipelineManifestVars []string
+var pipelineSeedAuth bool
+var pipelineAutoTrust bool
 
 const pipelineDetachedEnv = "SAFE_AGENTIC_PIPELINE_DETACHED"
 
@@ -158,6 +160,8 @@ func init() {
 	pipelineCmd.Flags().BoolVar(&pipelineBackground, "background", false, "Launch the pipeline detached and return immediately instead of waiting")
 	pipelineCmd.Flags().StringSliceVar(&pipelineManifestRepos, "repo", nil, "Fallback repo URL for manifest agents that don't set repo/repos; repeatable")
 	pipelineCmd.Flags().StringSliceVar(&pipelineManifestVars, "var", nil, "Manifest variable as key=value, filling ${key} placeholders; repeatable")
+	pipelineCmd.Flags().BoolVar(&pipelineSeedAuth, "seed-auth", false, "Seed the host's Claude/Codex login into every agent (like GUI spawns)")
+	pipelineCmd.Flags().BoolVar(&pipelineAutoTrust, "auto-trust", false, "Auto-accept each agent's in-container trust prompt")
 	pipelineCmd.AddCommand(pipelineListCmd, pipelineShowCmd, pipelineInspectCmd, pipelineRenderCmd, pipelineValidateCmd, pipelineCreateCmd)
 	rootCmd.AddCommand(pipelineCmd)
 }
@@ -180,6 +184,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		fmt.Println("No stages defined in pipeline manifest.")
 		return nil
 	}
+	applyPipelineAuthOverrides(m)
 
 	name := m.Name
 	if name == "" {
@@ -222,6 +227,12 @@ func launchDetachedPipelineImpl(manifestPath string) error {
 	}
 	for _, variable := range pipelineManifestVars {
 		childArgs = append(childArgs, "--var", variable)
+	}
+	if pipelineSeedAuth {
+		childArgs = append(childArgs, "--seed-auth")
+	}
+	if pipelineAutoTrust {
+		childArgs = append(childArgs, "--auto-trust")
 	}
 	cmd := exec.Command(self, childArgs...)
 	cmd.Env = append(os.Environ(), pipelineDetachedEnv+"=1")
@@ -889,6 +900,26 @@ func dispatchContainerNotify(ctx context.Context, exec vmexec.Executor, name str
 }
 
 // ─── helper ──────────────────────────────────────────────────────────────────
+
+// applyPipelineAuthOverrides forces host-auth seeding and/or trust-prompt skip
+// on every agent when the run passed --seed-auth/--auto-trust. Manifests set
+// reuse_auth but not seed_auth, so without this a GUI-run pipeline's agents can
+// land unauthenticated ("Not logged in") the way GUI spawns never do.
+func applyPipelineAuthOverrides(m *fleet.PipelineManifest) {
+	if !pipelineSeedAuth && !pipelineAutoTrust {
+		return
+	}
+	for i := range m.Stages {
+		for j := range m.Stages[i].Agents {
+			if pipelineSeedAuth {
+				m.Stages[i].Agents[j].SeedAuth = true
+			}
+			if pipelineAutoTrust {
+				m.Stages[i].Agents[j].AutoTrust = true
+			}
+		}
+	}
+}
 
 // specToSpawnOpts converts an AgentSpec from a fleet or pipeline manifest into
 // SpawnOpts suitable for executeSpawn.
