@@ -220,11 +220,16 @@ esac
 
 # Docker user namespace remap needs explicit subordinate ranges on Alpine.
 as_root touch /etc/subuid /etc/subgid
+# dockerd resolves both the dockremap user and group; BusyBox `adduser -S`
+# does not create a matching group, so provision the group explicitly.
+if ! getent group dockremap >/dev/null 2>&1; then
+  as_root addgroup -S dockremap 2>/dev/null || as_root groupadd -r dockremap
+fi
 if ! getent passwd dockremap >/dev/null 2>&1; then
   if command -v adduser >/dev/null 2>&1; then
-    as_root adduser -S -H -D dockremap 2>/dev/null || as_root useradd -r -M dockremap
+    as_root adduser -S -H -D -G dockremap dockremap 2>/dev/null || as_root useradd -r -M -g dockremap dockremap
   else
-    as_root useradd -r -M dockremap
+    as_root useradd -r -M -g dockremap dockremap
   fi
 fi
 grep -q '^dockremap:' /etc/subuid || echo 'dockremap:165536:65536' | as_root tee -a /etc/subuid >/dev/null
