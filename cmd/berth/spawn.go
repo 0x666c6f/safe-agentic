@@ -460,6 +460,13 @@ func requireSpawnHostEgress(opts SpawnOpts, cfg config.Config) error {
 // returns a short description of what's missing, or "" if both are active.
 // Shared by the spawn-time fail-closed guard and `berth diagnose`.
 func apiOnlyEnforcementGap(ctx context.Context, exec vmexec.Executor) string {
+	// The bti+ REJECT only takes effect if DOCKER-USER actually jumps to
+	// BERTH_EGRESS. A dockerd restart rebuilds DOCKER-USER and can drop that
+	// jump, leaving the rule present but orphaned (never reached) — so check
+	// the wiring, not just the rule, before trusting the drop.
+	if chain, err := exec.Run(ctx, "iptables", "-S", "DOCKER-USER"); err != nil || !strings.Contains(string(chain), "-j BERTH_EGRESS") {
+		return "BERTH_EGRESS not wired into DOCKER-USER"
+	}
 	rules, err := exec.Run(ctx, "iptables", "-S", "BERTH_EGRESS")
 	if err != nil || !strings.Contains(string(rules), "-i bti+") {
 		return "missing BERTH_EGRESS bti+ drop rule"
