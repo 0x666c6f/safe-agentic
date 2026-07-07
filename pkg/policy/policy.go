@@ -17,6 +17,7 @@ const (
 	DockerModeHostSocket = "host-socket"
 	NetworkManaged       = "managed"
 	NetworkNone          = "none"
+	NetworkAPIOnly       = "api-only"
 )
 
 type SpawnRequest struct {
