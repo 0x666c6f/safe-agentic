@@ -53,9 +53,15 @@ docker = false
 docker_socket = false
 network = "my-net"
 identity = "Your Name <you@example.com>"
+
+[git]                                  # optional: overrides the detected host identity
+author_name = "Your Name"
+author_email = "you@example.com"
+committer_name = "Your Name"
+committer_email = "you@example.com"
 ```
 
-These apply to `berth spawn` and `berth run`. Risk-widening defaults keep per-session opt-outs:
+These apply to `berth spawn` and `berth run`. Legacy env-style keys (`BERTH_DEFAULT_*`, `GIT_*`) work as aliases in `get`/`set`/`reset`. Risk-widening defaults keep per-session opt-outs:
 
 ```bash
 berth spawn claude --no-ssh --no-reuse-auth --repo https://github.com/org/repo.git

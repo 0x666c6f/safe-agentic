@@ -10,7 +10,7 @@ Every fleet agent, pipeline step, and stage agent accepts the same fields. Each 
 |---|---|---|
 | `name` | string | agent/step name (container name derives from it) |
 | `profile` | string | saved [agent profile](../guide/configuration.md#agent-profiles); manifest fields override profile fields |
-| `type` | string | `claude` or `codex` |
+| `type` | string | **required** — `claude`, `codex`, or `shell` |
 | `repo` | string | repository URL |
 | `repos` | list | multiple repository URLs |
 | `prompt` | string | the task; supports `${var}` interpolation |
@@ -35,6 +35,8 @@ Every fleet agent, pipeline step, and stage agent accepts the same fields. Each 
 | `max_cost` | string | advisory USD budget |
 | `notify` | string | notification targets (comma-separated) |
 | `on_exit` / `on_complete` / `on_fail` | string | lifecycle hook commands |
+
+Boolean fields are tri-state: unset inherits from `profile` / `defaults`; an explicit `false` overrides an inherited `true`.
 
 Pipeline-only fields on a step: `depends_on` (string), `models` (list), `judge` (block). Unsupported control fields — `on_failure`, `retry`, `when`, `outputs` — are **rejected at parse time** instead of silently ignored.
 
@@ -162,7 +164,7 @@ Stage fields:
 | Field | Type | Meaning |
 |---|---|---|
 | `name` | string | stage name |
-| `depends_on` | list | stages that must finish first |
+| `depends_on` | list | stages that must finish first; naming a `models`-expanded stage expands to its per-model children |
 | `agents` | list | agents that run in parallel within the stage |
 | `models` | list | duplicate the stage's agents once per entry; each entry becomes the agent `type` (`claude`, `codex`), available as `${model}` in prompts |
 | `pipeline` | string | path to a sub-pipeline YAML (mutually exclusive with `agents`) |
@@ -199,6 +201,10 @@ Validation rules:
 - a judge cannot depend on a sub-pipeline stage or another judge
 
 `auto_pr` pushes over HTTPS from a helper container using the winner's volumes — candidates need `reuse_gh_auth: true`.
+
+## Review presets
+
+[`berth pr-review` / `berth pr-fix`](../guide/workflow.md#one-shot-pr-review-workflows) run ordinary pipeline manifests resolved by name: user overrides in `~/.berth/pipelines/reviews/<name>.yaml` first, then the built-ins `claude`, `codex`, `dual` (the `pr-review` default — parallel Claude+Codex review feeding a Codex reconcile-fix), and `fix`. All declare required `repo` and `pr` inputs with `infer: repo` / `infer: pr`.
 
 ## Interpolation and precedence
 

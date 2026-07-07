@@ -25,7 +25,7 @@ Defaults:
 
 - path: `~/.berth/worktrees/<container-name>`
 - branch: `berth/<container-name>`
-- gitignored files listed in `.berthinclude` are copied into the worktree (env files, local fixtures)
+- gitignored files listed in `.berthinclude` are copied into the worktree (env files, local fixtures). Lines are glob patterns; `#` comments and blanks are skipped, and a pattern matching zero files fails the spawn
 
 `--worktree-path` must sit under the worktrees root; anything outside is rejected before launch.
 
