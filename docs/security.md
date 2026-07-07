@@ -113,6 +113,8 @@ The manifest (per-file sha256, size, and relative path) is written to the append
 
 **The read-only mount is not a noexec mount.** It stops the agent (or a malicious file) from tampering with or overwriting the evidence, preserving chain of custody — it does not prevent execution. Execution risk is contained the same way as the rest of the container: `api-only` egress plus `cap-drop ALL` and `no-new-privileges`. Treat everything under `/evidence` as untrusted data and never execute it.
 
+The sha256 manifest is computed from one read of the host files and the tar stream mounted into the container is a second, separate read; the manifest assumes the source is quiescent during ingestion. A source actively mutating while ingest runs could make the manifest and the mounted bytes diverge.
+
 ### The worktree mount trade-off
 
 By default the machine is created with `--home-mount none`: the host home is never shared with the VM, so even a VM-root compromise or Docker escape cannot reach host files.

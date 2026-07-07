@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,5 +98,35 @@ func TestIngestEvidence_NonexistentPath(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected no audit entries, got %d", len(entries))
+	}
+}
+
+// TestIngestEvidence_PopulateFailureCleansUpVolume covers Fix 1: if populate
+// fails after the volume was created, ingestEvidence must best-effort remove
+// the now-orphaned volume (the spawn aborts, so the stop-path cleanup never
+// runs for it) and still surface the original populate error.
+func TestIngestEvidence_PopulateFailureCleansUpVolume(t *testing.T) {
+	setTempAuditPath(t)
+	fake := vmexec.NewFake()
+
+	origPopulate := populateEvidenceVolume
+	populateErr := errors.New("populate boom")
+	populateEvidenceVolume = func(vmName, volName, imageName, hostPath string) error {
+		return populateErr
+	}
+	defer func() { populateEvidenceVolume = origPopulate }()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "evidence.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ingestEvidence(context.Background(), fake, "berth", "agent-1", root, "berth:latest", false)
+	if !errors.Is(err, populateErr) {
+		t.Fatalf("ingestEvidence() error = %v, want wrapped %v", err, populateErr)
+	}
+
+	if matches := fake.CommandsMatching("docker volume rm agent-1-evidence"); len(matches) != 1 {
+		t.Errorf("docker volume rm agent-1-evidence calls = %d, want 1 (log: %v)", len(matches), fake.Log)
 	}
 }

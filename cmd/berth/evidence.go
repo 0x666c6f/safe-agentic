@@ -20,7 +20,7 @@ var populateEvidenceVolume = populateEvidenceVolumeImpl
 // ingestEvidence validates hostPath, records a chain-of-custody audit entry,
 // and (unless dryRun) populates a labeled Docker volume with its contents.
 // Returns the evidence volume name.
-func ingestEvidence(ctx context.Context, exec vmexec.Executor, vmName, containerName, hostPath, imageName string, dryRun bool) (string, error) {
+func ingestEvidence(ctx context.Context, ex vmexec.Executor, vmName, containerName, hostPath, imageName string, dryRun bool) (string, error) {
 	m, err := evidence.Build(hostPath)
 	if err != nil {
 		return "", fmt.Errorf("build evidence manifest: %w", err)
@@ -40,11 +40,15 @@ func ingestEvidence(ctx context.Context, exec vmexec.Executor, vmName, container
 		return volName, nil
 	}
 
-	if err := docker.CreateLabeledVolume(ctx, exec, volName, "evidence", containerName); err != nil {
+	if err := docker.CreateLabeledVolume(ctx, ex, volName, "evidence", containerName); err != nil {
 		return "", err
 	}
 	if err := populateEvidenceVolume(vmName, volName, imageName, hostPath); err != nil {
-		return "", err
+		// Best-effort cleanup: the spawn aborts here, so the stop-path
+		// volume cleanup never runs, and an orphaned volume would hold
+		// partial, untrusted bytes.
+		_, _ = ex.Run(ctx, "docker", "volume", "rm", volName)
+		return "", fmt.Errorf("populate evidence volume: %w", err)
 	}
 	return volName, nil
 }
@@ -89,11 +93,15 @@ func populateEvidenceVolumeImpl(vmName, volName, imageName, hostPath string) err
 
 	waitErr := cmd.Wait()
 	writeErr := <-writeErrCh
-	if writeErr != nil {
-		return writeErr
-	}
+	// Check waitErr first: on an extraction failure the child exits early,
+	// which makes the write goroutine see a broken-pipe/closed-file error.
+	// waitErr carries tar's actual stderr diagnostic; writeErr in that case
+	// is just noise from the pipe closing underneath it.
 	if waitErr != nil {
 		return fmt.Errorf("populate evidence volume: %w\n%s", waitErr, stderr.String())
+	}
+	if writeErr != nil {
+		return writeErr
 	}
 	return nil
 }
