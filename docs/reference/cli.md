@@ -125,6 +125,7 @@ Flags:
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
 | `--ephemeral-auth` | bool | use a per-container auth volume |
 | `--fleet-volume` | string | shared fleet volume name |
+| `--forensic` | bool | use the forensic tool image (`berth:forensic`) and default `--network` to `api-only`; requires `berth update --forensic` first |
 | `--identity` | string | git identity in `Name <email>` form |
 | `--instructions` | string | task instructions |
 | `--instructions-file` | string | read instructions from a file |
@@ -165,6 +166,15 @@ berth spawn claude --network api-only --repo https://github.com/you/quarantine.g
 ```
 
 `--network api-only` routes all HTTP(S) traffic through a VM-side allowlisted proxy and drops direct internet and DNS — the recommended mode for analyzing untrusted or suspicious files. SSH clone won't work in this mode (port 22 is dropped); use an HTTPS repo URL. See [Security — api-only egress mode](../security.md#api-only-egress-mode) and [Architecture](../architecture.md#api-only-egress-mode).
+
+Forensic triage:
+
+```bash
+berth update --forensic
+berth spawn claude --forensic --template forensic-triage --repo https://github.com/you/quarantine.git
+```
+
+`--forensic` selects the `berth:forensic` image (built once with `berth update --forensic`) and defaults `--network` to `api-only` when no network is given (an explicit `--network` wins). It fails closed with a hint to run `berth update --forensic` if that image hasn't been built yet. See [Security — Forensic triage](../security.md#forensic-triage).
 
 Worktree mode:
 
@@ -238,6 +248,7 @@ Flags:
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
 | `--ephemeral-auth` | bool | use a per-container throwaway auth volume |
+| `--forensic` | bool | use the forensic tool image (`berth:forensic`) and default `--network` to `api-only`; requires `berth update --forensic` first |
 | `--instructions` | string | task instructions |
 | `--max-cost` | string | cost budget |
 | `--no-docker` | bool | disable default Docker-in-Docker |
@@ -1204,6 +1215,7 @@ Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
+| `--forensic` | bool | build the forensic tool image (`berth:forensic`) from `Dockerfile.forensic` |
 | `--full` | bool | full rebuild without cache |
 | `--quick` | bool | bust only the AI CLI layer |
 

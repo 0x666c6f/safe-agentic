@@ -93,6 +93,16 @@ seed_auth = false
 
 **Known limitation — container startup window.** A brief window at container startup was observed once (immediately after re-provisioning the VM) where direct egress succeeded before the bridge drop was fully effective; it did not reproduce on later spawns. The DNS blackhole narrows any such window (a hostname can't be resolved without a working resolver), and the agent does not process untrusted file content during init. If you require provably-zero egress from the first instant, treat this as an open gap pending root-cause rather than a guarantee.
 
+### Forensic triage
+
+`berth spawn --forensic` (also `berth run --forensic`) is for static triage of untrusted/suspicious files. It selects the `berth:forensic` image — built ahead of time with `berth update --forensic` from `Dockerfile.forensic` — and defaults `--network` to `api-only` when no network is given (an explicit `--network` wins). If `berth:forensic` hasn't been built, spawn fails closed with a hint to run `berth update --forensic`.
+
+The image pre-bakes a static-analysis tool set, since `api-only` blocks `apt`/`pip` at runtime: `file`, `binutils` (`strings`/`objdump`), `xxd`, `yara`, `binwalk`, `exiftool`, `radare2`, `ssdeep`, and `oletools` (`olevba`/`oleid`) for Office macro analysis. The `forensic-triage` template drives this tool set with never-execute rules.
+
+`clamav` is deliberately excluded — its signature database needs network updates that `api-only` blocks, so a stale scanner would be dead weight rather than protection.
+
+This is static analysis, not detonation: the tools inspect file structure, strings, metadata, and embedded content without running anything. `api-only`'s network narrowing (above) does not sandbox execution — never execute or open the files under analysis.
+
 ### The worktree mount trade-off
 
 By default the machine is created with `--home-mount none`: the host home is never shared with the VM, so even a VM-root compromise or Docker escape cannot reach host files.
