@@ -226,3 +226,22 @@ func TestValidateIsolated_RejectsUnsafeModeWithUplink(t *testing.T) {
 		t.Fatal("ValidateIsolated(nat + uplink) = nil error, want rejection")
 	}
 }
+
+// TestValidateIsolated_RejectsNovelUnrecognizedModes pins the allowlist
+// (fail-closed) property: ValidateIsolated must reject any mode string it
+// doesn't explicitly recognize as isolated, not just the four named unsafe
+// modes exercised above. This guards against a future refactor turning the
+// check into a denylist (which would silently admit new unsafe modes).
+func TestValidateIsolated_RejectsNovelUnrecognizedModes(t *testing.T) {
+	novelModes := []string{"NAT", "internet", "vpn", "tailscale", "proxy"}
+	for _, mode := range novelModes {
+		n := NetAttachment{Mode: mode, HasUplink: false}
+		err := ValidateIsolated(n)
+		if err == nil {
+			t.Fatalf("ValidateIsolated(%+v) = nil error, want rejection of unrecognized mode %q", n, mode)
+		}
+		if !strings.Contains(err.Error(), mode) {
+			t.Errorf("ValidateIsolated(%+v) error = %q, want it to name the mode %q", n, err.Error(), mode)
+		}
+	}
+}
