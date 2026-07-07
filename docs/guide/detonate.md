@@ -49,11 +49,12 @@ detonate destroy run-042
 These are enforced in code, not left to operator discipline:
 
 - **Isolated-network-only.** `run` calls `ConfigureIsolatedNet` and validates the result before boot; anything that isn't isolated fails closed and `Run` is never invoked.
-- **No reuse.** There is no restore or revert verb — only `create` (clone) and `destroy`. A clone that has touched a live sample is never detonated again; a fresh run always starts from the untouched golden.
 - **Offline sample injection.** `inject` attaches the sample to the guest disk before boot. There is no live network or shared-folder path for the sample to enter the guest.
 - **PoweredOff-gated collect.** `collect` checks `PoweredOff` first and refuses to pull artifacts from a running VM.
 - **Typed confirmation.** `run` prints a warning and requires you to type `detonate <run-name>` back exactly, or pass `--yes` **and** set `DETONATE_I_UNDERSTAND=1` — a bare `--yes` in a script is not enough.
 - **Auto-destroy on failure.** If `Run` errors, `detonate` destroys the clone automatically before returning the error.
+
+**Not enforced — operator discipline required:** there is no restore or revert verb, only `create` (clone) and `destroy`. But nothing in code stops re-invoking `run` on an un-destroyed clone that has already touched a live sample — there is no run-state store tracking "this clone is used up." The operator MUST `destroy` a run after `collect` (or immediately on failure) rather than relying on the tool to refuse reuse.
 
 ## Chain of custody
 

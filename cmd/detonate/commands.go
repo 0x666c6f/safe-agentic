@@ -36,10 +36,13 @@ var newRunner = func() detonate.Runner {
 	return r
 }
 
-// auditLog appends one chain-of-custody entry. The error is intentionally
-// unchecked, matching every other audit call site in cmd/berth.
+// auditLog appends one chain-of-custody entry. The write error never fails
+// the operation — audit is best-effort — but for a chain-of-custody tool a
+// silently-lost entry is worth a warning, so it's surfaced on stderr.
 func auditLog(run, action string, details map[string]string) {
-	(&audit.Logger{Path: audit.DefaultPath()}).Log(action, run, details)
+	if err := (&audit.Logger{Path: audit.DefaultPath()}).Log(action, run, details); err != nil {
+		fmt.Fprintf(os.Stderr, "detonate: warning: audit write failed: %v\n", err)
+	}
 }
 
 func sha256File(path string) (string, error) {
@@ -58,13 +61,18 @@ func sha256File(path string) (string, error) {
 // parseStaticFindings reads berth forensic JSON into StaticFindings,
 // tolerating either snake_case or camelCase field names.
 func parseStaticFindings(data []byte) (detonate.StaticFindings, error) {
-	var raw map[string]string
+	// map[string]any (not map[string]string): berth's forensic JSON carries
+	// numeric fields too (e.g. "size", "entropy"). Unmarshaling into
+	// map[string]string would fail wholesale the moment any field isn't a
+	// string. Only the string-typed fields below are actually used; anything
+	// else, numeric or not, is ignored.
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return detonate.StaticFindings{}, fmt.Errorf("parsing static findings JSON: %w", err)
 	}
 	pick := func(keys ...string) string {
 		for _, k := range keys {
-			if v, ok := raw[k]; ok {
+			if v, ok := raw[k].(string); ok {
 				return v
 			}
 		}
@@ -135,6 +143,9 @@ func runCreate(ctx context.Context, r detonate.Runner, run, golden string) error
 	}
 	if golden == "" {
 		return fmt.Errorf("--golden is required")
+	}
+	if err := validate.NameComponent(golden, "--golden"); err != nil {
+		return err
 	}
 	exists, err := r.GoldenExists(ctx, golden)
 	if err != nil {
@@ -212,6 +223,9 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 	}
 	if gateway == "" {
 		return fmt.Errorf("--gateway is required: name the pre-provisioned, operator-verified isolated (no-uplink) network gateway")
+	}
+	if err := validate.NameComponent(gateway, "--gateway"); err != nil {
+		return err
 	}
 
 	net, err := r.ConfigureIsolatedNet(ctx, run, gateway)
@@ -305,9 +319,14 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 	if !off {
 		return fmt.Errorf("collect refused: run %q is not powered off", run)
 	}
-	files, err := r.Collect(ctx, run, outDir)
-	if err != nil {
-		return fmt.Errorf("collect: %w", err)
+	// files may be non-empty even when collectErr != nil: TartRunner.Collect
+	// copies artifacts one-by-one and returns (alreadyCopied, err) on a
+	// mid-loop failure. Only skip straight to the error when nothing was
+	// actually collected — otherwise those already-copied artifacts would
+	// sit in outDir with zero audit trail.
+	files, collectErr := r.Collect(ctx, run, outDir)
+	if collectErr != nil && len(files) == 0 {
+		return fmt.Errorf("collect: %w", collectErr)
 	}
 	// Hash every artifact even if one fails: Runner.Collect already copied
 	// them all to outDir, so an early return here would leave collected
@@ -329,6 +348,9 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 		"count":     strconv.Itoa(len(files)),
 		"artifacts": strings.Join(lines, "\n"),
 	})
+	if collectErr != nil {
+		return fmt.Errorf("collect: %w", collectErr)
+	}
 	return hashErr
 }
 

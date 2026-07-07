@@ -141,6 +141,16 @@ func (f *FakeRunner) SetCollectErr(run string, err error) {
 	f.collectErr[run] = err
 }
 
+// SetCollectResult configures Collect to return both a partial file list and
+// an error, mirroring TartRunner.Collect's real (alreadyCopied, err) contract
+// when it fails mid-loop after copying some artifacts.
+func (f *FakeRunner) SetCollectResult(run string, files []string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.collectFiles[run] = files
+	f.collectErr[run] = err
+}
+
 func (f *FakeRunner) SetPoweredOff(run string, off bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -207,10 +217,9 @@ func (f *FakeRunner) Collect(_ context.Context, run, destDir string) ([]string, 
 	f.record("Collect", run, destDir)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.collectErr[run]; err != nil {
-		return nil, err
-	}
-	return f.collectFiles[run], nil
+	// Return files and err together, like TartRunner.Collect: a mid-loop
+	// failure there still returns the artifacts already copied.
+	return f.collectFiles[run], f.collectErr[run]
 }
 
 func (f *FakeRunner) PoweredOff(_ context.Context, run string) (bool, error) {

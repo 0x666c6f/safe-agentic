@@ -61,6 +61,38 @@ func TestParseStaticFindings_TolerantOfSnakeAndCamel(t *testing.T) {
 	}
 }
 
+// TestParseStaticFindings_TolerantOfNumericFields covers berth's forensic
+// JSON, which carries numeric fields (size, entropy) alongside the string
+// ones route cares about. Unmarshaling into map[string]string used to fail
+// wholesale the moment any field wasn't a string.
+func TestParseStaticFindings_TolerantOfNumericFields(t *testing.T) {
+	data := []byte(`{"sha256":"abc","arch":"arm64","format":"elf","size":1234,"entropy":7.9}`)
+	f, err := parseStaticFindings(data)
+	if err != nil {
+		t.Fatalf("parseStaticFindings() with numeric fields: %v", err)
+	}
+	if f.Arch != "arm64" || f.Format != "elf" || f.SHA256 != "abc" {
+		t.Errorf("numeric-field JSON parse mismatch: %+v", f)
+	}
+}
+
+// TestRunRoute_AcceptsNumericFields is the end-to-end check: route must not
+// refuse plausible input just because static.json has numeric fields.
+func TestRunRoute_AcceptsNumericFields(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "static.json")
+	body := `{"sha256":"a","arch":"arm64","format":"elf","size":1234,"entropy":7.9}`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runRoute(p, &buf); err != nil {
+		t.Fatalf("runRoute() error = %v, want nil (numeric fields must not cause a refusal)", err)
+	}
+	if !strings.Contains(buf.String(), "local-arm") {
+		t.Errorf("output missing tier: %s", buf.String())
+	}
+}
+
 func TestRunRoute_ExitBehaviorPerTier(t *testing.T) {
 	write := func(t *testing.T, body string) string {
 		t.Helper()
@@ -139,6 +171,19 @@ func TestRunCreate_Success(t *testing.T) {
 	}
 	if entries[0].Details["golden"] != "golden-1" {
 		t.Errorf("audit golden = %q, want %q", entries[0].Details["golden"], "golden-1")
+	}
+}
+
+func TestRunCreate_RejectsInvalidGolden(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+
+	err := runCreate(context.Background(), fake, "run-1", "-not-a-name")
+	if err == nil {
+		t.Fatal("runCreate() error = nil, want error for a leading-dash --golden value")
+	}
+	if hasCall(fake.Log, "GoldenExists") || hasCall(fake.Log, "Clone") {
+		t.Error("Runner should not be touched before --golden is validated")
 	}
 }
 
@@ -275,6 +320,20 @@ func TestRunRun_MissingGatewayFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRunRun_RejectsInvalidGateway(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+	t.Setenv("DETONATE_I_UNDERSTAND", "1")
+
+	err := runRun(context.Background(), fake, "run-1", "-not-a-name", time.Second, true, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("runRun() error = nil, want error for a leading-dash --gateway value")
+	}
+	if len(fake.Log) != 0 {
+		t.Errorf("Runner should not be touched before --gateway is validated, got: %+v", fake.Log)
+	}
+}
+
 func TestRunRun_ConfirmationGate(t *testing.T) {
 	setTempAuditPath(t)
 
@@ -354,6 +413,53 @@ func TestRunCollect_HashesArtifactsAndAudits(t *testing.T) {
 	wantHash := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 	if !strings.Contains(entries[0].Details["artifacts"], wantHash) {
 		t.Errorf("audit artifacts missing sha256(%q): %q", "hello", entries[0].Details["artifacts"])
+	}
+}
+
+// TestRunCollect_AuditsPartialFilesWhenCollectItselfErrors covers the case
+// TartRunner.Collect actually hits: a mid-loop failure that still returns
+// the artifacts already copied to outDir. runCollect must hash and audit
+// those before surfacing the collect error — otherwise the already-copied
+// files sit on disk with zero chain-of-custody trail.
+func TestRunCollect_AuditsPartialFilesWhenCollectItselfErrors(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+	fake.SetPoweredOff("run-1", true)
+
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "a.log")
+	f2 := filepath.Join(dir, "b.log")
+	if err := os.WriteFile(f1, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f2, []byte("world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	collectErr := fmt.Errorf("writing artifact c.log: disk full")
+	fake.SetCollectResult("run-1", []string{f1, f2}, collectErr)
+
+	err := runCollect(context.Background(), fake, "run-1", dir)
+	if err == nil {
+		t.Fatal("runCollect() error = nil, want the Collect error surfaced")
+	}
+	if !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("runCollect() error = %v, want it to wrap the Collect error", err)
+	}
+
+	entries := readAudit(t)
+	if len(entries) != 1 || entries[0].Action != "detonate-collect" {
+		t.Fatalf("unexpected audit entries: %+v — already-copied artifacts must still get a chain-of-custody entry", entries)
+	}
+	if entries[0].Details["count"] != "2" {
+		t.Errorf("audit count = %q, want %q", entries[0].Details["count"], "2")
+	}
+	wantHash1 := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	wantHash2 := "486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"
+	if !strings.Contains(entries[0].Details["artifacts"], wantHash1) {
+		t.Errorf("audit artifacts missing sha256(a.log): %q", entries[0].Details["artifacts"])
+	}
+	if !strings.Contains(entries[0].Details["artifacts"], wantHash2) {
+		t.Errorf("audit artifacts missing sha256(b.log): %q", entries[0].Details["artifacts"])
 	}
 }
 
