@@ -6,21 +6,21 @@
 import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 export function Close(id: string): $CancellablePromise<void> {
-    return $Call.ByID(952659619, id);
+    return $Call.ByID(2557146887, id);
 }
 
 export function Open(container: string, cols: number, rows: number): $CancellablePromise<string> {
-    return $Call.ByID(1079702345, container, cols, rows);
+    return $Call.ByID(2433084277, container, cols, rows);
 }
 
 export function Redraw(id: string): $CancellablePromise<void> {
-    return $Call.ByID(3063660242, id);
+    return $Call.ByID(4153998702, id);
 }
 
 export function Resize(id: string, cols: number, rows: number): $CancellablePromise<void> {
-    return $Call.ByID(269798433, id, cols, rows);
+    return $Call.ByID(631835077, id, cols, rows);
 }
 
 export function Write(id: string, data: string): $CancellablePromise<void> {
-    return $Call.ByID(3475231452, id, data);
+    return $Call.ByID(971866864, id, data);
 }

@@ -14,61 +14,61 @@ import * as audit$0 from "../../../pkg/audit/models.js";
 import * as $models from "./models.js";
 
 export function AuditTail(n: number): $CancellablePromise<audit$0.Entry[] | null> {
-    return $Call.ByID(2254927521, n);
+    return $Call.ByID(3443606653, n);
 }
 
 export function EventsTail(n: number): $CancellablePromise<$models.EventItem[] | null> {
-    return $Call.ByID(602569971, n);
+    return $Call.ByID(3664436423, n);
 }
 
 export function Inbox(n: number): $CancellablePromise<$models.EventItem[] | null> {
-    return $Call.ByID(3385797668, n);
+    return $Call.ByID(3933883800, n);
 }
 
 export function PipelineDelete(name: string): $CancellablePromise<void> {
-    return $Call.ByID(3695924437, name);
+    return $Call.ByID(2149073825, name);
 }
 
 export function PipelineFiles(): $CancellablePromise<string[] | null> {
-    return $Call.ByID(2603917901);
+    return $Call.ByID(2859068041);
 }
 
 /**
  * PipelineList returns user pipeline names (recursive, relative, no extension).
  */
 export function PipelineList(): $CancellablePromise<string[] | null> {
-    return $Call.ByID(2211967526);
+    return $Call.ByID(3906071538);
 }
 
 export function PipelineRead(name: string): $CancellablePromise<string> {
-    return $Call.ByID(262007570, name);
+    return $Call.ByID(1871660958, name);
 }
 
 export function PipelineSave(name: string, content: string): $CancellablePromise<void> {
-    return $Call.ByID(1232917943, name, content);
+    return $Call.ByID(3193771811, name, content);
 }
 
 /**
  * ProjectAdd registers a project without counting a use (idempotent).
  */
 export function ProjectAdd(url: string): $CancellablePromise<void> {
-    return $Call.ByID(3784048056, url);
+    return $Call.ByID(85405212, url);
 }
 
 export function ProjectRemove(url: string): $CancellablePromise<void> {
-    return $Call.ByID(3307348241, url);
+    return $Call.ByID(612119573, url);
 }
 
 /**
  * ProjectUse bumps the use count, adding the repo if new.
  */
 export function ProjectUse(url: string): $CancellablePromise<void> {
-    return $Call.ByID(2231767688, url);
+    return $Call.ByID(2214230076, url);
 }
 
 /**
  * Projects returns saved repos sorted by use count desc, then recency desc.
  */
 export function Projects(): $CancellablePromise<$models.Project[] | null> {
-    return $Call.ByID(118778646);
+    return $Call.ByID(1431122346);
 }
