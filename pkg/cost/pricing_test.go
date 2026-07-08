@@ -93,3 +93,26 @@ func TestSumCostEmpty(t *testing.T) {
 		t.Errorf("SumCost(nil) = %f, want 0", got)
 	}
 }
+
+func TestLookupPricingCurrentModels(t *testing.T) {
+	cases := []struct {
+		model   string
+		in, out float64
+	}{
+		{"claude-fable-5", 10.0, 50.0},
+		{"claude-opus-4-8", 5.0, 25.0},
+		{"claude-opus-4-1-20250805", 15.0, 75.0},
+		{"claude-sonnet-5", 3.0, 15.0},
+		{"claude-haiku-4-5-20251001", 1.0, 5.0},
+	}
+	for _, c := range cases {
+		p, ok := lookupPricing(c.model)
+		if !ok {
+			t.Errorf("%s: no pricing found", c.model)
+			continue
+		}
+		if p.InputPerMTok != c.in || p.OutputPerMTok != c.out {
+			t.Errorf("%s: got %v/%v, want %v/%v", c.model, p.InputPerMTok, p.OutputPerMTok, c.in, c.out)
+		}
+	}
+}

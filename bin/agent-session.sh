@@ -69,8 +69,11 @@ launch_codex() {
 
   if [ $# -gt 0 ]; then
     if [ "${BERTH_FLEET:-}" = "1" ]; then
-      # Fleet/pipeline mode: run prompt and exit when done.
-      exec codex --yolo "$@"
+      # Fleet/pipeline mode: run prompt and exit when done. No exec: the
+      # session.end event at the bottom of this script must still record the
+      # exit code, or a successful run reports exit 1 (session_exit_code's
+      # missing-event fallback).
+      codex --yolo "$@"
       return $?
     fi
     # Interactive mode: run prompt, then keep session alive for attach/peek.
@@ -173,8 +176,11 @@ launch_claude() {
     if [ "${BERTH_FLEET:-}" = "1" ]; then
       # Fleet/pipeline mode: pass -p directly to Claude so it runs
       # non-interactively and exits when done. Run directly (no script
-      # wrapper) so output is visible in the tmux pane for preview.
-      exec "${cmd[@]}"
+      # wrapper) so output is visible in the tmux pane for preview. No exec:
+      # the session.end event at the bottom of this script must still record
+      # the exit code, or a successful run reports exit 1 (session_exit_code's
+      # missing-event fallback).
+      "${cmd[@]}"
       return $?
     fi
 
