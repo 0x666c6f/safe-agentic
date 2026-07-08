@@ -484,7 +484,15 @@ func apiOnlyEnforcementGap(ctx context.Context, exec vmexec.Executor) string {
 	if err != nil || !strings.Contains(string(rules), "-i bti+") {
 		return "missing BERTH_EGRESS bti+ drop rule"
 	}
-	if _, err := exec.Run(ctx, "pgrep", "-x", "tinyproxy"); err != nil {
+	// -f full-cmdline match: busybox pgrep compares against argv[0], which is
+	// "/usr/bin/tinyproxy" for the init-supervised instance and bare
+	// "tinyproxy" for a legacy self-daemonized one (VM provisioned before the
+	// inittab supervisor) — (^|/) accepts both, so an upgraded CLI doesn't
+	// fail-closed against a healthy older VM. The [t] char class keeps the
+	// pattern from matching any probing process whose own cmdline carries it,
+	// and the wrapper (/bin/sh /usr/local/bin/berth-tinyproxy-run) doesn't
+	// match either, so a dead proxy with a sleeping wrapper still reads down.
+	if _, err := exec.Run(ctx, "pgrep", "-f", "(^|/)[t]inyproxy"); err != nil {
 		return "tinyproxy egress proxy not running"
 	}
 	return ""
@@ -805,7 +813,11 @@ func appendAuthVolumes(ctx context.Context, exec vmexec.Executor, cmd *docker.Do
 	}
 	cmd.AddLabel(labels.AuthType, "ephemeral")
 	for _, dst := range destinations {
-		cmd.AddTmpfsOwned(dst, "8m", true, true, 1000, 1000)
+		// 64m, not 8m: the agent's session transcript lives here too, and a
+		// full tmpfs makes those writes fail silently — Claude keeps running
+		// but `berth logs`/`berth output` see a 0-byte session file. tmpfs
+		// pages are allocated lazily, so the headroom costs nothing up front.
+		cmd.AddTmpfsOwned(dst, "64m", true, true, 1000, 1000)
 	}
 	return nil
 }

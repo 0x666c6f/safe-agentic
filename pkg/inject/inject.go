@@ -44,8 +44,36 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read claude settings: %w", err)
 	}
-	envs["BERTH_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(data)
+	envs["BERTH_CLAUDE_CONFIG_B64"] = base64.StdEncoding.EncodeToString(sanitizeClaudeSettings(data))
 	return envs, nil
+}
+
+// sanitizeClaudeSettings strips host plugin enablement from a seeded
+// settings.json. Inside the container Claude Code would otherwise clone every
+// enabled marketplace into ~/.claude/plugins on first start — filling the
+// small .claude tmpfs (which then silently breaks session-transcript writes,
+// i.e. `berth logs`/`berth output`) with repos that are host preferences, not
+// sandbox ones. Unparseable settings are passed through untouched.
+func sanitizeClaudeSettings(data []byte) []byte {
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return data
+	}
+	changed := false
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+		if _, ok := settings[key]; ok {
+			delete(settings, key)
+			changed = true
+		}
+	}
+	if !changed {
+		return data
+	}
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 func ReadClaudeAuth(homeDir string) (map[string]string, error) {

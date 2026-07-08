@@ -74,6 +74,16 @@ https://claude.ai/device`,
 			want: StateBlocked,
 		},
 		{
+			name: "blocked - prompt submitted without credentials",
+			pane: `
+❯ Create a file HELLO.txt at the repo root. Then finish.
+  ⎿  Not logged in · Please run /login
+✻ Worked for 0s
+❯
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents`,
+			want: StateBlocked,
+		},
+		{
 			name: "idle - awaiting prompt",
 			pane: `
 ╭──────────────────────────────────────────────╮

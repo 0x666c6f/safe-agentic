@@ -18,6 +18,9 @@ var claudeTable = table{
 		{"esc to interrupt", "actively working (esc to interrupt)"},
 		{"ctrl+c to interrupt", "actively working"},
 		{"esc to cancel", "actively working"},
+		// Extended-thinking spinner variant renders "(14s · still thinking
+		// with xhigh effort)" instead of the esc-to-interrupt hint.
+		{"still thinking", "actively working (thinking)"},
 	},
 	// Self-sufficient UI strings. "no, and tell claude" is the third option of
 	// every tool-permission box and appears nowhere else.
@@ -28,6 +31,9 @@ var claudeTable = table{
 		{"waiting for your input", "waiting for input"},
 		{"browser to log in", "waiting for login"},
 		{"paste this code", "waiting for login"},
+		// Rendered when a prompt is submitted without credentials (e.g. host
+		// seeding was off and the auth volume is empty).
+		{"please run /login", "waiting for login"},
 	},
 	// Ambiguous questions: only "blocked" when a selectable option is also on
 	// screen (Claude's tool-permission and plan-approval boxes render "❯ 1.").

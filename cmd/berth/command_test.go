@@ -43,6 +43,7 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	origStartVM := startVM
 	origInstallVMSupportFiles := installVMSupportFiles
 	origConfigureHostNAT := configureHostNAT
+	origVMEgressWorking := vmEgressWorking
 	origHostIPForwardingEnabled := hostIPForwardingEnabled
 	origConfigureLaunchdSSHAuth := configureLaunchdSSHAuth
 	origReconcileHomeMount := reconcileHomeMount
@@ -55,6 +56,7 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 	startVM = func(vmName string) error { return nil }
 	installVMSupportFiles = func(vmName, buildRoot string) error { return nil }
 	configureHostNAT = func(stdout, stderr io.Writer) error { return nil }
+	vmEgressWorking = func(vmName string) bool { return false }
 	hostIPForwardingEnabled = func() bool { return true }
 	configureLaunchdSSHAuth = func() error { return nil }
 	reconcileHomeMount = func(vmName, desired string, stdout, stderr io.Writer) (bool, error) { return false, nil }
@@ -68,6 +70,7 @@ func testSetup(t *testing.T) (*vmexec.FakeExecutor, func()) {
 		startVM = origStartVM
 		installVMSupportFiles = origInstallVMSupportFiles
 		configureHostNAT = origConfigureHostNAT
+		vmEgressWorking = origVMEgressWorking
 		hostIPForwardingEnabled = origHostIPForwardingEnabled
 		configureLaunchdSSHAuth = origConfigureLaunchdSSHAuth
 		reconcileHomeMount = origReconcileHomeMount
@@ -3689,6 +3692,52 @@ func TestDiagnoseCommand_DockerReady(t *testing.T) {
 	// Output should contain diagnostic header regardless
 	if !strings.Contains(output, "diagnostics") && !strings.Contains(output, "installed") {
 		t.Errorf("expected diagnostic output, got: %s", output)
+	}
+}
+
+func TestDiagnoseCommand_SummaryReflectsFailedChecks(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	// CI runners have no Apple `container` binary, and runDiagnose bails out
+	// before the summary when it is missing — stub one on PATH so the test
+	// exercises the same path everywhere.
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "container"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write container stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fake.SetResponse("docker info", "Server Version: 24.0\n")
+	fake.SetResponse("docker images berth:latest -q", "sha256:abc123\n")
+	// api-only gap: FakeExecutor returns "" for iptables -S DOCKER-USER, so the
+	// BERTH_EGRESS jump is missing and the check line shows ✗.
+
+	output := captureOutput(func() {
+		if err := runDiagnose(diagnoseCmd, nil); err != nil {
+			t.Fatalf("runDiagnose() error = %v", err)
+		}
+	})
+
+	if strings.Contains(output, "All checks passed") {
+		t.Fatalf("summary claims all passed despite ✗ check:\n%s", output)
+	}
+	if !strings.Contains(output, "Some checks failed — follow the fixes") {
+		t.Fatalf("expected posture-failure summary, got:\n%s", output)
+	}
+
+	// With the gap closed, the summary should say all passed again.
+	fake.SetResponse("iptables -S DOCKER-USER", "-A DOCKER-USER -j BERTH_EGRESS\n")
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	fake.SetResponse("pgrep -f (^|/)[t]inyproxy", "123\n")
+
+	output = captureOutput(func() {
+		if err := runDiagnose(diagnoseCmd, nil); err != nil {
+			t.Fatalf("runDiagnose() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "All checks passed") {
+		t.Fatalf("expected all-passed summary, got:\n%s", output)
 	}
 }
 

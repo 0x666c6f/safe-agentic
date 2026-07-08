@@ -547,12 +547,26 @@ case "$AGENT_TYPE" in
           sleep 3
         fi
         if [ -f "$SESSION_STATE_DIR/pending-prompt" ]; then
-          # Wait for Claude to be ready, then type the prompt
-          [ "${BERTH_AUTO_TRUST:-}" = "1" ] || sleep 5
           prompt=$(cat "$SESSION_STATE_DIR/pending-prompt")
           rm -f "$SESSION_STATE_DIR/pending-prompt"
+          # Wait for the TUI input box instead of a fixed sleep: seeded auth
+          # and MCP startup can outlast any constant, and a prompt typed too
+          # early sat in the input box with its Enter swallowed.
+          for _ in $(seq 1 30); do
+            pane=$(tmux capture-pane -pt "$TMUX_SESSION_NAME" 2>/dev/null || true)
+            case "$pane" in
+              *"? for shortcuts"*|*"bypass permissions on"*) break ;;
+            esac
+            sleep 1
+          done
           tmux send-keys -t "$TMUX_SESSION_NAME" -l "$prompt"
-          tmux send-keys -t "$TMUX_SESSION_NAME" Enter
+          # Enter can still be swallowed while the TUI settles after the
+          # paste. Re-sending is safe: Enter on an empty input box is a no-op,
+          # so extra presses after a successful submit change nothing.
+          for delay in 1 3 5; do
+            sleep "$delay"
+            tmux send-keys -t "$TMUX_SESSION_NAME" Enter
+          done
         fi
       ) &
     fi

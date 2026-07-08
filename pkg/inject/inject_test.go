@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -76,6 +77,44 @@ func TestReadClaudeConfigWithSettingsJSON(t *testing.T) {
 	}
 	if string(decoded) != content {
 		t.Errorf("decoded content = %q, want %q", string(decoded), content)
+	}
+}
+
+func TestReadClaudeConfigStripsPluginEnablement(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"model":"opus","enabledPlugins":{"ponytail@ponytail":true},"extraKnownMarketplaces":{"ponytail":{"source":{"source":"github","repo":"x/y"}}},"hooks":{}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(content), 0600); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+
+	envs, err := ReadClaudeConfig(dir)
+	if err != nil {
+		t.Fatalf("ReadClaudeConfig error: %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(envs["BERTH_CLAUDE_CONFIG_B64"])
+	if err != nil {
+		t.Fatalf("decode env var value: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(decoded, &got); err != nil {
+		t.Fatalf("seeded settings not valid JSON: %v", err)
+	}
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+		if _, ok := got[key]; ok {
+			t.Errorf("seeded settings still contain %q", key)
+		}
+	}
+	for _, key := range []string{"model", "hooks"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("seeded settings lost %q", key)
+		}
+	}
+}
+
+func TestSanitizeClaudeSettingsPassesThroughInvalidJSON(t *testing.T) {
+	raw := []byte(`{not json`)
+	if got := sanitizeClaudeSettings(raw); string(got) != string(raw) {
+		t.Errorf("invalid JSON should pass through unchanged, got %q", got)
 	}
 }
 
