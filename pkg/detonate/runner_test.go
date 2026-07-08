@@ -166,13 +166,13 @@ func TestBuildTartListArgs(t *testing.T) {
 }
 
 func TestBuildTartRunArgs(t *testing.T) {
-	got := buildTartRunArgs("run-1", "/tmp/sample.dmg", "10.0.0.0/24", "/tmp/artifacts")
+	got := buildTartRunArgs("run-1", "/tmp/sample.iso", "10.0.0.0/24", "/tmp/artifacts")
 	want := []string{
 		"run", "run-1",
 		"--no-graphics",
 		"--net-softnet",
 		"--net-softnet-allow=10.0.0.0/24",
-		"--disk=/tmp/sample.dmg:ro",
+		"--disk=/tmp/sample.iso:ro",
 		"--dir=out:/tmp/artifacts",
 	}
 	if !equalStrings(got, want) {
@@ -188,8 +188,10 @@ func TestBuildTartRunArgs(t *testing.T) {
 }
 
 func TestBuildHdiutilCreateArgs(t *testing.T) {
-	got := buildHdiutilCreateArgs("/tmp/src", "run-1-sample", "/tmp/sample.dmg")
-	want := []string{"create", "-srcfolder", "/tmp/src", "-volname", "run-1-sample", "-format", "UDRO", "-ov", "-o", "/tmp/sample.dmg"}
+	// Must build an ISO (Tart attaches ISOs; it rejects a UDRO .dmg), with the
+	// source dir as the trailing positional that makehybrid expects.
+	got := buildHdiutilCreateArgs("/tmp/src", "run-1-sample", "/tmp/sample.iso")
+	want := []string{"makehybrid", "-iso", "-joliet", "-default-volume-name", "run-1-sample", "-ov", "-o", "/tmp/sample.iso", "/tmp/src"}
 	if !equalStrings(got, want) {
 		t.Errorf("buildHdiutilCreateArgs = %v, want %v", got, want)
 	}
@@ -411,8 +413,13 @@ func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
 	if _, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "10.0.0.0/24"); err != nil {
 		t.Fatalf("ConfigureIsolatedNet: %v", err)
 	}
-	// A sample must be injected before Run will boot; record one directly.
-	r.samples["run-1"] = "/tmp/run-1-sample.dmg"
+	// A sample must be injected before Run will boot; Run fails closed unless
+	// the image exists on disk, so stage a real file and record it directly.
+	sampleImg := filepath.Join(t.TempDir(), "run-1-sample.iso")
+	if err := os.WriteFile(sampleImg, []byte("iso"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.samples["run-1"] = sampleImg
 
 	// Regression: mutate the shared field after ConfigureIsolatedNet. Run
 	// must not pick this up — it must use the CIDR captured at
@@ -435,7 +442,7 @@ func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
 	}
 	wantArg := "--net-softnet-allow=10.0.0.0/24"
 	badArg := "--net-softnet-allow=192.168.99.0/24"
-	wantDisk := "--disk=/tmp/run-1-sample.dmg:ro"
+	wantDisk := "--disk=" + sampleImg + ":ro"
 	found, foundDisk := false, false
 	for _, a := range runCall {
 		if a == badArg {

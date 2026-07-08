@@ -105,6 +105,10 @@ func buildTartDeleteArgs(run string) []string {
 	return []string{"delete", run}
 }
 
+func buildTartStopArgs(run string) []string {
+	return []string{"stop", run}
+}
+
 // buildTartRunArgs builds the `tart run` argv for an isolated detonation.
 // Documented cirruslabs/tart flags only — a wrong flag fails CLOSED because
 // the guest won't boot:
@@ -133,10 +137,13 @@ func buildTartRunArgs(run, sampleImagePath, softnetAllowCIDR, artifactsDir strin
 	}
 }
 
-// buildHdiutilCreateArgs builds a read-only (UDRO) disk image containing
-// only the staged sample, so the sample can never be written back to.
+// buildHdiutilCreateArgs builds a read-only ISO 9660 image containing only the
+// staged sample. An ISO (not a UDRO .dmg) is required: Tart's `--disk` attaches
+// raw images and ISOs, but rejects an Apple UDIF/UDRO .dmg ("failed to lock …:
+// Bad file descriptor"). ISO is inherently read-only, so the sample can never
+// be written back to. srcDir is the trailing positional for makehybrid.
 func buildHdiutilCreateArgs(srcDir, volName, outPath string) []string {
-	return []string{"create", "-srcfolder", srcDir, "-volname", volName, "-format", "UDRO", "-ov", "-o", outPath}
+	return []string{"makehybrid", "-iso", "-joliet", "-default-volume-name", volName, "-ov", "-o", outPath, srcDir}
 }
 
 // tartListEntry is the subset of `tart list --format json` fields this
@@ -152,6 +159,14 @@ func parseTartList(output []byte) ([]tartListEntry, error) {
 		return nil, fmt.Errorf("parsing tart list output: %w", err)
 	}
 	return entries, nil
+}
+
+// sampleImagePath is the deterministic on-disk location of a run's injected
+// sample image. InjectOffline writes it here and Run reads it back — the two
+// run in SEPARATE CLI processes, so the file path (not the in-memory samples
+// map) is the cross-invocation source of truth for what to attach.
+func (r *TartRunner) sampleImagePath(run string) string {
+	return filepath.Join(r.WorkDir, run, "sample.iso")
 }
 
 // --- Runner impl ---
@@ -216,10 +231,16 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	if err := ValidateIsolated(n); err != nil {
 		return err
 	}
-	// Fail closed if no sample was injected: booting a clone with no sample
-	// disk is a no-op at best and a state-confusion bug at worst.
+	// Fail closed if no sample was injected. The samples map is per-process;
+	// inject and run are separate CLI invocations, so fall back to the
+	// deterministic on-disk image path and require it to actually exist —
+	// booting a clone with no sample disk is a no-op at best and a
+	// state-confusion bug at worst.
 	if sampleImage == "" {
-		return fmt.Errorf("containment violation: no sample injected for run %q; call inject first", run)
+		sampleImage = r.sampleImagePath(run)
+	}
+	if _, err := os.Stat(sampleImage); err != nil {
+		return fmt.Errorf("containment violation: no sample image for run %q (%s); call inject first", run, err)
 	}
 	// Defense in depth: the captured CIDR must still be a private allow-list.
 	// The value re-validated here is the exact value buildTartRunArgs uses.
@@ -238,6 +259,30 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	// mutable r.AllowedIsolatedGateway field — so the values just guarded are
 	// the exact values that reach the command.
 	_, err := r.cmd.Run(runCtx, "tart", buildTartRunArgs(run, sampleImage, gw, artifactsDir)...)
+
+	// The timeout is the detonation WINDOW, not an error: a generic golden
+	// never powers itself off, so the expected end of a run is our deadline
+	// firing and tart run being killed. Treat DeadlineExceeded as the normal
+	// end of the window — but only after CONFIRMING the guest is actually
+	// powered off. A live-malware VM must never be reported as a completed
+	// run: killing tart run should tear the guest down, but if the stop can't
+	// be confirmed we fail closed so the caller auto-destroys the clone.
+	//
+	// runCtx.Err() distinguishes our timeout (DeadlineExceeded → window end)
+	// from a parent-ctx cancel (Canceled → propagate as failure), and from a
+	// genuine early tart failure (deadline not reached → err propagates).
+	if runCtx.Err() == context.DeadlineExceeded {
+		// Use the parent ctx, not the expired runCtx, for the teardown checks.
+		_, _ = r.cmd.Run(ctx, "tart", buildTartStopArgs(run)...)
+		off, offErr := r.PoweredOff(ctx, run)
+		if offErr != nil {
+			return fmt.Errorf("detonation window for run %q elapsed but VM power state could not be confirmed (treating as containment failure): %w", run, offErr)
+		}
+		if !off {
+			return fmt.Errorf("detonation window for run %q elapsed but the VM is still running after stop — treating as containment failure", run)
+		}
+		return nil
+	}
 	return err
 }
 
@@ -270,13 +315,13 @@ func (r *TartRunner) InjectOffline(ctx context.Context, run, samplePath string) 
 		return fmt.Errorf("staging sample: %w", err)
 	}
 
-	outDMG := filepath.Join(runDir, "sample.dmg")
-	if _, err := r.cmd.Run(ctx, "hdiutil", buildHdiutilCreateArgs(stageDir, run+"-sample", outDMG)...); err != nil {
+	outISO := r.sampleImagePath(run)
+	if _, err := r.cmd.Run(ctx, "hdiutil", buildHdiutilCreateArgs(stageDir, run+"-sample", outISO)...); err != nil {
 		return fmt.Errorf("building read-only sample image: %w", err)
 	}
 
 	r.mu.Lock()
-	r.samples[run] = outDMG
+	r.samples[run] = outISO
 	r.mu.Unlock()
 	return nil
 }

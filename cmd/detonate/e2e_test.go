@@ -93,7 +93,16 @@ func (m *mockTart) Run(_ context.Context, name string, args ...string) ([]byte, 
 		return nil, nil
 
 	case name == "hdiutil":
-		// InjectOffline stages the sample for real; only the image build is faked.
+		// InjectOffline stages the sample for real; only the image build is
+		// faked. Real hdiutil writes the image to its `-o <outPath>` argument,
+		// and Run fails closed unless that file exists on disk — so the mock
+		// must create it too, or the end-to-end run can't find the sample.
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "-o" {
+				_ = os.WriteFile(args[i+1], []byte("fake-iso"), 0o600)
+				break
+			}
+		}
 		return nil, nil
 	}
 	return nil, nil

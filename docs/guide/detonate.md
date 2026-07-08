@@ -14,10 +14,15 @@ If you only need to inspect a suspicious file without running it, you don't need
 
 - **An immutable golden VM image** — a pre-built, read-only, hashed analysis VM (instrumentation installed, network pre-pinned to the isolated segment, powered off clean). Every run clones it; the golden itself is never booted.
 - **An isolated, no-uplink network** — a segment with no NAT, no bridge, and no route to the host, berth's network, or your LAN. Isolation is **code-enforced**: the Tart backend boots the guest with `tart run --net-softnet --net-softnet-allow=<cidr>`, never `--net-bridged` (a bridge can reach the host LAN/internet). The `--gateway` you pass is that softnet allow-list CIDR, and `detonate` rejects any allow-list that isn't a single private range — `0.0.0.0/0`, `::/0`, or any public/routable CIDR fails closed before boot.
+- **Passwordless sudo for Softnet** — Tart's softnet needs root, and it invokes its helper via `sudo`. Without a passwordless-sudo entry, `tart run --net-softnet` dies immediately with *"root privileges are required … Softnet process terminated prematurely."* Configure it once (scoped to the softnet binary only), e.g.:
+  ```sh
+  printf '%s ALL=(root) NOPASSWD: %s\n' "$USER" "$(command -v softnet)" | sudo tee /etc/sudoers.d/softnet >/dev/null
+  sudo chmod 0440 /etc/sudoers.d/softnet
+  ```
 - **An INetSim (or equivalent) fakenet gateway VM** on that private segment (e.g. `10.0.0.0/24`), running out-of-band capture (`tcpdump`/`tshark`) and simulated DNS/HTTP/SMTP, so the sample gets a plausible network to talk to without ever reaching the real internet. The softnet allow-list pins the guest to exactly this gateway's private CIDR.
 - **A sacrificial or segmented detonation host** — never the analyst's daily Mac. A full VM escape should land on a throwaway box, not your primary machine.
 
-The Tart backend now runs a real detonation: `inject` builds a read-only (`hdiutil` UDRO) disk image of the sample and `run` attaches it read-only via `tart run --disk=<image>:ro`, so the sample disk can never be written back to. Provisioning the golden image and the fakenet gateway VM is still operator work — `detonate` enforces the containment around them, it does not build them for you.
+The Tart backend now runs a real detonation: `inject` builds a read-only ISO of the sample (`hdiutil makehybrid -iso` — Tart attaches raw images and ISOs but rejects an Apple UDIF/UDRO `.dmg`) and `run` attaches it read-only via `tart run --disk=<image>:ro`, so the sample disk can never be written back to. Provisioning the golden image and the fakenet gateway VM is still operator work — `detonate` enforces the containment around them, it does not build them for you.
 
 **Known hardening trade-off:** artifacts leave the guest through a writable host share (`tart run --dir=out:<dir>`), which is an escape surface a compromised guest could abuse. `collect` is already symlink-safe (it never dereferences guest-planted symlinks), but the stronger fix — collecting artifacts from an offline disk after poweroff — is deferred, since it can't be implemented or verified without a real Tart guest.
 
