@@ -321,6 +321,11 @@ TPEOF
 
 # Restart tinyproxy with our config (nohup: the VM has no assumed service manager here).
 as_root pkill -x tinyproxy >/dev/null 2>&1 || true
+# tinyproxy drops privileges to the tinyproxy user (User/Group in the config),
+# so its LogFile must be writable by that user — otherwise it dies at startup
+# with "Could not open file ...: Permission denied" and api-only fails closed.
+as_root touch /var/log/tinyproxy.log
+as_root chown tinyproxy:tinyproxy /var/log/tinyproxy.log 2>/dev/null || true
 # Let tinyproxy daemonize itself (it double-forks and reparents to init) rather
 # than `nohup ... &`: the backgrounded form raced with the machine-run session
 # teardown and sometimes left the proxy dead, so api-only spawns failed closed
