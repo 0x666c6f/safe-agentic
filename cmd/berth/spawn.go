@@ -484,7 +484,13 @@ func apiOnlyEnforcementGap(ctx context.Context, exec vmexec.Executor) string {
 	if err != nil || !strings.Contains(string(rules), "-i bti+") {
 		return "missing BERTH_EGRESS bti+ drop rule"
 	}
-	if _, err := exec.Run(ctx, "pgrep", "-x", "tinyproxy"); err != nil {
+	// -f full-path match: busybox pgrep compares against argv[0], which is
+	// "/usr/bin/tinyproxy" for the init-supervised instance (bare "tinyproxy -x"
+	// only matched the legacy self-daemonized one). The [t] char class keeps the
+	// pattern from matching any probing process whose own cmdline carries it,
+	// and the wrapper (/bin/sh /usr/local/bin/berth-tinyproxy-run) doesn't match
+	// either, so a dead proxy with a sleeping wrapper is still reported as down.
+	if _, err := exec.Run(ctx, "pgrep", "-f", "/usr/bin/[t]inyproxy"); err != nil {
 		return "tinyproxy egress proxy not running"
 	}
 	return ""

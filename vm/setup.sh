@@ -319,22 +319,42 @@ FilterCaseSensitive Off
 ConnectPort 443
 TPEOF
 
-# Restart tinyproxy with our config (nohup: the VM has no assumed service manager here).
-as_root pkill -x tinyproxy >/dev/null 2>&1 || true
 # tinyproxy drops privileges to the tinyproxy user (User/Group in the config),
 # so its LogFile must be writable by that user — otherwise it dies at startup
 # with "Could not open file ...: Permission denied" and api-only fails closed.
 as_root touch /var/log/tinyproxy.log
 as_root chown tinyproxy:tinyproxy /var/log/tinyproxy.log 2>/dev/null || true
-# Let tinyproxy daemonize itself (it double-forks and reparents to init) rather
-# than `nohup ... &`: the backgrounded form raced with the machine-run session
-# teardown and sometimes left the proxy dead, so api-only spawns failed closed
-# after a clean `berth vm start`. A plain foreground invocation returns once the
-# daemon has detached and persists reliably.
-as_root tinyproxy -c /etc/tinyproxy/tinyproxy.conf || echo "    WARNING: tinyproxy failed to start"
+# Supervise tinyproxy under busybox init (::respawn: in /etc/inittab) instead of
+# letting it daemonize from this session: a daemonized proxy started from a
+# machine-run session sometimes died with the session teardown, so api-only
+# spawns failed closed after a clean `berth vm start`. init restarts it if it
+# ever dies and brings it back after a VM reboot without re-running setup.
+as_root tee /usr/local/bin/berth-tinyproxy-run >/dev/null <<'TPRUN'
+#!/bin/sh
+# Respawned by init (see /etc/inittab). The sleep throttles a crash loop if
+# tinyproxy exits immediately (bad config, port held): busybox init has no
+# respawn backoff of its own.
+/usr/bin/tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf
+sleep 5
+TPRUN
+as_root chmod 0755 /usr/local/bin/berth-tinyproxy-run
+if ! as_root grep -q 'berth-tinyproxy-run' /etc/inittab 2>/dev/null; then
+  echo '::respawn:/usr/local/bin/berth-tinyproxy-run' | as_root tee -a /etc/inittab >/dev/null
+fi
+# Kill any running instance (a stray daemonized copy would hold port 8119, and
+# a supervised one must re-read the config we just wrote); init respawns it.
+# Both forms: -x matches a legacy self-daemonized instance (argv[0] "tinyproxy"),
+# -f the supervised one (argv[0] "/usr/bin/tinyproxy"); busybox pgrep/pkill
+# compare against argv[0], not comm. The [t] char class stops the -f pattern
+# from matching the probe's own process chain (e.g. sudo's cmdline).
+as_root pkill -x tinyproxy >/dev/null 2>&1 || true
+as_root pkill -f '/usr/bin/[t]inyproxy' >/dev/null 2>&1 || true
+as_root kill -HUP 1
 tinyproxy_up=false
-for _ in 1 2 3 4 5; do
-  if as_root pgrep -x tinyproxy >/dev/null 2>&1; then tinyproxy_up=true; break; fi
+# Up to ~10s: a killed instance sits out the wrapper's 5s crash-loop throttle
+# before init respawns it.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if as_root pgrep -f '/usr/bin/[t]inyproxy' >/dev/null 2>&1; then tinyproxy_up=true; break; fi
   sleep 1
 done
 $tinyproxy_up || echo "    WARNING: tinyproxy not running after start — api-only mode would fail closed"

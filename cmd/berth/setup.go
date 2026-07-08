@@ -37,6 +37,7 @@ var (
 	startVM                 = startVMImpl
 	installVMSupportFiles   = installVMSupportFilesImpl
 	configureHostNAT        = configureHostNATImpl
+	vmEgressWorking         = vmEgressWorkingImpl
 	hostIPForwardingEnabled = hostIPForwardingEnabledImpl
 	configureLaunchdSSHAuth = configureLaunchdSSHAuthImpl
 	reconcileHomeMount      = reconcileHomeMountImpl
@@ -520,6 +521,18 @@ func configureHostNATImpl(stdout, stderr io.Writer) error {
 	return nil
 }
 
+// vmEgressWorkingImpl reports whether the VM can already reach the internet
+// through the current host NAT state (DNS + TCP + HTTP). Probing first lets
+// setup/vm start skip the admin escalation when NAT survived since the last
+// apply. Direct argv, no berth-exec relay: it must also work on a machine that
+// setup has not provisioned yet.
+func vmEgressWorkingImpl(vmName string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "container", "machine", "run", "-n", vmName, "-u", "root", "--",
+		"wget", "-T", "5", "-q", "--spider", "http://dl-cdn.alpinelinux.org/alpine/MIRRORS.txt").Run() == nil
+}
+
 func hostNATInterfaces() ([]string, error) {
 	iface, err := defaultHostInterface()
 	if err != nil {
@@ -756,10 +769,14 @@ func runSetup(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("start VM: %w", err)
 		}
 	}
-	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
-		return err
+	if vmEgressWorking(vmName) {
+		fmt.Println("✓ Apple container host NAT already active (VM has egress)")
+	} else {
+		if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+			return err
+		}
+		fmt.Println("✓ Apple container host NAT configured")
 	}
-	fmt.Println("✓ Apple container host NAT configured")
 
 	vmRunner := newExecutor()
 
@@ -931,12 +948,17 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("✓ VM started")
 	// A reboot resets net.inet.ip.forwarding and flushes the pf NAT anchor, so
-	// restore egress before bootstrap tries package/network operations.
-	fmt.Println("Restoring host network egress (NAT)…")
-	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
-		return fmt.Errorf("restore host NAT: %w", err)
+	// restore egress before bootstrap tries package/network operations. Probe
+	// first: when NAT survived, skip the admin escalation entirely.
+	if vmEgressWorking(vmName) {
+		fmt.Println("✓ Host NAT already active (VM has egress)")
+	} else {
+		fmt.Println("Restoring host network egress (NAT)…")
+		if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+			return fmt.Errorf("restore host NAT: %w", err)
+		}
+		fmt.Println("✓ Host NAT applied")
 	}
-	fmt.Println("✓ Host NAT applied")
 	fmt.Println("Re-applying VM hardening…")
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
@@ -1012,10 +1034,12 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	vmName := configuredVMName()
 
+	failedChecks := 0
 	check := func(label string, ok bool, detail string) {
 		icon := "✓"
 		if !ok {
 			icon = "✗"
+			failedChecks++
 		}
 		if detail != "" {
 			fmt.Printf("  %s %s — %s\n", icon, label, detail)
@@ -1124,7 +1148,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	infraOK := containerErr == nil && systemErr == nil && vmExists && dockerErr == nil && imageExists
 	switch {
-	case infraOK && cfgErr == nil && forwarding:
+	case infraOK && cfgErr == nil && failedChecks == 0:
 		fmt.Println("All checks passed. Environment is ready.")
 	case infraOK && cfgErr == nil && !forwarding:
 		fmt.Println("Environment built but VM has no internet egress. Run: berth vm start")
@@ -1132,6 +1156,10 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		// executeSpawn aborts on this same config error, so the environment is
 		// not actually usable even though the infra checks pass.
 		fmt.Printf("Spawn defaults are unreadable (%s); fix or reset with: berth config reset\n", config.DefaultsPath())
+	case infraOK:
+		// Core infra is fine but a posture check failed (api-only enforcement,
+		// worktree mount) — its ✗ line above carries the specific remediation.
+		fmt.Println("Some checks failed — follow the fixes on the ✗ lines above.")
 	default:
 		fmt.Println("Some checks failed. Run: berth setup")
 	}

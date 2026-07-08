@@ -805,9 +805,9 @@ func TestRequireAPIOnlyEnforcement_ActiveEnforcementPasses(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j BERTH_EGRESS\n")
 	fake.SetResponse("iptables -S BERTH_EGRESS", "-N BERTH_EGRESS\n-A BERTH_EGRESS -i bti+ -j REJECT\n")
-	// pgrep -x tinyproxy default (unset) succeeds with empty output — set
+	// pgrep -f /usr/bin/[t]inyproxy default (unset) succeeds with empty output — set
 	// explicitly for clarity.
-	fake.SetResponse("pgrep -x tinyproxy", "123\n")
+	fake.SetResponse("pgrep -f /usr/bin/[t]inyproxy", "123\n")
 
 	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
 	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false); err != nil {
@@ -821,7 +821,7 @@ func TestRequireAPIOnlyEnforcement_MissingJumpFailsClosed(t *testing.T) {
 	// rule is orphaned and never reached. Must still fail closed.
 	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j RETURN\n")
 	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
-	fake.SetResponse("pgrep -x tinyproxy", "123\n")
+	fake.SetResponse("pgrep -f /usr/bin/[t]inyproxy", "123\n")
 
 	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
 	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
@@ -852,7 +852,7 @@ func TestRequireAPIOnlyEnforcement_TinyproxyNotRunningFailsClosed(t *testing.T) 
 	fake := vmexec.NewFake()
 	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j BERTH_EGRESS\n")
 	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
-	fake.SetError("pgrep -x tinyproxy", "no process found")
+	fake.SetError("pgrep -f /usr/bin/[t]inyproxy", "no process found")
 
 	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
 	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
