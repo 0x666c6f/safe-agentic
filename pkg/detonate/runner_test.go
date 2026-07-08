@@ -166,10 +166,24 @@ func TestBuildTartListArgs(t *testing.T) {
 }
 
 func TestBuildTartRunArgs(t *testing.T) {
-	got := buildTartRunArgs("run-1", "isolated-bridge0", "/tmp/artifacts")
-	want := []string{"run", "run-1", "--no-graphics", "--net-bridged=isolated-bridge0", "--dir=out:/tmp/artifacts"}
+	got := buildTartRunArgs("run-1", "/tmp/sample.dmg", "10.0.0.0/24", "/tmp/artifacts")
+	want := []string{
+		"run", "run-1",
+		"--no-graphics",
+		"--net-softnet",
+		"--net-softnet-allow=10.0.0.0/24",
+		"--disk=/tmp/sample.dmg:ro",
+		"--dir=out:/tmp/artifacts",
+	}
 	if !equalStrings(got, want) {
 		t.Errorf("buildTartRunArgs = %v, want %v", got, want)
+	}
+	// Containment: bridged networking is forbidden — it can reach the host
+	// LAN/internet. There must be no --net-bridged in the argv, ever.
+	for _, a := range got {
+		if strings.HasPrefix(a, "--net-bridged") {
+			t.Fatalf("buildTartRunArgs emitted forbidden bridged networking: %v", got)
+		}
 	}
 }
 
@@ -258,20 +272,21 @@ func TestTartRunner_Run_RejectsWhenNoAttachmentConfigured(t *testing.T) {
 	}
 }
 
-func TestTartRunner_ConfigureIsolatedNet_FailsClosedWithoutOperatorGateway(t *testing.T) {
+func TestTartRunner_ConfigureIsolatedNet_FailsClosedOnNonCIDRGateway(t *testing.T) {
 	r := NewTartRunner(t.TempDir())
-	// AllowedIsolatedGateway is unset (zero value) — must fail closed.
+	// A non-CIDR allow-list (e.g. an interface name) must fail closed:
+	// validateSoftnetAllow only accepts a parseable private CIDR.
 	_, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "en0")
 	if err == nil {
-		t.Fatal("ConfigureIsolatedNet without an operator-provisioned gateway = nil error, want rejection")
+		t.Fatal("ConfigureIsolatedNet with a non-CIDR allow-list = nil error, want rejection")
 	}
 }
 
 func TestTartRunner_ConfigureIsolatedNet_SucceedsWithMatchingOperatorGateway(t *testing.T) {
 	r := NewTartRunner(t.TempDir())
-	r.AllowedIsolatedGateway = "isolated-bridge0"
+	r.AllowedIsolatedGateway = "10.0.0.0/24"
 
-	n, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "isolated-bridge0")
+	n, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "10.0.0.0/24")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -280,21 +295,20 @@ func TestTartRunner_ConfigureIsolatedNet_SucceedsWithMatchingOperatorGateway(t *
 	}
 }
 
-// TestTartRunner_InjectOffline_BuildsImageButFailsClosedOnAttach documents
-// the deliberate stub: hdiutil image creation is a real, nameable command
-// and is exercised; attaching that image to a running Tart guest is not a
-// capability this code invents, so it must fail closed rather than claim
-// success.
-func TestTartRunner_InjectOffline_BuildsImageButFailsClosedOnAttach(t *testing.T) {
+// TestTartRunner_InjectOffline_BuildsImageAndRecordsPath: hdiutil builds the
+// read-only sample image (spied here — the real-hdiutil path is exercised in
+// tart_test.go), and the built image path is recorded per-run so Run can
+// attach it read-only. Attaching happens at `tart run --disk` time, so
+// InjectOffline succeeds rather than failing closed.
+func TestTartRunner_InjectOffline_BuildsImageAndRecordsPath(t *testing.T) {
 	spy := &spyCmdRunner{listJSON: []byte(`[{"Name":"run-1","State":"stopped"}]`)}
 	r := NewTartRunner(t.TempDir())
 	r.cmd = spy
 
 	samplePath := writeTempSample(t)
 
-	err := r.InjectOffline(context.Background(), "run-1", samplePath)
-	if err == nil {
-		t.Fatal("InjectOffline attach step = nil error, want fail-closed operator-provisioned error")
+	if err := r.InjectOffline(context.Background(), "run-1", samplePath); err != nil {
+		t.Fatalf("InjectOffline = %v, want nil (image built + path recorded)", err)
 	}
 
 	foundHdiutil := false
@@ -305,6 +319,9 @@ func TestTartRunner_InjectOffline_BuildsImageButFailsClosedOnAttach(t *testing.T
 	}
 	if !foundHdiutil {
 		t.Errorf("expected hdiutil to be invoked to build the read-only sample image, calls: %v", spy.calls)
+	}
+	if r.samples["run-1"] == "" {
+		t.Error("InjectOffline must record the built sample image path for run-1")
 	}
 }
 
@@ -389,17 +406,19 @@ func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
 	spy := &spyCmdRunner{}
 	r := NewTartRunner(t.TempDir())
 	r.cmd = spy
-	r.AllowedIsolatedGateway = "isolated-bridge0"
+	r.AllowedIsolatedGateway = "10.0.0.0/24"
 
-	if _, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "isolated-bridge0"); err != nil {
+	if _, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "10.0.0.0/24"); err != nil {
 		t.Fatalf("ConfigureIsolatedNet: %v", err)
 	}
+	// A sample must be injected before Run will boot; record one directly.
+	r.samples["run-1"] = "/tmp/run-1-sample.dmg"
 
 	// Regression: mutate the shared field after ConfigureIsolatedNet. Run
-	// must not pick this up — it must use the gateway captured at
-	// ConfigureIsolatedNet time, so the value ValidateIsolated guarded and
+	// must not pick this up — it must use the CIDR captured at
+	// ConfigureIsolatedNet time, so the value validateSoftnetAllow guarded and
 	// the value `tart run` consumes can never diverge.
-	r.AllowedIsolatedGateway = "attacker-bridge1"
+	r.AllowedIsolatedGateway = "192.168.99.0/24"
 
 	if err := r.Run(context.Background(), "run-1", time.Second); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -414,19 +433,29 @@ func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
 	if runCall == nil {
 		t.Fatalf("expected a `tart run` invocation, calls: %v", spy.calls)
 	}
-	wantArg := "--net-bridged=isolated-bridge0"
-	badArg := "--net-bridged=attacker-bridge1"
-	found := false
+	wantArg := "--net-softnet-allow=10.0.0.0/24"
+	badArg := "--net-softnet-allow=192.168.99.0/24"
+	wantDisk := "--disk=/tmp/run-1-sample.dmg:ro"
+	found, foundDisk := false, false
 	for _, a := range runCall {
 		if a == badArg {
 			t.Fatalf("Run used the mutated shared gateway field instead of the captured value: %v", runCall)
 		}
+		if strings.HasPrefix(a, "--net-bridged") {
+			t.Fatalf("Run emitted forbidden bridged networking: %v", runCall)
+		}
 		if a == wantArg {
 			found = true
 		}
+		if a == wantDisk {
+			foundDisk = true
+		}
 	}
 	if !found {
-		t.Fatalf("expected tart run args to contain %q (captured gateway), got %v", wantArg, runCall)
+		t.Fatalf("expected tart run args to contain %q (captured CIDR), got %v", wantArg, runCall)
+	}
+	if !foundDisk {
+		t.Fatalf("expected tart run args to attach the injected sample read-only %q, got %v", wantDisk, runCall)
 	}
 }
 

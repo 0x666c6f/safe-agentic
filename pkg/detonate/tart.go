@@ -38,13 +38,13 @@ func (execCmdRunner) Run(ctx context.Context, name string, args ...string) ([]by
 // TartRunner is the real Runner backed by the `tart` CLI (cirruslabs/tart,
 // Apple Virtualization.framework) plus `hdiutil` for sample staging.
 //
-// Network isolation is operator-provisioned, not invented here: real
-// containment (no route to the internet) depends on the operator having
-// already built a bridge/softnet interface with no uplink. TartRunner only
-// enforces that ConfigureIsolatedNet was told about that exact,
-// operator-named gateway (AllowedIsolatedGateway) and that Run() re-checks
-// the resulting NetAttachment through ValidateIsolated before ever invoking
-// `tart run`.
+// Network isolation is CODE-ENFORCED here: ConfigureIsolatedNet runs the
+// softnet allow-list through validateSoftnetAllow (must be a single private
+// CIDR — the operator's fakenet gateway subnet — never a public/0.0.0.0/0
+// range), Run re-validates it plus the resulting NetAttachment through
+// ValidateIsolated, and buildTartRunArgs emits --net-softnet, never
+// --net-bridged. The operator still provisions the golden image and the
+// fakenet gateway; this code guarantees the guest is pinned to it.
 type TartRunner struct {
 	cmd cmdRunner
 
@@ -52,20 +52,26 @@ type TartRunner struct {
 	// images and the artifacts directory shared into the guest.
 	WorkDir string
 
-	// AllowedIsolatedGateway is the name of the single operator-verified,
-	// no-uplink network interface ConfigureIsolatedNet will accept. Left
-	// empty (the zero value), every ConfigureIsolatedNet call fails
-	// closed — isolation must be explicitly provisioned, never assumed.
+	// AllowedIsolatedGateway is an OPTIONAL operator pin: when non-empty,
+	// ConfigureIsolatedNet additionally requires the softnet allow-CIDR to
+	// equal it, so the operator can nail detonations to one exact fakenet
+	// gateway subnet. When empty, any CIDR that passes validateSoftnetAllow
+	// (i.e. any private range) is accepted — the private-CIDR check is the
+	// load-bearing containment control either way.
 	AllowedIsolatedGateway string
 
 	mu   sync.Mutex
 	nets map[string]NetAttachment
-	// gateways captures, per run, the exact gateway string ConfigureIsolatedNet
-	// validated against AllowedIsolatedGateway. Run must build its command
-	// from this captured value — never from the mutable AllowedIsolatedGateway
-	// field — so the value the guard checked and the value the command uses
-	// can never diverge, even if AllowedIsolatedGateway changes afterward.
+	// gateways captures, per run, the exact softnet allow-CIDR
+	// ConfigureIsolatedNet validated. Run must build its command from this
+	// captured value — never from the mutable AllowedIsolatedGateway field —
+	// so the value the guard checked and the value the command uses can never
+	// diverge, even if AllowedIsolatedGateway changes afterward.
 	gateways map[string]string
+	// samples captures, per run, the path to the read-only sample image
+	// InjectOffline built. Run refuses to boot a run with no injected sample,
+	// and attaches this exact image via --disk=<path>:ro.
+	samples map[string]string
 }
 
 func NewTartRunner(workDir string) *TartRunner {
@@ -74,6 +80,7 @@ func NewTartRunner(workDir string) *TartRunner {
 		WorkDir:  workDir,
 		nets:     make(map[string]NetAttachment),
 		gateways: make(map[string]string),
+		samples:  make(map[string]string),
 	}
 }
 
@@ -91,12 +98,32 @@ func buildTartDeleteArgs(run string) []string {
 	return []string{"delete", run}
 }
 
-// buildTartRunArgs builds the `tart run` argv for an isolated detonation:
-// no graphics (headless), attached only to the operator-provisioned
-// isolated bridge, with the host artifacts directory shared in read-write
-// so the guest can drop results without any extraction step being needed.
-func buildTartRunArgs(run, isolatedGateway, artifactsDir string) []string {
-	return []string{"run", run, "--no-graphics", "--net-bridged=" + isolatedGateway, "--dir=out:" + artifactsDir}
+// buildTartRunArgs builds the `tart run` argv for an isolated detonation.
+// Documented cirruslabs/tart flags only — a wrong flag fails CLOSED because
+// the guest won't boot:
+//   - --no-graphics: headless.
+//   - --net-softnet + --net-softnet-allow=<CIDR>: Tart's isolated user-space
+//     network (softnet), pinned by an allow-list to the single private CIDR
+//     of the operator's fakenet gateway. NEVER --net-bridged: a bridge can
+//     reach the host LAN/internet, which is the exact egress this forbids.
+//   - --disk=<sample>:ro: the injected sample, attached READ-ONLY. The :ro is
+//     mandatory — the sample image must never be writable by the guest.
+//   - --dir=out:<artifactsDir>: host artifacts share so the guest drops
+//     results with no extraction step.
+func buildTartRunArgs(run, sampleImagePath, softnetAllowCIDR, artifactsDir string) []string {
+	return []string{
+		"run", run,
+		"--no-graphics",
+		"--net-softnet",
+		"--net-softnet-allow=" + softnetAllowCIDR,
+		"--disk=" + sampleImagePath + ":ro",
+		// ponytail: this writable artifact share is a known escape-surface
+		// trade-off — a guest can plant symlinks/large files here (Collect is
+		// already symlink-safe). The stronger fix is collecting artifacts from
+		// an offline disk after poweroff, but that can't be implemented or
+		// verified without a real Tart guest, so it's the deferred hardening.
+		"--dir=out:" + artifactsDir,
+	}
 }
 
 // buildHdiutilCreateArgs builds a read-only (UDRO) disk image containing
@@ -144,13 +171,20 @@ func (r *TartRunner) Clone(ctx context.Context, golden, run string) error {
 	return err
 }
 
+// ConfigureIsolatedNet interprets gw as the softnet allow-CIDR (the
+// operator's fakenet gateway subnet/host). It fails closed unless gw is a
+// single private CIDR (validateSoftnetAllow); if AllowedIsolatedGateway is
+// set it must additionally match it exactly. On success it records the
+// isolated NetAttachment and the validated CIDR per-run so Run consumes the
+// exact value guarded here.
 func (r *TartRunner) ConfigureIsolatedNet(_ context.Context, run, gw string) (NetAttachment, error) {
-	if r.AllowedIsolatedGateway == "" || gw != r.AllowedIsolatedGateway {
-		// operator-provisioned: real isolation (no route to a real
-		// uplink) is a network-level guarantee this code cannot verify
-		// on its own. Fail closed until the operator sets
-		// AllowedIsolatedGateway to their verified no-uplink interface.
-		return NetAttachment{}, fmt.Errorf("operator-provisioned: no verified isolated gateway configured for %q (got %q) — set TartRunner.AllowedIsolatedGateway to a pre-provisioned no-uplink bridge/softnet interface first", run, gw)
+	if r.AllowedIsolatedGateway != "" && gw != r.AllowedIsolatedGateway {
+		return NetAttachment{}, fmt.Errorf("containment violation: softnet allow-CIDR %q for run %q does not match the operator pin %q", gw, run, r.AllowedIsolatedGateway)
+	}
+	// Load-bearing control: the allow-list must be a private CIDR or the
+	// sample gets internet egress. Reject anything public/0.0.0.0/0.
+	if err := validateSoftnetAllow(gw); err != nil {
+		return NetAttachment{}, err
 	}
 	n := NetAttachment{Mode: "isolated", HasUplink: false}
 	r.mu.Lock()
@@ -164,6 +198,7 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	r.mu.Lock()
 	n, ok := r.nets[run]
 	gw := r.gateways[run]
+	sampleImage := r.samples[run]
 	r.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("containment violation: no network attachment configured for run %q; call ConfigureIsolatedNet first", run)
@@ -174,6 +209,16 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	if err := ValidateIsolated(n); err != nil {
 		return err
 	}
+	// Fail closed if no sample was injected: booting a clone with no sample
+	// disk is a no-op at best and a state-confusion bug at worst.
+	if sampleImage == "" {
+		return fmt.Errorf("containment violation: no sample injected for run %q; call inject first", run)
+	}
+	// Defense in depth: the captured CIDR must still be a private allow-list.
+	// The value re-validated here is the exact value buildTartRunArgs uses.
+	if err := validateSoftnetAllow(gw); err != nil {
+		return err
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -182,25 +227,19 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
 		return fmt.Errorf("preparing artifacts dir: %w", err)
 	}
-	// Use the gateway captured at ConfigureIsolatedNet time (gw), not
-	// r.AllowedIsolatedGateway, so the value ValidateIsolated just guarded
-	// is the exact value that reaches the command.
-	_, err := r.cmd.Run(runCtx, "tart", buildTartRunArgs(run, gw, artifactsDir)...)
+	// Use the CIDR and sample captured at inject/configure time — never the
+	// mutable r.AllowedIsolatedGateway field — so the values just guarded are
+	// the exact values that reach the command.
+	_, err := r.cmd.Run(runCtx, "tart", buildTartRunArgs(run, sampleImage, gw, artifactsDir)...)
 	return err
 }
 
 // InjectOffline builds a read-only disk image of the sample with hdiutil
-// (a real, nameable command) and refuses to proceed unless the guest is
-// confirmed powered off.
-//
-// operator-provisioned: attaching that built image as an extra disk to an
-// existing Tart guest is NOT wired up here. Tart's exact mechanism/flag for
-// attaching an additional disk to an already-cloned VM is version-dependent
-// and not something this code will guess at — inventing a flag that turns
-// out wrong would silently do nothing (or worse) while claiming success.
-// Confirm the correct incantation against the operator's installed Tart
-// version and extend this method before relying on it; until then it fails
-// closed after building the image.
+// (a real, nameable command), refuses to proceed unless the guest is
+// confirmed powered off, and records the built image path so Run can attach
+// it read-only via `tart run --disk=<path>:ro`. Attaching an extra disk at
+// `tart run` time (not to a live guest) is Tart's documented mechanism, so no
+// separate live-attach step is needed.
 func (r *TartRunner) InjectOffline(ctx context.Context, run, samplePath string) error {
 	off, err := r.PoweredOff(ctx, run)
 	if err != nil {
@@ -229,7 +268,10 @@ func (r *TartRunner) InjectOffline(ctx context.Context, run, samplePath string) 
 		return fmt.Errorf("building read-only sample image: %w", err)
 	}
 
-	return fmt.Errorf("operator-provisioned: built read-only sample image at %s but the guest-attach step is not configured — verify your Tart version's extra-disk mechanism and extend TartRunner.InjectOffline before use", outDMG)
+	r.mu.Lock()
+	r.samples[run] = outDMG
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *TartRunner) Collect(ctx context.Context, run, destDir string) ([]string, error) {
@@ -298,6 +340,7 @@ func (r *TartRunner) Destroy(ctx context.Context, run string) error {
 	r.mu.Lock()
 	delete(r.nets, run)
 	delete(r.gateways, run)
+	delete(r.samples, run)
 	r.mu.Unlock()
 	return err
 }

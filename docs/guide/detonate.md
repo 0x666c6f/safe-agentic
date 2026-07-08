@@ -13,11 +13,13 @@ If you only need to inspect a suspicious file without running it, you don't need
 `detonate` refuses to run rather than fake success. Before `run` will do anything, you need:
 
 - **An immutable golden VM image** — a pre-built, read-only, hashed analysis VM (instrumentation installed, network pre-pinned to the isolated segment, powered off clean). Every run clones it; the golden itself is never booted.
-- **An isolated, no-uplink network** — a segment with no NAT, no bridge, and no route to the host, berth's network, or your LAN. `run` re-validates this immediately before boot and refuses if it isn't provably isolated.
-- **An INetSim (or equivalent) gateway VM** on that segment, running out-of-band capture (`tcpdump`/`tshark`) and simulated DNS/HTTP/SMTP, so the sample gets a plausible network to talk to without ever reaching the real internet.
+- **An isolated, no-uplink network** — a segment with no NAT, no bridge, and no route to the host, berth's network, or your LAN. Isolation is **code-enforced**: the Tart backend boots the guest with `tart run --net-softnet --net-softnet-allow=<cidr>`, never `--net-bridged` (a bridge can reach the host LAN/internet). The `--gateway` you pass is that softnet allow-list CIDR, and `detonate` rejects any allow-list that isn't a single private range — `0.0.0.0/0`, `::/0`, or any public/routable CIDR fails closed before boot.
+- **An INetSim (or equivalent) fakenet gateway VM** on that private segment (e.g. `10.0.0.0/24`), running out-of-band capture (`tcpdump`/`tshark`) and simulated DNS/HTTP/SMTP, so the sample gets a plausible network to talk to without ever reaching the real internet. The softnet allow-list pins the guest to exactly this gateway's private CIDR.
 - **A sacrificial or segmented detonation host** — never the analyst's daily Mac. A full VM escape should land on a throwaway box, not your primary machine.
 
-`InjectOffline` and real network-isolation verification are deliberate fail-closed stubs today: the harness refuses the operation rather than pretend it happened. Wiring them to a real hypervisor/network backend is operator work, not something `detonate` will fake for you.
+The Tart backend now runs a real detonation: `inject` builds a read-only (`hdiutil` UDRO) disk image of the sample and `run` attaches it read-only via `tart run --disk=<image>:ro`, so the sample disk can never be written back to. Provisioning the golden image and the fakenet gateway VM is still operator work — `detonate` enforces the containment around them, it does not build them for you.
+
+**Known hardening trade-off:** artifacts leave the guest through a writable host share (`tart run --dir=out:<dir>`), which is an escape surface a compromised guest could abuse. `collect` is already symlink-safe (it never dereferences guest-planted symlinks), but the stronger fix — collecting artifacts from an offline disk after poweroff — is deferred, since it can't be implemented or verified without a real Tart guest.
 
 ## Verb lifecycle
 
@@ -25,8 +27,8 @@ If you only need to inspect a suspicious file without running it, you don't need
 detonate route   <static.json>              # pick Tier A/B/C, or refuse
 detonate create  <run> --golden <name>       # CoW-clone the immutable golden
 detonate inject  <run> <sample>              # offline disk-mount; hash into custody
-detonate run     <run> --gateway <gw> --timeout 180s [--yes]
-                                              # boot on the isolated net only; hard timeout
+detonate run     <run> --gateway <private-cidr> --timeout 180s [--yes]
+                                              # boot on softnet pinned to <private-cidr>; hard timeout
 detonate collect <run> --out <dir>           # offline RO-mount; pull + hash artifacts
 detonate destroy <run>                       # delete the clone; golden stays untouched
 ```
@@ -37,7 +39,7 @@ Example sequence:
 detonate route static-findings.json
 detonate create run-042 --golden remnux-golden
 detonate inject run-042 ./sample.bin
-detonate run run-042 --gateway isolated-gw --timeout 300s
+detonate run run-042 --gateway 10.0.0.0/24 --timeout 300s
 detonate collect run-042 --out ~/detonate-out/run-042
 detonate destroy run-042
 ```
@@ -48,8 +50,8 @@ detonate destroy run-042
 
 These are enforced in code, not left to operator discipline:
 
-- **Isolated-network-only.** `run` calls `ConfigureIsolatedNet` and validates the result before boot; anything that isn't isolated fails closed and `Run` is never invoked.
-- **Offline sample injection.** `inject` attaches the sample to the guest disk before boot. There is no live network or shared-folder path for the sample to enter the guest.
+- **Isolated-network-only.** `run` calls `ConfigureIsolatedNet` (which rejects any allow-list that isn't a single private CIDR), validates the result before boot, and re-validates the captured CIDR again immediately before invoking `tart run`; anything that isn't isolated fails closed and `Run` is never invoked. The guest is booted with `--net-softnet`, never `--net-bridged`.
+- **Offline sample injection, read-only.** `inject` builds a read-only disk image of the sample; `run` refuses to boot a run with no injected sample and attaches the image via `--disk=<image>:ro`. There is no live network or shared-folder path for the sample to enter the guest, and the sample disk is never writable.
 - **PoweredOff-gated collect.** `collect` checks `PoweredOff` first and refuses to pull artifacts from a running VM.
 - **Typed confirmation.** `run` prints a warning and requires you to type `detonate <run-name>` back exactly, or pass `--yes` **and** set `DETONATE_I_UNDERSTAND=1` — a bare `--yes` in a script is not enough.
 - **Auto-destroy on failure.** If `Run` errors, `detonate` destroys the clone automatically before returning the error.
