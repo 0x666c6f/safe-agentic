@@ -200,6 +200,18 @@ func setLookPath(t *testing.T, fn func(string) (string, error)) {
 
 func allPresent(name string) (string, error) { return "/usr/bin/" + name, nil }
 
+// softnetSudoOK / setSoftnetSudoProbe stub the passwordless-sudo probe so check
+// tests never invoke real sudo. The default is "configured"; individual tests
+// override it to exercise the fail-closed path.
+func softnetSudoOK(context.Context) (bool, string) { return true, "/usr/bin/softnet (NOPASSWD)" }
+
+func setSoftnetSudoProbe(t *testing.T, fn func(context.Context) (bool, string)) {
+	t.Helper()
+	orig := softnetSudoProbe
+	softnetSudoProbe = fn
+	t.Cleanup(func() { softnetSudoProbe = orig })
+}
+
 // assertReadOnly fails if check ever invoked a stateful Runner method. check
 // must only probe (GoldenExists) — never Clone/Run/InjectOffline/etc.
 func assertReadOnly(t *testing.T, fake *detonate.FakeRunner) {
@@ -214,6 +226,7 @@ func assertReadOnly(t *testing.T, fake *detonate.FakeRunner) {
 func TestRunCheck_AllPresentPrivateGateway_Passes(t *testing.T) {
 	setTempAuditPath(t) // DETONATE_STATE_DIR -> writable temp dir
 	setLookPath(t, allPresent)
+	setSoftnetSudoProbe(t, softnetSudoOK)
 	fake := detonate.NewFakeRunner()
 	fake.SetGoldenExists("golden-ok", true)
 
@@ -238,6 +251,7 @@ func TestRunCheck_TartAbsent_FailsClosed(t *testing.T) {
 		}
 		return "/usr/bin/" + name, nil
 	})
+	setSoftnetSudoProbe(t, softnetSudoOK)
 	fake := detonate.NewFakeRunner()
 
 	var buf bytes.Buffer
@@ -256,6 +270,7 @@ func TestRunCheck_PublicGateway_FailsClosed(t *testing.T) {
 		t.Run(gw, func(t *testing.T) {
 			setTempAuditPath(t)
 			setLookPath(t, allPresent)
+			setSoftnetSudoProbe(t, softnetSudoOK)
 			fake := detonate.NewFakeRunner()
 
 			var buf bytes.Buffer
@@ -274,6 +289,7 @@ func TestRunCheck_PublicGateway_FailsClosed(t *testing.T) {
 func TestRunCheck_GoldenMissing_FailsClosed(t *testing.T) {
 	setTempAuditPath(t)
 	setLookPath(t, allPresent)
+	setSoftnetSudoProbe(t, softnetSudoOK)
 	fake := detonate.NewFakeRunner()
 	fake.SetGoldenExists("missing", false) // default is false anyway
 
@@ -296,6 +312,7 @@ func TestRunCheck_HdiutilAbsent_FailsClosed(t *testing.T) {
 		}
 		return "/usr/bin/" + name, nil
 	})
+	setSoftnetSudoProbe(t, softnetSudoOK)
 	fake := detonate.NewFakeRunner()
 
 	var buf bytes.Buffer
@@ -309,11 +326,59 @@ func TestRunCheck_HdiutilAbsent_FailsClosed(t *testing.T) {
 	assertReadOnly(t, fake)
 }
 
+func TestRunCheck_SoftnetSudoAbsent_FailsClosed(t *testing.T) {
+	setTempAuditPath(t)
+	setLookPath(t, allPresent)
+	setSoftnetSudoProbe(t, func(context.Context) (bool, string) {
+		return false, "no passwordless-sudo (NOPASSWD) rule for softnet"
+	})
+	fake := detonate.NewFakeRunner()
+
+	var buf bytes.Buffer
+	err := runCheck(context.Background(), fake, "", "", &buf)
+	if err == nil {
+		t.Fatal("runCheck() = nil, want non-nil when softnet passwordless sudo is unconfigured (fail closed)")
+	}
+	if !strings.Contains(buf.String(), "✗ softnet passwordless sudo") {
+		t.Errorf("expected ✗ softnet passwordless sudo, got:\n%s", buf.String())
+	}
+	assertReadOnly(t, fake)
+}
+
+func TestListingHasNoPasswd(t *testing.T) {
+	const path = "/opt/homebrew/bin/softnet"
+	cases := []struct {
+		name    string
+		listing string
+		want    bool
+	}{
+		{"exact rule", "    (root) NOPASSWD: /opt/homebrew/bin/softnet", true},
+		{"rule with args", "    (root) NOPASSWD: /opt/homebrew/bin/softnet --net", true},
+		{"in a comma list, all NOPASSWD", "    (root) NOPASSWD: /bin/foo, /opt/homebrew/bin/softnet", true},
+		{"NOPASSWD after a PASSWD command", "    (root) PASSWD: /bin/foo, NOPASSWD: /opt/homebrew/bin/softnet", true},
+		{"full realistic listing", "Matching Defaults entries...\n\nUser x may run:\n    (ALL) ALL\n    (root) NOPASSWD: /opt/homebrew/bin/softnet", true},
+
+		{"no rule at all", "    (ALL) ALL", false},
+		{"prefix-only sibling binary", "    (root) NOPASSWD: /opt/homebrew/bin/softnet-helper", false},
+		{"softnet but PASSWD-required", "    (root) PASSWD: /opt/homebrew/bin/softnet", false},
+		{"softnet flipped back to PASSWD after NOPASSWD", "    (root) NOPASSWD: /bin/foo, PASSWD: /opt/homebrew/bin/softnet", false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := listingHasNoPasswd(c.listing, path); got != c.want {
+				t.Errorf("listingHasNoPasswd(%q) = %v, want %v", c.listing, got, c.want)
+			}
+		})
+	}
+}
+
 func TestRunCheck_MalformedGateway_FailsClosed(t *testing.T) {
 	for _, gw := range []string{"not-a-cidr", "en0", "10.0.0.0"} {
 		t.Run(gw, func(t *testing.T) {
 			setTempAuditPath(t)
 			setLookPath(t, allPresent)
+			setSoftnetSudoProbe(t, softnetSudoOK)
 			fake := detonate.NewFakeRunner()
 
 			var buf bytes.Buffer

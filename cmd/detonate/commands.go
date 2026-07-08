@@ -108,6 +108,83 @@ func parseStaticFindings(data []byte) (detonate.StaticFindings, error) {
 // being present or absent without the real binaries on PATH.
 var lookPath = exec.LookPath
 
+// softnetSudoProbe reports whether passwordless sudo is configured for Tart's
+// softnet helper, and a human-readable detail. It's a package var so `check`
+// tests can stub it without invoking real sudo.
+var softnetSudoProbe = probeSoftnetSudo
+
+// probeSoftnetSudo checks — read-only and non-interactively — whether the
+// current user has a passwordless-sudo (NOPASSWD) rule for the softnet binary.
+// `tart run --net-softnet` invokes softnet via sudo and dies immediately
+// ("root privileges are required … Softnet process terminated prematurely")
+// without it, so this is a hard preflight requirement.
+//
+// It never executes softnet and never prompts. `sudo -n -l <cmd>` alone can't
+// prove NOPASSWD — a cached sudo timestamp makes it succeed for ANY permitted
+// command — so instead it parses the full `sudo -n -l` policy listing, which
+// annotates each rule, for a NOPASSWD line naming softnet's path. The exit code
+// is deliberately ignored: only the parsed listing decides (fail closed if the
+// rule isn't found, e.g. when no cached timestamp lets `-n` list at all).
+func probeSoftnetSudo(ctx context.Context) (bool, string) {
+	path, err := lookPath("softnet")
+	if err != nil {
+		return false, "softnet not on PATH — it ships with cirruslabs/tart; install tart"
+	}
+	out, _ := exec.CommandContext(ctx, "sudo", "-n", "-l").CombinedOutput()
+	if listingHasNoPasswd(string(out), path) {
+		return true, path + " (NOPASSWD)"
+	}
+	return false, fmt.Sprintf("no passwordless-sudo (NOPASSWD) rule for %s — tart run --net-softnet will fail; see docs/guide/detonate.md (if you just configured it, run `sudo -v` and re-check)", path)
+}
+
+// listingHasNoPasswd reports whether `sudo -l` output grants cmdPath under a
+// NOPASSWD tag. It is deliberately conservative to avoid FALSE POSITIVES (which
+// would green-light an environment where softnet actually needs a password):
+//   - matches cmdPath only as a whole command token (right boundary = end,
+//     whitespace, or comma), so a rule for ".../softnet-helper" never satisfies
+//     a check for ".../softnet";
+//   - honors sudo's left-to-right tag scoping on a line: a command listed after
+//     a PASSWD: tag that overrides an earlier NOPASSWD: is NOT treated as
+//     passwordless.
+func listingHasNoPasswd(listing, cmdPath string) bool {
+	for _, line := range strings.Split(listing, "\n") {
+		i := strings.Index(line, "NOPASSWD")
+		if i < 0 {
+			continue
+		}
+		// Commands governed by this NOPASSWD tag are to its right, up to any
+		// later " PASSWD:" tag that flips subsequent commands back to
+		// password-required. (" PASSWD:" can't match inside "NOPASSWD:" — the
+		// char before PASSWD there is 'O', not a space.)
+		scope := line[i:]
+		if j := strings.Index(scope, " PASSWD:"); j >= 0 {
+			scope = scope[:j]
+		}
+		if containsCommandToken(scope, cmdPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCommandToken reports whether cmdPath appears in s as a whole token —
+// the next character after it is end-of-string, whitespace, or a comma — so a
+// path that is merely a prefix of a longer command (softnet vs softnet-helper)
+// does not match.
+func containsCommandToken(s, cmdPath string) bool {
+	for idx := 0; ; {
+		j := strings.Index(s[idx:], cmdPath)
+		if j < 0 {
+			return false
+		}
+		end := idx + j + len(cmdPath)
+		if end == len(s) || s[end] == ' ' || s[end] == '\t' || s[end] == ',' {
+			return true
+		}
+		idx = end
+	}
+}
+
 var (
 	checkGolden  string
 	checkGateway string
@@ -184,7 +261,14 @@ func runCheck(ctx context.Context, r detonate.Runner, golden, gateway string, ou
 	}
 	check("hdiutil available", hdiErr == nil, hdiDetail)
 
-	// 3. state dir writable — same path the store uses (honors DETONATE_STATE_DIR).
+	// 3. softnet passwordless sudo — tart run --net-softnet invokes softnet via
+	// sudo and dies without a NOPASSWD rule. Read-only probe (parses sudo -n -l);
+	// it never executes softnet and never prompts. This is the #1 detonation
+	// gotcha, so it's an unconditional hard check.
+	sudoOK, sudoDetail := softnetSudoProbe(ctx)
+	check("softnet passwordless sudo", sudoOK, sudoDetail)
+
+	// 4. state dir writable — same path the store uses (honors DETONATE_STATE_DIR).
 	stateDir := detonate.StateDir()
 	stErr := stateDirWritable(stateDir)
 	stDetail := stateDir
@@ -193,7 +277,7 @@ func runCheck(ctx context.Context, r detonate.Runner, golden, gateway string, ou
 	}
 	check("state dir writable", stErr == nil, stDetail)
 
-	// 4. golden image — only checked when named. GoldenExists is read-only.
+	// 5. golden image — only checked when named. GoldenExists is read-only.
 	if golden != "" {
 		exists, err := r.GoldenExists(ctx, golden)
 		switch {
@@ -206,7 +290,7 @@ func runCheck(ctx context.Context, r detonate.Runner, golden, gateway string, ou
 		}
 	}
 
-	// 5. isolation gateway — only checked when given. This is the safety-critical
+	// 6. isolation gateway — only checked when given. This is the safety-critical
 	// check: it runs the SAME validator the run path enforces, so a ✓ here means
 	// the run path would accept this CIDR as isolated.
 	if gateway != "" {
@@ -218,7 +302,7 @@ func runCheck(ctx context.Context, r detonate.Runner, golden, gateway string, ou
 		check("isolation gateway "+gateway, err == nil, gwDetail)
 	}
 
-	// 6. Informational — green ≠ safe.
+	// 7. Informational — green ≠ safe.
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Note: green means the ENVIRONMENT is ready, NOT that any sample is safe —")
 	fmt.Fprintln(out, "benign behavior in the sandbox is not proof of safety, and you must still")
