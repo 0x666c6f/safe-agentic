@@ -253,6 +253,15 @@ func findBuildRootImpl() (string, error) {
 	}
 
 	if exe, err := os.Executable(); err == nil {
+		// Resolve symlinks first: a Homebrew install exposes berth as a
+		// symlink chain (bin/berth -> Cellar/<v>/bin/berth -> libexec/bin/berth),
+		// and the bundled build-root files (Dockerfile, entrypoint.sh, vm/) sit
+		// next to the *real* binary in libexec. Without resolving, exeDir lands
+		// in /opt/homebrew/bin and the files are never found — so `berth vm
+		// start` fails from any directory that isn't the berth source tree.
+		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+			exe = resolved
+		}
 		exeDir := filepath.Dir(exe)
 		addCandidate(filepath.Dir(exeDir))
 		addCandidate(filepath.Dir(filepath.Dir(exeDir)))

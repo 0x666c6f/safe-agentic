@@ -308,6 +308,7 @@ Group tinyproxy
 Port 8119
 Listen 0.0.0.0
 Timeout 600
+LogFile "/var/log/tinyproxy.log"
 LogLevel Warning
 MaxClients 100
 Filter "/etc/tinyproxy/allowlist"
@@ -320,7 +321,18 @@ TPEOF
 
 # Restart tinyproxy with our config (nohup: the VM has no assumed service manager here).
 as_root pkill -x tinyproxy >/dev/null 2>&1 || true
-as_root sh -c 'nohup tinyproxy -c /etc/tinyproxy/tinyproxy.conf >/var/log/tinyproxy.log 2>&1 &'
+# Let tinyproxy daemonize itself (it double-forks and reparents to init) rather
+# than `nohup ... &`: the backgrounded form raced with the machine-run session
+# teardown and sometimes left the proxy dead, so api-only spawns failed closed
+# after a clean `berth vm start`. A plain foreground invocation returns once the
+# daemon has detached and persists reliably.
+as_root tinyproxy -c /etc/tinyproxy/tinyproxy.conf || echo "    WARNING: tinyproxy failed to start"
+tinyproxy_up=false
+for _ in 1 2 3 4 5; do
+  if as_root pgrep -x tinyproxy >/dev/null 2>&1; then tinyproxy_up=true; break; fi
+  sleep 1
+done
+$tinyproxy_up || echo "    WARNING: tinyproxy not running after start — api-only mode would fail closed"
 
 # =============================================================================
 # Egress guardrails for berth managed bridges
