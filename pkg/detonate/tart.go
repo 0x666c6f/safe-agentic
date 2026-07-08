@@ -15,10 +15,12 @@ import (
 
 var _ Runner = (*TartRunner)(nil)
 
-// cmdRunner is a thin exec.Command wrapper so TartRunner's command building
+// CmdRunner is a thin exec.Command wrapper so TartRunner's command building
 // is swappable in tests without ever shelling out. execCmdRunner is the
-// real implementation; tests use a spy.
-type cmdRunner interface {
+// real implementation; tests use a spy. Exported so external-package tests
+// (notably the cmd/detonate end-to-end test) can drive a real TartRunner
+// against a fake tart/hdiutil via SetCmdRunner.
+type CmdRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
@@ -46,7 +48,7 @@ func (execCmdRunner) Run(ctx context.Context, name string, args ...string) ([]by
 // --net-bridged. The operator still provisions the golden image and the
 // fakenet gateway; this code guarantees the guest is pinned to it.
 type TartRunner struct {
-	cmd cmdRunner
+	cmd CmdRunner
 
 	// WorkDir roots this runner's per-run host-side staging: sample
 	// images and the artifacts directory shared into the guest.
@@ -83,6 +85,11 @@ func NewTartRunner(workDir string) *TartRunner {
 		samples:  make(map[string]string),
 	}
 }
+
+// SetCmdRunner swaps the exec seam. Test-only: production installs the real
+// execCmdRunner via NewTartRunner. Exists so external-package tests can drive
+// a real TartRunner against a fake tart/hdiutil without shelling out.
+func (r *TartRunner) SetCmdRunner(c CmdRunner) { r.cmd = c }
 
 // --- pure arg builders (unit-tested without exec) ---
 
