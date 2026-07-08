@@ -262,16 +262,25 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 
 	// The timeout is the detonation WINDOW, not an error: a generic golden
 	// never powers itself off, so the expected end of a run is our deadline
-	// firing and tart run being killed. Treat DeadlineExceeded as success —
-	// the guest ran for the full window — and best-effort stop the VM so
-	// collect's PoweredOff check passes. Only a genuine tart failure (bad
-	// flags, isolation refusal, disk error — err with the context still live)
-	// propagates and triggers auto-destroy upstream.
+	// firing and tart run being killed. Treat DeadlineExceeded as the normal
+	// end of the window — but only after CONFIRMING the guest is actually
+	// powered off. A live-malware VM must never be reported as a completed
+	// run: killing tart run should tear the guest down, but if the stop can't
+	// be confirmed we fail closed so the caller auto-destroys the clone.
 	//
-	// runCtx.Err() distinguishes our timeout (DeadlineExceeded → success)
-	// from a parent-ctx cancel (Canceled → propagate as failure).
+	// runCtx.Err() distinguishes our timeout (DeadlineExceeded → window end)
+	// from a parent-ctx cancel (Canceled → propagate as failure), and from a
+	// genuine early tart failure (deadline not reached → err propagates).
 	if runCtx.Err() == context.DeadlineExceeded {
+		// Use the parent ctx, not the expired runCtx, for the teardown checks.
 		_, _ = r.cmd.Run(ctx, "tart", buildTartStopArgs(run)...)
+		off, offErr := r.PoweredOff(ctx, run)
+		if offErr != nil {
+			return fmt.Errorf("detonation window for run %q elapsed but VM power state could not be confirmed (treating as containment failure): %w", run, offErr)
+		}
+		if !off {
+			return fmt.Errorf("detonation window for run %q elapsed but the VM is still running after stop — treating as containment failure", run)
+		}
 		return nil
 	}
 	return err

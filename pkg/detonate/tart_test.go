@@ -97,12 +97,24 @@ func TestTartRunner_Run_RejectsWhenNoSampleInjected(t *testing.T) {
 
 // blockingCmdRunner blocks the `tart run` call until the context is canceled
 // (a guest that runs until the window's deadline kills tart run) and returns
-// immediately for every other call.
-type blockingCmdRunner struct{ calls [][]string }
+// immediately for every other call. `tart list` reports the run in listState
+// (default "stopped") so Run's post-window PoweredOff check has something to
+// read — set listState to "running" to simulate a VM that survived the stop.
+type blockingCmdRunner struct {
+	calls     [][]string
+	listState string
+}
 
 func (b *blockingCmdRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	b.calls = append(b.calls, append([]string{name}, args...))
-	if name == "tart" && len(args) > 0 && args[0] == "run" {
+	switch {
+	case name == "tart" && len(args) > 0 && args[0] == "list":
+		st := b.listState
+		if st == "" {
+			st = "stopped"
+		}
+		return []byte(`[{"Name":"run-1","State":"` + st + `"}]`), nil
+	case name == "tart" && len(args) > 0 && args[0] == "run":
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -145,6 +157,28 @@ func TestTartRunner_Run_TimeoutIsSuccessNotFailure(t *testing.T) {
 	}
 	if deleted {
 		t.Errorf("Run must NOT delete the clone on timeout (collect needs it); calls: %v", b.calls)
+	}
+}
+
+// If the window elapses but the VM is STILL running after the stop, that is a
+// containment failure, not a completed run: a live-malware guest must never be
+// reported as success. Run must return an error so the caller auto-destroys.
+func TestTartRunner_Run_TimeoutButVMStillRunningIsFailure(t *testing.T) {
+	b := &blockingCmdRunner{listState: "running"} // stop "fails" to power it off
+	r := NewTartRunner(t.TempDir())
+	r.cmd = b
+	r.AllowedIsolatedGateway = "10.0.0.0/24"
+	if _, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "10.0.0.0/24"); err != nil {
+		t.Fatalf("ConfigureIsolatedNet: %v", err)
+	}
+	sampleImg := filepath.Join(t.TempDir(), "sample.iso")
+	if err := os.WriteFile(sampleImg, []byte("iso"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.samples["run-1"] = sampleImg
+
+	if err := r.Run(context.Background(), "run-1", 50*time.Millisecond); err == nil {
+		t.Fatal("Run with a VM still running after the window = nil, want a containment failure error")
 	}
 }
 
