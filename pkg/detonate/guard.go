@@ -3,6 +3,7 @@ package detonate
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 // privateBlocks are the only network ranges a softnet allow-list may name:
@@ -35,6 +36,12 @@ var privateBlocks = func() []*net.IPNet {
 func validateSoftnetAllow(cidr string) error {
 	if cidr == "" {
 		return fmt.Errorf("containment violation: softnet allow-list is empty (must be a single private CIDR)")
+	}
+	// Reject any colon up front: this forces a plain IPv4 dotted CIDR and
+	// removes IPv4-mapped-IPv6 forms (e.g. ::ffff:10.0.0.0/120) as an
+	// ambiguous input to the private-block math below.
+	if strings.ContainsRune(cidr, ':') {
+		return fmt.Errorf("containment violation: softnet allow-list %q must be a plain IPv4 CIDR (no IPv6 or v4-mapped notation)", cidr)
 	}
 	ip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {

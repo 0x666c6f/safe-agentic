@@ -30,18 +30,21 @@ func TestValidateSoftnetAllow(t *testing.T) {
 	}
 
 	reject := []string{
-		"",               // empty
-		"0.0.0.0/0",      // default route — internet
-		"::/0",           // IPv6 default route
-		"8.8.8.8/32",     // public host
-		"1.2.3.0/24",     // public range
-		"11.0.0.0/8",     // just outside 10.0.0.0/8
-		"172.15.0.0/16",  // just below the 172.16/12 block
-		"172.32.0.0/24",  // just above the 172.16/12 block
-		"192.167.0.0/16", // just below 192.168/16
-		"10.0.0.0/7",     // prefix too short: spans 10.x and 11.x
-		"not-a-cidr",     // unparseable
-		"en0",            // interface name, not a CIDR
+		"",                    // empty
+		"0.0.0.0/0",           // default route — internet
+		"::/0",                // IPv6 default route
+		"8.8.8.8/32",          // public host
+		"1.2.3.0/24",          // public range
+		"11.0.0.0/8",          // just outside 10.0.0.0/8
+		"172.15.0.0/16",       // just below the 172.16/12 block
+		"172.32.0.0/24",       // just above the 172.16/12 block
+		"192.167.0.0/16",      // just below 192.168/16
+		"10.0.0.0/7",          // prefix too short: spans 10.x and 11.x
+		"192.168.0.0/8",       // prefix widened to all of 192.x (public space)
+		"::ffff:10.0.0.0/120", // IPv4-mapped IPv6 notation — rejected outright
+		"::ffff:8.8.8.8/128",  // v4-mapped public host
+		"not-a-cidr",          // unparseable
+		"en0",                 // interface name, not a CIDR
 	}
 	for _, cidr := range reject {
 		if err := validateSoftnetAllow(cidr); err == nil {
