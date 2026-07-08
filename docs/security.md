@@ -69,6 +69,55 @@ seed_auth = false
 - shared auth when reuse/seed flags are on
 - AWS access when `--aws` is on
 - host home isolation, unless the worktree mount is enabled (below)
+- direct internet egress, when `--network api-only` is on (below)
+
+### api-only egress mode
+
+`--network api-only` is the recommended mode for analyzing untrusted or suspicious file content. The container's direct internet egress is dropped by an iptables `REJECT` on its bridge (see [Architecture](architecture.md#api-only-egress-mode)). External DNS is closed separately: Docker's embedded resolver forwards queries from the VM's own network namespace, which would bypass the bridge `REJECT`, so the container's resolver upstream is pointed at a blackhole (`--dns 127.0.0.1`) — external name resolution fails while `/etc/hosts` entries (the proxy) still resolve. All HTTP(S) traffic must go through a VM-side `tinyproxy` instance reachable only via the injected `HTTPS_PROXY=http://berth-proxy:8119`; the proxy resolves allowlisted targets VM-side, so the container needs no resolver of its own. That proxy is default-deny and forwards only to an exact-host allowlist:
+
+- `api.anthropic.com`
+- `statsig.anthropic.com`
+- `sentry.io`
+- `github.com`
+- `codeload.github.com`
+- `objects.githubusercontent.com`
+
+**Blocks:** direct internet access on arbitrary hosts/ports and the container's own DNS resolution — a malicious file in the workspace can't open a socket or resolve a hostname to anywhere but those six hosts.
+
+**Residual channels (not blocked):**
+
+- **The model conversation itself.** Claude Code's own traffic to `api.anthropic.com` is allowed (that's how the agent works at all), so a payload could in principle exfiltrate small amounts of data by getting the agent to echo it back through the conversation. That path is low-bandwidth and logged in session history, not covert — but it's not zero.
+- **The allowlisted GitHub clone path.** `github.com`, `codeload.github.com`, and `objects.githubusercontent.com` are allowlisted so the agent can clone over HTTPS — which means `git clone`/`fetch` against *any* public GitHub repo works through the proxy, not just the one the agent was spawned with. That's a real pull channel: a file or the agent itself can pull arbitrary public data or instructions (a possible C2/instruction channel). Push-exfil back to GitHub needs write credentials, which `--ephemeral-auth` (no shared auth) avoids.
+
+**api-only is not a malware detonation sandbox.** It narrows network blast radius for static analysis; it does not sandbox execution. Treat all file content as untrusted data and never execute it. SSH clone doesn't work in this mode (port 22 is dropped) — use an HTTPS repo URL.
+
+**Known limitation — container startup window.** A brief window at container startup was observed once (immediately after re-provisioning the VM) where direct egress succeeded before the bridge drop was fully effective; it did not reproduce on later spawns. The DNS blackhole narrows any such window (a hostname can't be resolved without a working resolver), and the agent does not process untrusted file content during init. If you require provably-zero egress from the first instant, treat this as an open gap pending root-cause rather than a guarantee.
+
+### Forensic triage
+
+`berth spawn --forensic` (also `berth run --forensic`) is for static triage of untrusted/suspicious files. It selects the `berth:forensic` image — built ahead of time with `berth update --forensic` from `Dockerfile.forensic` — and defaults `--network` to `api-only` when no network is given (an explicit `--network` wins). If `berth:forensic` hasn't been built, spawn fails closed with a hint to run `berth update --forensic`.
+
+The image pre-bakes a static-analysis tool set, since `api-only` blocks `apt`/`pip` at runtime: `file`, `binutils` (`strings`/`objdump`), `xxd`, `yara`, `binwalk`, `exiftool`, `radare2`, `ssdeep`, and `oletools` (`olevba`/`oleid`) for Office macro analysis. The `forensic-triage` template drives this tool set with never-execute rules.
+
+`clamav` is deliberately excluded — its signature database needs network updates that `api-only` blocks, so a stale scanner would be dead weight rather than protection.
+
+`Dockerfile.forensic` layers `FROM berth:latest`, so build the base image first (`berth setup`, or `berth update`) before `berth update --forensic`. Its apt tools come from the same GPG-signed Ubuntu repos as the base image; `oletools` is version-pinned via pip, though its transitive Python dependencies are not hash-locked (on par with the base image's package installs, not stricter).
+
+This is static analysis, not detonation: the tools inspect file structure, strings, metadata, and embedded content without running anything. `api-only`'s network narrowing (above) does not sandbox execution — never execute or open the files under analysis.
+
+### Evidence mount
+
+`berth spawn --evidence <local-path>` (also `berth run --evidence`) is for analyzing suspicious local files that don't live in a repo. berth reads the host path directly, computes a sha256 manifest, and streams the files into a per-container Docker volume (`<container>-evidence`) mounted **read-only** at `/evidence`. There is no host bind mount and no git involved — the VM stays `home-mount=none`.
+
+The manifest (per-file sha256, size, and relative path) is written to the append-only audit log as an `evidence-ingest` entry before the container launches, so it survives even if a later step fails — that's the chain of custody, viewable with `berth audit`. `--evidence` defaults `--network` to `api-only` when no network is given (an explicit `--network` wins, same chokepoint `--forensic` uses). The evidence volume is removed when the container is stopped (`berth stop`).
+
+**The read-only mount is not a noexec mount.** It stops the agent (or a malicious file) from tampering with or overwriting the evidence, preserving chain of custody — it does not prevent execution. Execution risk is contained the same way as the rest of the container: `api-only` egress plus `cap-drop ALL` and `no-new-privileges`. Treat everything under `/evidence` as untrusted data and never execute it.
+
+The sha256 manifest is computed from one read of the host files and the tar stream mounted into the container is a second, separate read; the manifest assumes the source is quiescent during ingestion. A source actively mutating while ingest runs could make the manifest and the mounted bytes diverge.
+
+### Detonation is a separate, higher-privilege tool
+
+Everything above is static — files are inspected, never executed. Actually *running* a live sample belongs to [`detonate`](guide/detonate.md), a deliberately separate binary from `berth`, kept out of it so live-malware execution can never blur berth's blast-radius boundary. It only runs samples inside an isolated, no-uplink VM it re-validates as isolated immediately before every boot, and it fails closed — refusing rather than faking success — without an operator-provisioned immutable golden VM, isolated network, and gateway. Treat it as a distinct, explicitly-invoked, higher-privilege operation from berth's static triage, not an extension of it.
 
 ### The worktree mount trade-off
 

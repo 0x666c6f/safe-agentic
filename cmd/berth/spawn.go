@@ -72,6 +72,8 @@ type SpawnOpts struct {
 	WorktreeInclude   string
 	DryRun            bool
 	Yes               bool
+	Forensic          bool
+	Evidence          string
 	// Interactive marks a spawn launched from the `spawn`/`run` CLI commands
 	// (as opposed to fleet/pipeline/retry, which drive executeSpawn directly).
 	// Only interactive spawns get the risk confirmation prompt.
@@ -135,7 +137,7 @@ func init() {
 	f.BoolVar(&spawnOpts.NoDocker, "no-docker", false, "Force Docker-in-Docker off even when your config defaults it on")
 	f.BoolVar(&spawnOpts.DockerSocket, "docker-socket", false, "Mount the host Docker socket into the container (broad access); off by default")
 	f.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Force host Docker socket off even when your config defaults it on")
-	f.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	f.StringVar(&spawnOpts.Network, "network", "", "Network mode: 'api-only' (allowlisted proxy egress, safe for untrusted files), a named Docker network like agent-isolated for no internet, or default dedicated bridge")
 	f.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
 	f.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
 	f.IntVar(&spawnOpts.PIDsLimit, "pids-limit", 0, "Max processes in the container; must be >= 64 (default 512)")
@@ -156,10 +158,12 @@ func init() {
 	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "File listing gitignored paths to copy into the worktree, e.g. .env (default: .berthinclude)")
 	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	f.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
+	f.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
+	f.StringVar(&spawnOpts.Evidence, "evidence", "", "Mount a host file/dir read-only at /evidence for analysis; records a sha256 manifest and defaults --network to api-only")
 
 	rf := runCmd.Flags()
 	rf.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
-	rf.StringVar(&spawnOpts.Network, "network", "", "Attach to a named Docker network, e.g. agent-isolated for no internet (default: dedicated bridge)")
+	rf.StringVar(&spawnOpts.Network, "network", "", "Network mode: 'api-only' (allowlisted proxy egress, safe for untrusted files), a named Docker network like agent-isolated for no internet, or default dedicated bridge")
 	rf.StringVar(&spawnOpts.Memory, "memory", "", "Memory limit in Docker syntax, e.g. 8g or 512m (default 8g)")
 	rf.StringVar(&spawnOpts.CPUs, "cpus", "", "CPU limit, e.g. 4 or 2.5 (default 4)")
 	rf.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Cost budget in USD, recorded on the container (advisory — not yet enforced)")
@@ -181,6 +185,8 @@ func init() {
 	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Host path for the --worktree checkout (must sit under the worktrees root)")
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	rf.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
+	rf.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
+	rf.StringVar(&spawnOpts.Evidence, "evidence", "", "Mount a host file/dir read-only at /evidence for analysis; records a sha256 manifest and defaults --network to api-only")
 
 	rootCmd.AddCommand(spawnCmd, runCmd, notifyWaitCmd)
 }
@@ -263,7 +269,19 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
+	// Fail closed BEFORE any docker run: an api-only spawn on a VM that predates
+	// this feature must refuse to launch rather than silently fall through to
+	// full internet (see requireAPIOnlyEnforcement).
+	if err := requireAPIOnlyEnforcement(ctx, exec, resolved, opts.DryRun); err != nil {
+		return err
+	}
+	if err := requireForensicImage(ctx, exec, opts); err != nil {
+		return err
+	}
 	if err := prepareSpawnResourceLimits(ctx, exec, opts, &resolved); err != nil {
+		return err
+	}
+	if err := prepareSpawnEvidence(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
 
@@ -315,6 +333,7 @@ type spawnResolved struct {
 	WorktreePath   string
 	WorktreeVMPath string
 	WorktreeBranch string
+	EvidenceVolume string
 }
 
 func prepareSpawnWorktree(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
@@ -449,6 +468,55 @@ func requireSpawnHostEgress(opts SpawnOpts, cfg config.Config) error {
 	return withExitCode(exitInfra, fmt.Errorf("host egress NAT is off; VM has no internet egress. Run `berth vm start` and approve the macOS administrator prompt, then retry"))
 }
 
+// apiOnlyEnforcementGap probes the VM for the two conditions api-only egress
+// depends on (the BERTH_EGRESS bti+ REJECT rule and a running tinyproxy) and
+// returns a short description of what's missing, or "" if both are active.
+// Shared by the spawn-time fail-closed guard and `berth diagnose`.
+func apiOnlyEnforcementGap(ctx context.Context, exec vmexec.Executor) string {
+	// The bti+ REJECT only takes effect if DOCKER-USER actually jumps to
+	// BERTH_EGRESS. A dockerd restart rebuilds DOCKER-USER and can drop that
+	// jump, leaving the rule present but orphaned (never reached) — so check
+	// the wiring, not just the rule, before trusting the drop.
+	if chain, err := exec.Run(ctx, "iptables", "-S", "DOCKER-USER"); err != nil || !strings.Contains(string(chain), "-j BERTH_EGRESS") {
+		return "BERTH_EGRESS not wired into DOCKER-USER"
+	}
+	rules, err := exec.Run(ctx, "iptables", "-S", "BERTH_EGRESS")
+	if err != nil || !strings.Contains(string(rules), "-i bti+") {
+		return "missing BERTH_EGRESS bti+ drop rule"
+	}
+	if _, err := exec.Run(ctx, "pgrep", "-x", "tinyproxy"); err != nil {
+		return "tinyproxy egress proxy not running"
+	}
+	return ""
+}
+
+// requireAPIOnlyEnforcement fails closed if the VM lacks the iptables bti+ drop
+// rule or the egress proxy, so an api-only spawn never silently gets full
+// internet on a VM that predates this feature. Only checked for api-only mode.
+func requireAPIOnlyEnforcement(ctx context.Context, exec vmexec.Executor, resolved spawnResolved, dryRun bool) error {
+	if dryRun || resolved.NetworkMode != policy.NetworkAPIOnly {
+		return nil
+	}
+	if gap := apiOnlyEnforcementGap(ctx, exec); gap != "" {
+		return withExitCode(exitInfra, fmt.Errorf("api-only egress enforcement is not active in the VM (%s). Your VM predates this feature. Run `berth vm start` to re-provision, then retry", gap))
+	}
+	return nil
+}
+
+// requireForensicImage fails closed if --forensic is set but the berth:forensic
+// image hasn't been built in the VM, so a forensic spawn never silently falls
+// back to berth:latest.
+func requireForensicImage(ctx context.Context, exec vmexec.Executor, opts SpawnOpts) error {
+	if !opts.Forensic || opts.DryRun {
+		return nil
+	}
+	out, err := exec.Run(ctx, "docker", "images", "berth:forensic", "-q")
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return withExitCode(exitInfra, fmt.Errorf("forensic image berth:forensic not found. Build it with `berth update --forensic`, then retry"))
+	}
+	return nil
+}
+
 func validateResolvedSpawn(resolved spawnResolved) error {
 	if err := validate.MemoryLimit(resolved.Memory); err != nil {
 		return err
@@ -466,13 +534,17 @@ func validateResolvedSpawn(resolved spawnResolved) error {
 
 func prepareSpawnResolved(opts SpawnOpts, cfg config.Config) (spawnResolved, error) {
 	var err error
+	imageName := "berth:latest"
+	if opts.Forensic {
+		imageName = "berth:forensic"
+	}
 	resolved := spawnResolved{
 		Config:        cfg,
 		Memory:        coalesce(opts.Memory, cfg.Defaults.Memory),
 		CPUs:          coalesce(opts.CPUs, cfg.Defaults.CPUs),
 		PIDsLimit:     opts.PIDsLimit,
 		ContainerName: resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos),
-		ImageName:     "berth:latest",
+		ImageName:     imageName,
 	}
 	if resolved.PIDsLimit == 0 && cfg.Defaults.PIDsLimit > 0 {
 		resolved.PIDsLimit = cfg.Defaults.PIDsLimit
@@ -526,6 +598,15 @@ func applySpawnConfigDefaults(opts SpawnOpts, cfg config.Config) SpawnOpts {
 		opts.SeedAuth = false
 	} else if cfg.Defaults.SeedAuth {
 		opts.SeedAuth = true
+	}
+	// berth is safe-by-default: a forensic spawn or one mounting external evidence
+	// handles untrusted artifacts, so absent an explicit --network (flag or config
+	// default) it gets api-only egress rather than the normal full-internet bridge.
+	// This is the single chokepoint opts.Network is normalized at, before policy
+	// enforcement, host egress checks, and network creation all read it — so image
+	// selection, the risk summary, and the api-only preflight stay in agreement.
+	if (opts.Forensic || opts.Evidence != "") && opts.Network == "" && cfg.Defaults.Network == "" {
+		opts.Network = policy.NetworkAPIOnly
 	}
 	return opts
 }
@@ -585,6 +666,21 @@ func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts 
 	return nil
 }
 
+// prepareSpawnEvidence ingests --evidence (validate, audit, populate a labeled
+// volume) and records the resulting volume name so buildSpawnRunCmd can mount
+// it read-only. No-op when --evidence is unset.
+func prepareSpawnEvidence(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
+	if opts.Evidence == "" {
+		return nil
+	}
+	volName, err := ingestEvidence(ctx, exec, configuredVMName(), resolved.ContainerName, opts.Evidence, resolved.ImageName, opts.DryRun)
+	if err != nil {
+		return fmt.Errorf("ingest evidence: %w", err)
+	}
+	resolved.EvidenceVolume = volName
+	return nil
+}
+
 func dockerCgroupIsThreaded(ctx context.Context, exec vmexec.Executor) bool {
 	out, err := exec.Run(ctx, "bash", "-lc", "cat /sys/fs/cgroup/docker/cgroup.type /sys/fs/cgroup/cgroup.type 2>/dev/null || true")
 	if err != nil {
@@ -612,6 +708,29 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 		PIDsLimit:       resolved.PIDsLimit,
 		WorkspaceSource: resolved.WorktreeVMPath,
 	})
+	if resolved.NetworkMode == policy.NetworkAPIOnly {
+		cmd.AddFlag("--add-host", "berth-proxy:host-gateway")
+		// Blackhole external DNS: the container needs no resolver of its own
+		// (it reaches the proxy by /etc/hosts name, and the proxy resolves
+		// allowlisted targets VM-side). Docker's embedded resolver forwards
+		// upstream from the VM netns, bypassing the bti+ egress drop, so without
+		// this a malicious file could still tunnel/exfil over DNS. Pointing the
+		// upstream at container loopback (nothing listening) fails external
+		// lookups fast while /etc/hosts entries (berth-proxy) still resolve.
+		cmd.AddFlag("--dns", "127.0.0.1")
+		const proxyURL = "http://berth-proxy:8119"
+		const noProxy = "localhost,127.0.0.1,::1"
+		cmd.AddEnv("HTTPS_PROXY", proxyURL)
+		cmd.AddEnv("HTTP_PROXY", proxyURL)
+		cmd.AddEnv("NO_PROXY", noProxy)
+		// Lowercase variants too: some tools (curl, Python requests) only read
+		// the lowercase form.
+		cmd.AddEnv("https_proxy", proxyURL)
+		cmd.AddEnv("http_proxy", proxyURL)
+		cmd.AddEnv("no_proxy", noProxy)
+		cmd.AddEnv("NODE_USE_ENV_PROXY", "1")
+	}
+	cmd.AddEnv("BERTH_NETWORK_MODE", resolved.NetworkMode)
 	docker.AppendCacheMounts(cmd)
 	if opts.AutoTrust {
 		cmd.AddEnv("BERTH_AUTO_TRUST", "1")
@@ -621,6 +740,10 @@ func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunC
 	}
 	if opts.AllowSetupScripts {
 		cmd.AddEnv("BERTH_ALLOW_SETUP_SCRIPTS", "1")
+	}
+	if resolved.EvidenceVolume != "" {
+		cmd.AddNamedVolumeRO(resolved.EvidenceVolume, "/evidence")
+		cmd.AddEnv("BERTH_EVIDENCE", "1")
 	}
 	return cmd
 }
@@ -642,6 +765,7 @@ func appendSpawnLabels(cmd *docker.DockerRunCmd, opts SpawnOpts, resolved spawnR
 	cmd.AddLabel(labels.SeedAuth, fmt.Sprintf("%v", opts.SeedAuth))
 	cmd.AddLabel(labels.RepoDisplay, repourl.DisplayLabel(opts.Repos))
 	cmd.AddLabel(labels.NetworkMode, resolved.NetworkMode)
+	cmd.AddLabel(labels.Forensic, fmt.Sprintf("%v", opts.Forensic))
 	cmd.AddLabel(labels.Resources, fmt.Sprintf("cpu=%s,mem=%s,pids=%d", resolved.CPUs, resolved.Memory, resolved.PIDsLimit))
 	cmd.AddLabel(labels.Terminal, "tmux")
 	if resolved.WorktreePath != "" {

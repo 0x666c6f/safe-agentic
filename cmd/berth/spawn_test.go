@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0x666c6f/berth/pkg/config"
 	"github.com/0x666c6f/berth/pkg/docker"
+	"github.com/0x666c6f/berth/pkg/policy"
 	"github.com/0x666c6f/berth/pkg/vmexec"
 )
 
@@ -565,5 +567,323 @@ func TestExecuteSpawnWorktreeRejectsStaleRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); !os.IsNotExist(err) {
 		t.Fatalf("worktree must not be created on a stale root, stat err=%v", err)
+	}
+}
+
+// buildSpawnRunCmdForTest renders the docker run command buildSpawnRunCmd would
+// produce, joined into a single string for substring assertions.
+func buildSpawnRunCmdForTest(t *testing.T, opts SpawnOpts, resolved spawnResolved) *docker.DockerRunCmd {
+	t.Helper()
+	return buildSpawnRunCmd(opts, resolved)
+}
+
+func TestSpawnAPIOnlyInjectsProxy(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{
+		AgentType: "claude",
+		Network:   "api-only",
+	}, spawnResolved{
+		ContainerName: "forensic1",
+		NetworkName:   "forensic1-net",
+		NetworkMode:   "api-only",
+		Memory:        "8g",
+		CPUs:          "4",
+		PIDsLimit:     512,
+	})
+	s := strings.Join(cmd.Build(), " ")
+	for _, want := range []string{
+		"--add-host berth-proxy:host-gateway",
+		"--dns 127.0.0.1",
+		"HTTPS_PROXY=http://berth-proxy:8119",
+		"HTTP_PROXY=http://berth-proxy:8119",
+		"https_proxy=http://berth-proxy:8119",
+		"NO_PROXY=localhost,127.0.0.1,::1",
+		"NODE_USE_ENV_PROXY=1",
+		"BERTH_NETWORK_MODE=api-only",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("api-only run cmd missing %q\ngot: %s", want, s)
+		}
+	}
+}
+
+func TestSpawnManagedDoesNotInjectProxy(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{
+		AgentType: "claude",
+	}, spawnResolved{
+		ContainerName: "agent1",
+		NetworkName:   "agent1-net",
+		NetworkMode:   "managed",
+		Memory:        "8g", CPUs: "4", PIDsLimit: 512,
+	})
+	if strings.Contains(strings.Join(cmd.Build(), " "), "HTTPS_PROXY") {
+		t.Error("managed mode must not inject a proxy")
+	}
+}
+
+// ─── --forensic (forensic tool image, safe-default api-only network) ──────────
+
+func TestSpawnForensicSelectsImageAndDefaultsAPIOnly(t *testing.T) {
+	// image selection
+	r := spawnResolved{ContainerName: "f1", NetworkName: "f1-net", NetworkMode: "api-only", Memory: "8g", CPUs: "4", PIDsLimit: 512, ImageName: "berth:forensic"}
+	cmd := buildSpawnRunCmd(SpawnOpts{AgentType: "claude", Forensic: true}, r)
+	if !strings.Contains(strings.Join(cmd.Build(), " "), "berth:forensic") {
+		t.Error("forensic spawn must use berth:forensic image")
+	}
+}
+
+func TestPrepareSpawnResolved_ForensicSelectsForensicImage(t *testing.T) {
+	resolved, err := prepareSpawnResolved(SpawnOpts{AgentType: "claude", Forensic: true}, config.Config{})
+	if err != nil {
+		t.Fatalf("prepareSpawnResolved() error = %v", err)
+	}
+	if resolved.ImageName != "berth:forensic" {
+		t.Errorf("ImageName = %q, want berth:forensic", resolved.ImageName)
+	}
+}
+
+func TestPrepareSpawnResolved_NonForensicUsesLatestImage(t *testing.T) {
+	resolved, err := prepareSpawnResolved(SpawnOpts{AgentType: "claude"}, config.Config{})
+	if err != nil {
+		t.Fatalf("prepareSpawnResolved() error = %v", err)
+	}
+	if resolved.ImageName != "berth:latest" {
+		t.Errorf("ImageName = %q, want berth:latest", resolved.ImageName)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicDefaultsNetworkAPIOnly(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true}, config.Config{})
+	if opts.Network != policy.NetworkAPIOnly {
+		t.Errorf("Network = %q, want %q", opts.Network, policy.NetworkAPIOnly)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicRespectsExplicitNetwork(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true, Network: "managed"}, config.Config{})
+	if opts.Network != "managed" {
+		t.Errorf("Network = %q, want explicit managed to win", opts.Network)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicRespectsConfigNetworkDefault(t *testing.T) {
+	// A config-level network default already picks the network; the forensic
+	// safe-default must not clobber opts.Network to api-only here — downstream
+	// (prepareSpawnNetwork, spawnPolicyRequest, requireSpawnHostEgress) falls
+	// back to cfg.Defaults.Network on its own when opts.Network is empty.
+	cfg := config.Config{Defaults: config.DefaultsSection{Network: "agent-isolated"}}
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true}, cfg)
+	if opts.Network != "" {
+		t.Errorf("Network = %q, want empty (config default wins via its own fallback, not an api-only override)", opts.Network)
+	}
+}
+
+func TestApplySpawnConfigDefaults_NonForensicLeavesNetworkEmpty(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude"}, config.Config{})
+	if opts.Network != "" {
+		t.Errorf("Network = %q, want empty for non-forensic spawn", opts.Network)
+	}
+}
+
+// ─── --evidence (mount host evidence RO, safe-default api-only network) ───────
+
+func TestApplySpawnConfigDefaults_EvidenceDefaultsNetworkAPIOnly(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Evidence: "/x"}, config.Config{})
+	if opts.Network != policy.NetworkAPIOnly {
+		t.Errorf("Network = %q, want %q", opts.Network, policy.NetworkAPIOnly)
+	}
+}
+
+func TestApplySpawnConfigDefaults_EvidenceRespectsExplicitNetwork(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Evidence: "/x", Network: "managed"}, config.Config{})
+	if opts.Network != "managed" {
+		t.Errorf("Network = %q, want explicit managed to win", opts.Network)
+	}
+}
+
+func TestSpawnEvidenceMountsReadOnly(t *testing.T) {
+	cmd := buildSpawnRunCmdForTest(t, SpawnOpts{AgentType: "claude"}, spawnResolved{
+		ContainerName:  "agent-x",
+		NetworkMode:    "api-only",
+		EvidenceVolume: "agent-x-evidence",
+	})
+	s := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(s, "type=volume,src=agent-x-evidence,dst=/evidence,readonly") {
+		t.Errorf("run cmd missing evidence RO mount, got: %s", s)
+	}
+	if !strings.Contains(s, "BERTH_EVIDENCE=1") {
+		t.Errorf("run cmd missing BERTH_EVIDENCE=1, got: %s", s)
+	}
+}
+
+func TestSpawnCmdAndRunCmdRegisterEvidenceFlag(t *testing.T) {
+	if spawnCmd.Flags().Lookup("evidence") == nil {
+		t.Error("spawn: --evidence flag is not registered")
+	}
+	if runCmd.Flags().Lookup("evidence") == nil {
+		t.Error("run: --evidence flag is not registered")
+	}
+}
+
+func TestPrepareSpawnEvidence_PopulatesResolvedVolume(t *testing.T) {
+	setTempAuditPath(t)
+	fake := vmexec.NewFake()
+	origPopulate := populateEvidenceVolume
+	defer func() { populateEvidenceVolume = origPopulate }()
+	populateEvidenceVolume = func(vmName, volName, imageName, hostPath string) error { return nil }
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved := spawnResolved{ContainerName: "agent-x", ImageName: "berth:latest"}
+	err := prepareSpawnEvidence(context.Background(), fake, SpawnOpts{Evidence: root}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnEvidence() error = %v", err)
+	}
+	if resolved.EvidenceVolume != "agent-x-evidence" {
+		t.Errorf("EvidenceVolume = %q, want agent-x-evidence", resolved.EvidenceVolume)
+	}
+}
+
+func TestPrepareSpawnEvidence_NoOpWhenUnset(t *testing.T) {
+	resolved := spawnResolved{ContainerName: "agent-x"}
+	if err := prepareSpawnEvidence(context.Background(), vmexec.NewFake(), SpawnOpts{}, &resolved); err != nil {
+		t.Fatalf("prepareSpawnEvidence() error = %v", err)
+	}
+	if resolved.EvidenceVolume != "" {
+		t.Errorf("EvidenceVolume = %q, want empty when --evidence unset", resolved.EvidenceVolume)
+	}
+}
+
+// ─── requireForensicImage (fail-closed berth:forensic image preflight) ────────
+
+func TestRequireForensicImage_MissingImageFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake() // default: empty output = image not found
+	err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true})
+	if err == nil {
+		t.Fatal("expected error when berth:forensic image is missing, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+	if !strings.Contains(err.Error(), "berth update --forensic") {
+		t.Errorf("error should hint at the build command, got: %v", err)
+	}
+}
+
+func TestRequireForensicImage_PresentImagePasses(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker images berth:forensic -q", "abc123\n")
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil", err)
+	}
+}
+
+func TestRequireForensicImage_NonForensicSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil for non-forensic spawn", err)
+	}
+	if cmds := fake.CommandsMatching("docker images berth:forensic"); len(cmds) != 0 {
+		t.Errorf("non-forensic spawn should not probe for the image, got %v", cmds)
+	}
+}
+
+func TestRequireForensicImage_DryRunSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true, DryRun: true}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil for dry-run", err)
+	}
+	if cmds := fake.CommandsMatching("docker images berth:forensic"); len(cmds) != 0 {
+		t.Errorf("dry-run should not probe for the image, got %v", cmds)
+	}
+}
+
+// ─── requireAPIOnlyEnforcement (fail-closed VM enforcement check) ──────────────
+
+func TestRequireAPIOnlyEnforcement_ActiveEnforcementPasses(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j BERTH_EGRESS\n")
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-N BERTH_EGRESS\n-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	// pgrep -x tinyproxy default (unset) succeeds with empty output — set
+	// explicitly for clarity.
+	fake.SetResponse("pgrep -x tinyproxy", "123\n")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil", err)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_MissingJumpFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake()
+	// bti+ rule present, but DOCKER-USER does not jump to BERTH_EGRESS — the
+	// rule is orphaned and never reached. Must still fail closed.
+	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j RETURN\n")
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	fake.SetResponse("pgrep -x tinyproxy", "123\n")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
+	if err == nil {
+		t.Fatal("expected error when BERTH_EGRESS is not wired into DOCKER-USER, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_MissingIptablesRuleFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j BERTH_EGRESS\n")
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-P BERTH_EGRESS ACCEPT\n")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
+	if err == nil {
+		t.Fatal("expected error when VM lacks the bti+ REJECT rule, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_TinyproxyNotRunningFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("iptables -S DOCKER-USER", "-N DOCKER-USER\n-A DOCKER-USER -j BERTH_EGRESS\n")
+	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
+	fake.SetError("pgrep -x tinyproxy", "no process found")
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false)
+	if err == nil {
+		t.Fatal("expected error when tinyproxy is not running, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_ManagedModeSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkManaged}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, false); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil for managed mode", err)
+	}
+	if cmds := fake.CommandsMatching("iptables -S DOCKER-USER"); len(cmds) != 0 {
+		t.Errorf("managed mode should not probe iptables, got %v", cmds)
+	}
+}
+
+func TestRequireAPIOnlyEnforcement_DryRunSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+
+	resolved := spawnResolved{NetworkMode: policy.NetworkAPIOnly}
+	if err := requireAPIOnlyEnforcement(context.Background(), fake, resolved, true); err != nil {
+		t.Fatalf("requireAPIOnlyEnforcement() error = %v, want nil for dry-run", err)
+	}
+	if cmds := fake.CommandsMatching("iptables -S DOCKER-USER"); len(cmds) != 0 {
+		t.Errorf("dry-run should not probe iptables, got %v", cmds)
 	}
 }

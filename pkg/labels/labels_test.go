@@ -11,6 +11,7 @@ func TestLabelKeysUniqueAndNonEmpty(t *testing.T) {
 		GHAuth,
 		SeedAuth,
 		NetworkMode,
+		Forensic,
 		DockerMode,
 		Resources,
 		Prompt,

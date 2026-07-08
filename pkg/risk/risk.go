@@ -52,5 +52,8 @@ func SpawnNotices(input SpawnInput) []Notice {
 		network := input.NetworkName
 		notices = append(notices, Notice{"--network " + network, "uses a custom network outside managed egress guardrails"})
 	}
+	if input.NetworkMode == "api-only" {
+		notices = append(notices, Notice{"--network api-only", "egress restricted to an allowlisted VM proxy; direct internet and DNS are dropped"})
+	}
 	return notices
 }

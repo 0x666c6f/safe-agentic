@@ -1,0 +1,27 @@
+# Forensic tool layer for berth, built on top of the standard agent image.
+# Built with: berth update --forensic  ->  berth:forensic
+# Tools are pre-baked because --network api-only blocks apt at runtime.
+FROM berth:latest
+
+# apt tools come from Ubuntu's GPG-signed repos (same trust model as the base
+# image). Installed as root; the image returns to the non-root agent user.
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    file \
+    binutils \
+    xxd \
+    yara \
+    binwalk \
+    libimage-exiftool-perl \
+    radare2 \
+    ssdeep \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# oletools (Office macro/OLE static analysis) — pinned. PEP 668 marks the
+# system env externally-managed on Ubuntu 24.04, so allow the install.
+ARG OLETOOLS_VERSION=0.60.2
+RUN pip3 install --no-cache-dir --break-system-packages "oletools==${OLETOOLS_VERSION}"
+
+USER agent

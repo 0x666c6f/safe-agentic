@@ -310,6 +310,87 @@ func TestReconstructSpawnOpts_MissingAgentType(t *testing.T) {
 	}
 }
 
+func TestReconstructSpawnOpts_NetworkMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		networkMode string
+		wantNetwork string
+	}{
+		{"api-only restores explicit mode", "api-only", "api-only"},
+		{"none restores explicit mode", "none", "none"},
+		{"managed leaves default network", "managed", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containerName := "agent-network-" + tt.networkMode
+			labelMap := map[string]string{
+				"berth.agent-type":      "claude",
+				"berth.ssh":             "false",
+				"berth.auth":            "shared",
+				"berth.gh-auth":         "",
+				"berth.seed-auth":       "false",
+				"berth.docker":          "off",
+				"berth.max-cost":        "",
+				"berth.aws":             "",
+				"berth.network-mode":    tt.networkMode,
+				"berth.on-complete-b64": "",
+				"berth.on-fail-b64":     "",
+				"berth.notify-b64":      "",
+			}
+			exec := buildFakeExec(containerName, labelMap, nil)
+
+			opts, err := reconstructSpawnOpts(context.Background(), exec, containerName)
+			if err != nil {
+				t.Fatalf("reconstructSpawnOpts() error: %v", err)
+			}
+			if opts.Network != tt.wantNetwork {
+				t.Errorf("Network = %q, want %q", opts.Network, tt.wantNetwork)
+			}
+		})
+	}
+}
+
+func TestReconstructSpawnOpts_Forensic(t *testing.T) {
+	tests := []struct {
+		name          string
+		forensicLabel string
+		wantForensic  bool
+	}{
+		{"true label restores forensic", "true", true},
+		{"false label restores non-forensic", "false", false},
+		{"absent label defaults to non-forensic", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containerName := "agent-forensic-" + tt.name
+			labelMap := map[string]string{
+				"berth.agent-type":      "claude",
+				"berth.ssh":             "false",
+				"berth.auth":            "shared",
+				"berth.gh-auth":         "",
+				"berth.seed-auth":       "false",
+				"berth.docker":          "off",
+				"berth.max-cost":        "",
+				"berth.aws":             "",
+				"berth.network-mode":    "api-only",
+				"berth.forensic":        tt.forensicLabel,
+				"berth.on-complete-b64": "",
+				"berth.on-fail-b64":     "",
+				"berth.notify-b64":      "",
+			}
+			exec := buildFakeExec(containerName, labelMap, nil)
+
+			opts, err := reconstructSpawnOpts(context.Background(), exec, containerName)
+			if err != nil {
+				t.Fatalf("reconstructSpawnOpts() error: %v", err)
+			}
+			if opts.Forensic != tt.wantForensic {
+				t.Errorf("Forensic = %v, want %v", opts.Forensic, tt.wantForensic)
+			}
+		})
+	}
+}
+
 // ─── retry feedback appending ──────────────────────────────────────────────
 
 func TestRetryFeedbackAppended(t *testing.T) {

@@ -1049,6 +1049,10 @@ func TestStopCommand_Single(t *testing.T) {
 	if len(rmCmds) == 0 {
 		t.Fatal("expected docker rm command")
 	}
+	volCmds := fake.CommandsMatching("docker volume rm " + containerName + "-evidence")
+	if len(volCmds) == 0 {
+		t.Fatal("expected best-effort docker volume rm for the evidence volume")
+	}
 }
 
 func TestStopCommand_All(t *testing.T) {
@@ -1215,6 +1219,26 @@ func TestCleanupAuthRemovesSharedAndIsolatedAuthVolumes(t *testing.T) {
 		if got := fake.CommandsMatching(want); len(got) == 0 {
 			t.Fatalf("missing cleanup command %q", want)
 		}
+	}
+}
+
+func TestCleanupSweepsEvidenceVolumesRegardlessOfAuthFlag(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	origCleanupAuth := cleanupAuth
+	cleanupAuth = false // evidence sweep must not be gated on --auth
+	cleanupYes = true
+	defer func() { cleanupAuth = origCleanupAuth; cleanupYes = false }()
+
+	fake.SetResponse("docker volume ls --filter label=berth.type=evidence --format {{.Name}}", "agent-claude-test-evidence\n")
+
+	if err := runCleanup(cleanupCmd, nil); err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+
+	if got := fake.CommandsMatching("docker volume rm agent-claude-test-evidence"); len(got) == 0 {
+		t.Fatalf("missing evidence volume cleanup command")
 	}
 }
 
@@ -2163,6 +2187,36 @@ func TestUpdateCommand_Full(t *testing.T) {
 	joined := strings.Join(buildCmds[0], " ")
 	if !strings.Contains(joined, "--no-cache") {
 		t.Errorf("expected '--no-cache', got: %s", joined)
+	}
+}
+
+func TestUpdateCommand_Forensic(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	fake.SetResponse("docker build", "Successfully built abc123\n")
+
+	updateForensic = true
+	defer func() { updateForensic = false }()
+
+	output := captureOutput(func() {
+		if err := runUpdate(updateCmd, nil); err != nil {
+			t.Fatalf("runUpdate() error = %v", err)
+		}
+	})
+
+	buildCmds := fake.CommandsMatching("docker build")
+	if len(buildCmds) != 1 {
+		t.Fatalf("want 1 build, got %d", len(buildCmds))
+	}
+	joined := strings.Join(buildCmds[0], " ")
+	for _, want := range []string{"-f /tmp/build-context/Dockerfile.forensic", "-t berth:forensic"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("forensic build missing %q: %s", want, joined)
+		}
+	}
+	if !strings.Contains(output, "berth:forensic") {
+		t.Errorf("expected 'berth:forensic' in output, got: %s", output)
 	}
 }
 

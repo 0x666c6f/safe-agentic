@@ -175,3 +175,56 @@ func TestPrepareNetwork_InvalidCustom(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestAPIOnlyBridgeNameHasBtiPrefix(t *testing.T) {
+	name := APIOnlyBridgeName("my-forensic-agent")
+	if !strings.HasPrefix(name, "bti") {
+		t.Fatalf("api-only bridge %q must start with bti", name)
+	}
+	if len(name) > 15 {
+		t.Fatalf("bridge name %q exceeds Linux IFNAMSIZ (15)", name)
+	}
+	// Deterministic for a given container name.
+	if name != APIOnlyBridgeName("my-forensic-agent") {
+		t.Fatal("bridge name must be deterministic")
+	}
+	// Managed bridge for the same name must NOT collide with the bti prefix.
+	if strings.HasPrefix(ManagedBridgeName("my-forensic-agent"), "bti") {
+		t.Fatal("managed bridge unexpectedly starts with bti")
+	}
+}
+
+func TestPrepareNetworkAPIOnly(t *testing.T) {
+	fake := vmexec.NewFake()
+	name, mode, err := PrepareNetwork(context.Background(), fake, "agent1", "api-only", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mode != "api-only" {
+		t.Fatalf("mode = %q, want api-only", mode)
+	}
+	if name != ManagedNetworkName("agent1") {
+		t.Fatalf("network name = %q, want %q", name, ManagedNetworkName("agent1"))
+	}
+	created := fake.CommandsMatching("docker network create")
+	if len(created) != 1 {
+		t.Fatalf("expected one network create, got %d", len(created))
+	}
+	if !strings.Contains(strings.Join(created[0], " "), "com.docker.network.bridge.name="+APIOnlyBridgeName("agent1")) {
+		t.Fatalf("create did not pin bti bridge name: %s", created[0])
+	}
+}
+
+func TestPrepareNetworkAPIOnlyDryRun(t *testing.T) {
+	fake := vmexec.NewFake()
+	name, mode, err := PrepareNetwork(context.Background(), fake, "agent1", "api-only", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mode != "api-only" || name != ManagedNetworkName("agent1") {
+		t.Fatalf("dry-run returned name=%q mode=%q", name, mode)
+	}
+	if len(fake.CommandsMatching("docker network create")) != 0 {
+		t.Fatal("dry-run must not create a network")
+	}
+}

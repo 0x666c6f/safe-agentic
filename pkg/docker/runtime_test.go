@@ -99,6 +99,15 @@ func TestAddNamedVolume(t *testing.T) {
 	}
 }
 
+func TestAddNamedVolumeRO(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
+	cmd.AddNamedVolumeRO("ev", "/evidence")
+	cmdStr := strings.Join(cmd.Build(), " ")
+	if !strings.Contains(cmdStr, "type=volume,src=ev,dst=/evidence,readonly") {
+		t.Errorf("missing read-only named volume mount: %s", cmdStr)
+	}
+}
+
 func TestAddBindMount(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "berth:latest")
 	cmd.AddBindMount("/tmp/worktree", "/workspace", false)

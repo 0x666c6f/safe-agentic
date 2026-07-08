@@ -79,6 +79,16 @@ exit
 berth spawn claude --network agent-isolated --repo https://github.com/org/repo.git
 ```
 
+### api-only egress mode
+
+```bash
+berth spawn claude --network api-only --repo https://github.com/org/repo.git
+```
+
+api-only containers attach to a managed bridge like any other agent, but the bridge interface is pinned to a distinct `bti` prefix instead of the normal `bt` + hex used for managed bridges — hex digits never include `i`, so the two prefixes can't collide. `vm/setup.sh` inserts one rule ahead of the normal guardrails: `iptables -A BERTH_EGRESS -i 'bti+' -j REJECT`, which drops **all** forwarded traffic from api-only bridges — direct internet, external DNS, everything.
+
+The only reachable path out is a `tinyproxy` instance the VM runs on `0.0.0.0:8119`, default-deny with an exact-host allowlist (`api.anthropic.com`, `statsig.anthropic.com`, `sentry.io`, `github.com`, `codeload.github.com`, `objects.githubusercontent.com`). The container reaches it via `--add-host berth-proxy:host-gateway` plus an injected `HTTPS_PROXY=http://berth-proxy:8119`: that traffic is the container talking to the VM's own host-gateway address, which lands on the VM's `INPUT` chain, not `FORWARD` — so the `bti+` REJECT rule (which only matches forwarded traffic) never sees it. Name resolution for allowlisted hosts happens proxy-side, in the VM. The container's own DNS lookups are forwarded packets too, so mechanically the same `bti+` REJECT should drop them — the live acceptance gate (see the api-only egress mode plan, Task 7) is what actually verifies the container's default resolver path is blocked; treat that verification, not this description, as the source of truth.
+
 `--ssh` changes **auth exposure, not topology**: it forwards an SSH agent socket into the container through a socat relay in the VM. The container gains signing/auth ability; the private key material stays in your host agent (or 1Password).
 
 !!! note "Host NAT"

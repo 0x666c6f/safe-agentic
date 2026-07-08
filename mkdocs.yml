@@ -50,6 +50,7 @@ nav:
     - Worktrees: guide/worktrees.md
     - Fleets & Pipelines: guide/fleet.md
     - Automation: guide/automation.md
+    - Detonate: guide/detonate.md
     - Configuration: guide/configuration.md
   - Interfaces:
     - Desktop App: guide/app.md

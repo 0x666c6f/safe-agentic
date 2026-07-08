@@ -16,6 +16,7 @@ import (
 	"github.com/0x666c6f/berth/pkg/events"
 	"github.com/0x666c6f/berth/pkg/inject"
 	"github.com/0x666c6f/berth/pkg/labels"
+	"github.com/0x666c6f/berth/pkg/policy"
 	"github.com/0x666c6f/berth/pkg/tmux"
 	"github.com/0x666c6f/berth/pkg/vmexec"
 
@@ -463,10 +464,11 @@ func stopOneContainer(ctx context.Context, exec vmexec.Executor, name string) er
 		fmt.Fprintf(os.Stderr, "warning: rm %s: %v\n", name, err)
 	}
 
-	// Clean up DinD sidecar and managed network (best-effort)
+	// Clean up DinD sidecar, managed network, and evidence volume (best-effort)
 	docker.RemoveDinDRuntime(ctx, exec, name)
 	netName := docker.ManagedNetworkName(name)
 	docker.RemoveManagedNetwork(ctx, exec, netName)
+	exec.Run(ctx, "docker", "volume", "rm", name+"-evidence")
 
 	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
 	auditLogger.Log("stop", name, nil)
@@ -494,6 +496,7 @@ func stopAllContainers(ctx context.Context, exec vmexec.Executor) error {
 		exec.Run(ctx, "docker", "rm", name)
 		docker.RemoveDinDRuntime(ctx, exec, name)
 		docker.RemoveManagedNetwork(ctx, exec, docker.ManagedNetworkName(name))
+		exec.Run(ctx, "docker", "volume", "rm", name+"-evidence")
 	}
 
 	fmt.Printf("Done. Stopped %d container(s).\n", total)
@@ -562,7 +565,17 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	// 5. Prune dangling images
 	exec.Run(ctx, "docker", "image", "prune", "-f")
 
-	// 6. Auth volumes (optional)
+	// 6. Evidence volumes — always swept (not auth, holds untrusted sample
+	// bytes; per-container `berth stop` already removes these, but bulk
+	// cleanup needs its own sweep since it never runs a per-container stop).
+	evidenceOut, _ := exec.Run(ctx, "docker", "volume", "ls",
+		"--filter", "label=berth.type=evidence",
+		"--format", "{{.Name}}")
+	for _, vol := range splitLines(string(evidenceOut)) {
+		exec.Run(ctx, "docker", "volume", "rm", vol)
+	}
+
+	// 7. Auth volumes (optional)
 	if cleanupAuth {
 		volOut, _ := exec.Run(ctx, "docker", "volume", "ls",
 			"--filter", "name=berth-",
@@ -752,6 +765,16 @@ func applyReconstructedLabels(opts *SpawnOpts, getLabel func(string) string) {
 	opts.Notify = decodeB64Value(getLabel(labels.NotifyB64))
 	opts.OnComplete = decodeB64Value(getLabel(labels.OnCompleteB64))
 	opts.OnFail = decodeB64Value(getLabel(labels.OnFailB64))
+	// Restore only the modes whose label value is a valid --network value.
+	// managed is the default (leave opts.Network == "") and custom networks
+	// aren't reconstructable from a label alone.
+	switch getLabel(labels.NetworkMode) {
+	case policy.NetworkAPIOnly:
+		opts.Network = policy.NetworkAPIOnly
+	case policy.NetworkNone:
+		opts.Network = policy.NetworkNone
+	}
+	opts.Forensic = getLabel(labels.Forensic) == "true"
 }
 
 func applyReconstructedAuth(opts *SpawnOpts, authType, ghAuth string) {

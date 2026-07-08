@@ -14,6 +14,7 @@ You are running inside a hardened berth container.
 - AWS credentials: {{AWS_STATUS}}
 - Network: {{NETWORK_STATUS}}
 - Docker: {{DOCKER_STATUS}}
+- Evidence: {{EVIDENCE_STATUS}}
 
 ## Rules
 - Do NOT attempt privilege escalation or container escape

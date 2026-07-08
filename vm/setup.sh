@@ -16,7 +16,7 @@ WORKTREES_MOUNT=/worktrees
 # with worktreesSentinelPath in cmd/berth/setup.go.
 WORKTREES_SENTINEL=/run/berth-worktrees-source
 
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 step() {
   step_number="$1"
   shift
@@ -182,6 +182,8 @@ step 3 "Installing Docker dependencies..."
 
 case "${ID:-}" in
   alpine)
+    # tinyproxy lives in Alpine's community repo; enable it if not already present.
+    as_root sh -c 'grep -q "/community" /etc/apk/repositories || echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/community" >> /etc/apk/repositories'
     as_root apk update
     as_root apk add --no-cache \
       bash \
@@ -196,6 +198,7 @@ case "${ID:-}" in
       openssh-client \
       shadow \
       socat \
+      tinyproxy \
       tar \
       tzdata
     ;;
@@ -210,7 +213,7 @@ case "${ID:-}" in
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" \
       | as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
     as_root apt-get update -qq
-    as_root apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat
+    as_root apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat tinyproxy
     ;;
   *)
     echo "Unsupported VM OS: ${ID:-unknown}" >&2
@@ -285,9 +288,44 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # =============================================================================
+# API-only egress proxy (tinyproxy, default-deny allowlist)
+# =============================================================================
+step 5 "Configuring api-only egress proxy..."
+as_root mkdir -p /etc/tinyproxy
+
+as_root tee /etc/tinyproxy/allowlist >/dev/null <<'ALEOF'
+^api\.anthropic\.com$
+^statsig\.anthropic\.com$
+^sentry\.io$
+^github\.com$
+^codeload\.github\.com$
+^objects\.githubusercontent\.com$
+ALEOF
+
+as_root tee /etc/tinyproxy/tinyproxy.conf >/dev/null <<'TPEOF'
+User tinyproxy
+Group tinyproxy
+Port 8119
+Listen 0.0.0.0
+Timeout 600
+LogLevel Warning
+MaxClients 100
+Filter "/etc/tinyproxy/allowlist"
+FilterDefaultDeny Yes
+FilterExtended On
+FilterCaseSensitive Off
+# Allow CONNECT (HTTPS) to standard TLS port only; hosts still filtered above.
+ConnectPort 443
+TPEOF
+
+# Restart tinyproxy with our config (nohup: the VM has no assumed service manager here).
+as_root pkill -x tinyproxy >/dev/null 2>&1 || true
+as_root sh -c 'nohup tinyproxy -c /etc/tinyproxy/tinyproxy.conf >/var/log/tinyproxy.log 2>&1 &'
+
+# =============================================================================
 # Egress guardrails for berth managed bridges
 # =============================================================================
-step 5 "Configuring egress guardrails..."
+step 6 "Configuring egress guardrails..."
 as_root iptables -nL DOCKER-USER >/dev/null 2>&1 || as_root iptables -N DOCKER-USER
 # Drop the pre-rename chain if this VM was set up as safe-agentic
 as_root iptables -D DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
@@ -297,6 +335,16 @@ as_root iptables -N BERTH_EGRESS >/dev/null 2>&1 || true
 as_root iptables -F BERTH_EGRESS
 as_root iptables -C DOCKER-USER -j BERTH_EGRESS >/dev/null 2>&1 \
   || as_root iptables -I DOCKER-USER 1 -j BERTH_EGRESS
+# api-only bridges (bti*): drop ALL forwarded egress. The only reachable path
+# is the VM-local proxy (host-gateway), which is INPUT-path, not FORWARD, so it
+# is unaffected by this rule. This kills direct internet, external DNS, and C2.
+#
+# ORDERING INVARIANT: this rule MUST stay the FIRST rule appended to
+# BERTH_EGRESS, before any '-i bt+' rule below. '-i bt+' prefix-matches
+# 'bti*' interfaces too (bti is bt + i), so a managed bt+ allow placed ahead
+# of this REJECT would silently let api-only traffic out on 22/80/443 —
+# fail-open for the one mode meant to be locked down. Do not reorder.
+as_root iptables -A BERTH_EGRESS -i 'bti+' -j REJECT
 as_root iptables -A BERTH_EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 for cidr in \
   0.0.0.0/8 \

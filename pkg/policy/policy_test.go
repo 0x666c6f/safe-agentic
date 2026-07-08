@@ -210,3 +210,27 @@ func sameFilePath(a, b string) bool {
 	}
 	return filepath.Clean(a) == filepath.Clean(b)
 }
+
+func TestNetworkAPIOnlyConstant(t *testing.T) {
+	if NetworkAPIOnly != "api-only" {
+		t.Fatalf("NetworkAPIOnly = %q, want api-only", NetworkAPIOnly)
+	}
+}
+
+func TestEnforceAllowsAPIOnlyWhenListed(t *testing.T) {
+	allow := []string{NetworkAPIOnly}
+	rules := []RuleSet{{Source: "test", Allow: AllowRules{Networks: &allow}}}
+	err := Enforce(rules, SpawnRequest{DockerMode: DockerModeOff, Network: NetworkAPIOnly})
+	if err != nil {
+		t.Fatalf("api-only should be allowed: %v", err)
+	}
+}
+
+func TestEnforceDeniesAPIOnlyWhenNotListed(t *testing.T) {
+	allow := []string{NetworkManaged}
+	rules := []RuleSet{{Source: "test", Allow: AllowRules{Networks: &allow}}}
+	err := Enforce(rules, SpawnRequest{DockerMode: DockerModeOff, Network: NetworkAPIOnly})
+	if err == nil {
+		t.Fatal("expected api-only to be denied when not in allow list")
+	}
+}

@@ -798,8 +798,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 // ─── update ────────────────────────────────────────────────────────────────
 
 var (
-	updateQuick bool
-	updateFull  bool
+	updateQuick    bool
+	updateFull     bool
+	updateForensic bool
 )
 
 var updateCmd = &cobra.Command{
@@ -814,6 +815,7 @@ to only refresh the AI CLI layer, or --full to rebuild from scratch.`,
 func init() {
 	updateCmd.Flags().BoolVar(&updateQuick, "quick", false, "Rebuild only the AI CLI layer (fast; picks up new Claude/Codex versions)")
 	updateCmd.Flags().BoolVar(&updateFull, "full", false, "Rebuild every layer from scratch with no cache (slowest, most thorough)")
+	updateCmd.Flags().BoolVar(&updateForensic, "forensic", false, "Build the forensic tool image (berth:forensic) from Dockerfile.forensic")
 	rootCmd.AddCommand(updateCmd)
 }
 
@@ -835,22 +837,29 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 func runDockerBuild(ctx context.Context, vmRunner vmexec.Executor) error {
 	buildArgs := []string{"docker", "build", "-t", "berth:latest", "/tmp/build-context"}
+	image := "berth:latest"
 
 	switch {
+	case updateForensic:
+		image = "berth:forensic"
+		// -f must be absolute: buildkit resolves a relative Dockerfile path
+		// against the docker client's cwd (/ in the VM), not the build context,
+		// so a bare "Dockerfile.forensic" is looked up as /Dockerfile.forensic.
+		buildArgs = []string{"docker", "build", "-f", "/tmp/build-context/Dockerfile.forensic", "-t", image, "/tmp/build-context"}
 	case updateFull:
-		buildArgs = []string{"docker", "build", "--no-cache", "-t", "berth:latest", "/tmp/build-context"}
+		buildArgs = []string{"docker", "build", "--no-cache", "-t", image, "/tmp/build-context"}
 	case updateQuick:
 		cacheBust := fmt.Sprintf("%d", time.Now().Unix())
-		buildArgs = []string{"docker", "build", "--build-arg", "CLI_CACHE_BUST=" + cacheBust, "-t", "berth:latest", "/tmp/build-context"}
+		buildArgs = []string{"docker", "build", "--build-arg", "CLI_CACHE_BUST=" + cacheBust, "-t", image, "/tmp/build-context"}
 	}
 
 	// Stream the build log live: it runs for minutes, and on failure the output is
 	// the only clue to what broke — buffering it discarded that on error.
-	fmt.Println("Building berth:latest…")
+	fmt.Printf("Building %s…\n", image)
 	if err := vmRunner.RunStreaming(ctx, os.Stdout, buildArgs...); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
-	fmt.Println("✓ Image updated")
+	fmt.Printf("✓ Image updated (%s)\n", image)
 	return nil
 }
 
@@ -1058,6 +1067,18 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		egressDetail = "IP forwarding off — VM has no internet egress; run: berth vm start"
 	}
 	check("Host egress NAT (ip.forwarding)", forwarding, egressDetail)
+
+	// 5b. Report api-only egress enforcement posture (bti+ REJECT rule +
+	// tinyproxy). Best-effort: a probe error just reports not-active, it
+	// doesn't fail diagnose.
+	if dockerErr == nil {
+		gap := apiOnlyEnforcementGap(ctx, vmRunner)
+		detail := ""
+		if gap != "" {
+			detail = gap + " — run: berth vm start to (re-)provision it"
+		}
+		check("api-only egress enforcement", gap == "", detail)
+	}
 
 	// 6. Report the worktree-mount posture. Disabled (home-mount=none) is the
 	// default and the strongest isolation; enabling it trades that for --worktree.
