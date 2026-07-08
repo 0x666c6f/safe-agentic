@@ -15,7 +15,10 @@ var rootCmd = &cobra.Command{
 	Use:   "detonate",
 	Short: "Enforced state machine for defensive malware detonation (Tier A: local ARM)",
 	Long: `detonate orchestrates the disposable-VM malware-detonation lifecycle for
-berth's forensic workflow. Safety model (non-negotiable, enforced in code):
+berth's forensic workflow. Run 'detonate check' first: it preflights the
+environment for presence AND provable isolation (read-only, boots nothing) and
+exits non-zero on a misconfigured setup. Safety model (non-negotiable, enforced
+in code):
 
   - Isolated network only. Every run re-validates an isolated, no-uplink
     network attachment immediately before boot. Anything else fails closed

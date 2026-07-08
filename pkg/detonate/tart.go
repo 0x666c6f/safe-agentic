@@ -39,7 +39,7 @@ func (execCmdRunner) Run(ctx context.Context, name string, args ...string) ([]by
 // Apple Virtualization.framework) plus `hdiutil` for sample staging.
 //
 // Network isolation is CODE-ENFORCED here: ConfigureIsolatedNet runs the
-// softnet allow-list through validateSoftnetAllow (must be a single private
+// softnet allow-list through ValidateSoftnetAllow (must be a single private
 // CIDR — the operator's fakenet gateway subnet — never a public/0.0.0.0/0
 // range), Run re-validates it plus the resulting NetAttachment through
 // ValidateIsolated, and buildTartRunArgs emits --net-softnet, never
@@ -55,7 +55,7 @@ type TartRunner struct {
 	// AllowedIsolatedGateway is an OPTIONAL operator pin: when non-empty,
 	// ConfigureIsolatedNet additionally requires the softnet allow-CIDR to
 	// equal it, so the operator can nail detonations to one exact fakenet
-	// gateway subnet. When empty, any CIDR that passes validateSoftnetAllow
+	// gateway subnet. When empty, any CIDR that passes ValidateSoftnetAllow
 	// (i.e. any private range) is accepted — the private-CIDR check is the
 	// load-bearing containment control either way.
 	AllowedIsolatedGateway string
@@ -173,7 +173,7 @@ func (r *TartRunner) Clone(ctx context.Context, golden, run string) error {
 
 // ConfigureIsolatedNet interprets gw as the softnet allow-CIDR (the
 // operator's fakenet gateway subnet/host). It fails closed unless gw is a
-// single private CIDR (validateSoftnetAllow); if AllowedIsolatedGateway is
+// single private CIDR (ValidateSoftnetAllow); if AllowedIsolatedGateway is
 // set it must additionally match it exactly. On success it records the
 // isolated NetAttachment and the validated CIDR per-run so Run consumes the
 // exact value guarded here.
@@ -183,7 +183,7 @@ func (r *TartRunner) ConfigureIsolatedNet(_ context.Context, run, gw string) (Ne
 	}
 	// Load-bearing control: the allow-list must be a private CIDR or the
 	// sample gets internet egress. Reject anything public/0.0.0.0/0.
-	if err := validateSoftnetAllow(gw); err != nil {
+	if err := ValidateSoftnetAllow(gw); err != nil {
 		return NetAttachment{}, err
 	}
 	n := NetAttachment{Mode: "isolated", HasUplink: false}
@@ -216,7 +216,7 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	}
 	// Defense in depth: the captured CIDR must still be a private allow-list.
 	// The value re-validated here is the exact value buildTartRunArgs uses.
-	if err := validateSoftnetAllow(gw); err != nil {
+	if err := ValidateSoftnetAllow(gw); err != nil {
 		return err
 	}
 

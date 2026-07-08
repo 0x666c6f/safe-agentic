@@ -21,6 +21,27 @@ The Tart backend now runs a real detonation: `inject` builds a read-only (`hdiut
 
 **Known hardening trade-off:** artifacts leave the guest through a writable host share (`tart run --dir=out:<dir>`), which is an escape surface a compromised guest could abuse. `collect` is already symlink-safe (it never dereferences guest-planted symlinks), but the stronger fix — collecting artifacts from an offline disk after poweroff — is deferred, since it can't be implemented or verified without a real Tart guest.
 
+## Preflight: `detonate check`
+
+Run `detonate check` **before a real detonation**. It validates that the environment is present *and* provably isolated **without running, cloning, or booting anything** — a read-only safety net so nobody fires a live sample into a misconfigured, non-isolated setup. It prints a ✓/✗ checklist and **exits non-zero if any hard check fails** (fail closed — an unverified environment is never "ready").
+
+```bash
+detonate check                                   # tart, hdiutil, state dir
+detonate check --golden remnux-golden            # + verify the golden exists
+detonate check --gateway 10.0.0.0/24             # + verify the CIDR is isolated
+detonate check --golden remnux-golden --gateway 10.0.0.0/24
+```
+
+What it checks:
+
+- **tart installed** — `tart` on `PATH`; hard-fails if missing (detonation is impossible without it).
+- **hdiutil available** — needed to build the read-only sample image (macOS); hard-fails if missing.
+- **state dir writable** — the detonate state dir (`~/.berth/detonate`, or `DETONATE_STATE_DIR`) exists or can be created and written; hard-fails otherwise.
+- **golden image** *(only with `--golden`)* — verifies the named golden exists via a read-only `tart list`; hard-fails if named but missing.
+- **isolation gateway** *(only with `--gateway`)* — runs the **same** softnet isolation validator the `run` path enforces. A ✓ here means `run` would accept this CIDR as isolated; a public/`0.0.0.0/0`/non-private range hard-fails.
+
+`check` **never** runs `tart run`/`clone` or touches run state — the only VM interaction is the read-only golden lookup. A green result means the *environment* is ready, **not** that any sample is safe: benign behavior in the sandbox is not proof of safety, and you must still ensure the named gateway is a genuinely no-uplink fakenet segment.
+
 ## Verb lifecycle
 
 ```

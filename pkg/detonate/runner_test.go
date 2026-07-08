@@ -275,7 +275,7 @@ func TestTartRunner_Run_RejectsWhenNoAttachmentConfigured(t *testing.T) {
 func TestTartRunner_ConfigureIsolatedNet_FailsClosedOnNonCIDRGateway(t *testing.T) {
 	r := NewTartRunner(t.TempDir())
 	// A non-CIDR allow-list (e.g. an interface name) must fail closed:
-	// validateSoftnetAllow only accepts a parseable private CIDR.
+	// ValidateSoftnetAllow only accepts a parseable private CIDR.
 	_, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "en0")
 	if err == nil {
 		t.Fatal("ConfigureIsolatedNet with a non-CIDR allow-list = nil error, want rejection")
@@ -416,7 +416,7 @@ func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
 
 	// Regression: mutate the shared field after ConfigureIsolatedNet. Run
 	// must not pick this up — it must use the CIDR captured at
-	// ConfigureIsolatedNet time, so the value validateSoftnetAllow guarded and
+	// ConfigureIsolatedNet time, so the value ValidateSoftnetAllow guarded and
 	// the value `tart run` consumes can never diverge.
 	r.AllowedIsolatedGateway = "192.168.99.0/24"
 

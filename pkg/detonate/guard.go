@@ -27,13 +27,14 @@ var privateBlocks = func() []*net.IPNet {
 	return out
 }()
 
-// validateSoftnetAllow is the load-bearing containment control for the
+// ValidateSoftnetAllow is the load-bearing containment control for the
 // softnet path: the `--net-softnet-allow` value MUST be a single private /
 // isolated CIDR wholly contained in one privateBlock (or a /32 within one).
 // A permissive allow-list (0.0.0.0/0, ::/0, any public/routable range) would
 // hand the detonating sample internet egress, so anything not provably
-// private is rejected — fail closed.
-func validateSoftnetAllow(cidr string) error {
+// private is rejected — fail closed. Exported so `detonate check` preflights
+// the exact same CIDR the run path enforces — one function, no divergence.
+func ValidateSoftnetAllow(cidr string) error {
 	if cidr == "" {
 		return fmt.Errorf("containment violation: softnet allow-list is empty (must be a single private CIDR)")
 	}

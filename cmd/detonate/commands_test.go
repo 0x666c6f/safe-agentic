@@ -187,6 +187,148 @@ func TestRunRoute_ExitBehaviorPerTier(t *testing.T) {
 	})
 }
 
+// ─── check (environment preflight) ───────────────────────────────────────
+
+// setLookPath swaps the exec.LookPath seam so check tests can simulate a
+// binary being present or absent without the real tart/hdiutil on PATH.
+func setLookPath(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	orig := lookPath
+	lookPath = fn
+	t.Cleanup(func() { lookPath = orig })
+}
+
+func allPresent(name string) (string, error) { return "/usr/bin/" + name, nil }
+
+// assertReadOnly fails if check ever invoked a stateful Runner method. check
+// must only probe (GoldenExists) — never Clone/Run/InjectOffline/etc.
+func assertReadOnly(t *testing.T, fake *detonate.FakeRunner) {
+	t.Helper()
+	for _, c := range fake.Log {
+		if c.Method != "GoldenExists" {
+			t.Errorf("check invoked stateful Runner method %q — must be read-only", c.Method)
+		}
+	}
+}
+
+func TestRunCheck_AllPresentPrivateGateway_Passes(t *testing.T) {
+	setTempAuditPath(t) // DETONATE_STATE_DIR -> writable temp dir
+	setLookPath(t, allPresent)
+	fake := detonate.NewFakeRunner()
+	fake.SetGoldenExists("golden-ok", true)
+
+	var buf bytes.Buffer
+	if err := runCheck(context.Background(), fake, "golden-ok", "10.0.0.0/24", &buf); err != nil {
+		t.Fatalf("runCheck() = %v, want nil (all present + private gateway)", err)
+	}
+	if strings.Contains(buf.String(), "✗") {
+		t.Errorf("expected no ✗ checks, got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "All checks passed") {
+		t.Errorf("expected pass summary, got:\n%s", buf.String())
+	}
+	assertReadOnly(t, fake)
+}
+
+func TestRunCheck_TartAbsent_FailsClosed(t *testing.T) {
+	setTempAuditPath(t)
+	setLookPath(t, func(name string) (string, error) {
+		if name == "tart" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + name, nil
+	})
+	fake := detonate.NewFakeRunner()
+
+	var buf bytes.Buffer
+	err := runCheck(context.Background(), fake, "", "", &buf)
+	if err == nil {
+		t.Fatal("runCheck() = nil, want non-nil when tart is absent (fail closed)")
+	}
+	if !strings.Contains(buf.String(), "✗ tart installed") {
+		t.Errorf("expected ✗ tart installed, got:\n%s", buf.String())
+	}
+	assertReadOnly(t, fake)
+}
+
+func TestRunCheck_PublicGateway_FailsClosed(t *testing.T) {
+	for _, gw := range []string{"0.0.0.0/0", "8.8.8.8/32"} {
+		t.Run(gw, func(t *testing.T) {
+			setTempAuditPath(t)
+			setLookPath(t, allPresent)
+			fake := detonate.NewFakeRunner()
+
+			var buf bytes.Buffer
+			err := runCheck(context.Background(), fake, "", gw, &buf)
+			if err == nil {
+				t.Fatalf("runCheck(gateway=%q) = nil, want non-nil (public CIDR must fail closed)", gw)
+			}
+			if !strings.Contains(buf.String(), "✗ isolation gateway") {
+				t.Errorf("expected ✗ isolation gateway, got:\n%s", buf.String())
+			}
+			assertReadOnly(t, fake)
+		})
+	}
+}
+
+func TestRunCheck_GoldenMissing_FailsClosed(t *testing.T) {
+	setTempAuditPath(t)
+	setLookPath(t, allPresent)
+	fake := detonate.NewFakeRunner()
+	fake.SetGoldenExists("missing", false) // default is false anyway
+
+	var buf bytes.Buffer
+	err := runCheck(context.Background(), fake, "missing", "10.0.0.0/24", &buf)
+	if err == nil {
+		t.Fatal("runCheck(golden=missing) = nil, want non-nil when named golden is absent")
+	}
+	if !strings.Contains(buf.String(), "✗ golden image") {
+		t.Errorf("expected ✗ golden image, got:\n%s", buf.String())
+	}
+	assertReadOnly(t, fake)
+}
+
+func TestRunCheck_HdiutilAbsent_FailsClosed(t *testing.T) {
+	setTempAuditPath(t)
+	setLookPath(t, func(name string) (string, error) {
+		if name == "hdiutil" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + name, nil
+	})
+	fake := detonate.NewFakeRunner()
+
+	var buf bytes.Buffer
+	err := runCheck(context.Background(), fake, "", "", &buf)
+	if err == nil {
+		t.Fatal("runCheck() = nil, want non-nil when hdiutil is absent (fail closed)")
+	}
+	if !strings.Contains(buf.String(), "✗ hdiutil") {
+		t.Errorf("expected ✗ hdiutil, got:\n%s", buf.String())
+	}
+	assertReadOnly(t, fake)
+}
+
+func TestRunCheck_MalformedGateway_FailsClosed(t *testing.T) {
+	for _, gw := range []string{"not-a-cidr", "en0", "10.0.0.0"} {
+		t.Run(gw, func(t *testing.T) {
+			setTempAuditPath(t)
+			setLookPath(t, allPresent)
+			fake := detonate.NewFakeRunner()
+
+			var buf bytes.Buffer
+			err := runCheck(context.Background(), fake, "", gw, &buf)
+			if err == nil {
+				t.Fatalf("runCheck(gateway=%q) = nil, want non-nil (malformed CIDR must fail closed)", gw)
+			}
+			if !strings.Contains(buf.String(), "✗ isolation gateway") {
+				t.Errorf("expected ✗ isolation gateway, got:\n%s", buf.String())
+			}
+			assertReadOnly(t, fake)
+		})
+	}
+}
+
 // ─── create ─────────────────────────────────────────────────────────────
 
 func TestRunCreate_FailsClosedWhenGoldenMissing(t *testing.T) {

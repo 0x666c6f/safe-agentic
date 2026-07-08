@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// --- validateSoftnetAllow: the load-bearing softnet containment control ---
+// --- ValidateSoftnetAllow: the load-bearing softnet containment control ---
 
 func TestValidateSoftnetAllow(t *testing.T) {
 	accept := []string{
@@ -24,8 +24,8 @@ func TestValidateSoftnetAllow(t *testing.T) {
 		"169.254.1.1/32",
 	}
 	for _, cidr := range accept {
-		if err := validateSoftnetAllow(cidr); err != nil {
-			t.Errorf("validateSoftnetAllow(%q) = %v, want nil (private CIDR)", cidr, err)
+		if err := ValidateSoftnetAllow(cidr); err != nil {
+			t.Errorf("ValidateSoftnetAllow(%q) = %v, want nil (private CIDR)", cidr, err)
 		}
 	}
 
@@ -47,8 +47,8 @@ func TestValidateSoftnetAllow(t *testing.T) {
 		"en0",                 // interface name, not a CIDR
 	}
 	for _, cidr := range reject {
-		if err := validateSoftnetAllow(cidr); err == nil {
-			t.Errorf("validateSoftnetAllow(%q) = nil, want rejection (not a private CIDR)", cidr)
+		if err := ValidateSoftnetAllow(cidr); err == nil {
+			t.Errorf("ValidateSoftnetAllow(%q) = nil, want rejection (not a private CIDR)", cidr)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -99,6 +100,135 @@ func parseStaticFindings(data []byte) (detonate.StaticFindings, error) {
 		Arch:     pick("arch", "Arch"),
 		Format:   pick("format", "Format"),
 	}, nil
+}
+
+// ─── check (environment preflight) ───────────────────────────────────────
+
+// lookPath is the exec.LookPath seam so `check` tests can simulate tart/hdiutil
+// being present or absent without the real binaries on PATH.
+var lookPath = exec.LookPath
+
+var (
+	checkGolden  string
+	checkGateway string
+)
+
+var checkCmd = &cobra.Command{
+	Use:   "check [--golden <name>] [--gateway <cidr>]",
+	Short: "Preflight the detonation environment for presence AND provable isolation, without booting anything",
+	Long: `check validates that the detonation environment is present and provably
+isolated WITHOUT running, cloning, or booting anything — a read-only safety net
+to run before a real detonation. It prints a ✓/✗ checklist and exits non-zero if
+any hard check fails: an unverified environment is never treated as ready.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCheck(context.Background(), newRunner(), checkGolden, checkGateway, os.Stdout)
+	},
+}
+
+func init() {
+	checkCmd.Flags().StringVar(&checkGolden, "golden", "", "if set, verify this golden VM image exists (via tart list, read-only)")
+	checkCmd.Flags().StringVar(&checkGateway, "gateway", "", "if set, verify this CIDR passes the softnet isolation validator (same check as run)")
+	rootCmd.AddCommand(checkCmd)
+}
+
+// stateDirWritable proves the detonate state dir can actually be created and
+// written — a green here means create/inject/run can persist run state.
+func stateDirWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	probe := filepath.Join(dir, ".preflight-probe")
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		return err
+	}
+	return os.Remove(probe)
+}
+
+// runCheck is the read-only environment preflight. It NEVER calls a stateful
+// Runner method (Clone/Run/Inject/…): the only Runner call is GoldenExists, and
+// only when --golden is given. It returns a non-nil error (→ non-zero exit) if
+// any hard check fails, so a misconfigured, non-isolated environment can never
+// be mistaken for "ready".
+func runCheck(ctx context.Context, r detonate.Runner, golden, gateway string, out io.Writer) error {
+	failed := false
+	check := func(label string, ok bool, detail string) {
+		icon := "✓"
+		if !ok {
+			icon = "✗"
+			failed = true
+		}
+		if detail != "" {
+			fmt.Fprintf(out, "  %s %s — %s\n", icon, label, detail)
+		} else {
+			fmt.Fprintf(out, "  %s %s\n", icon, label)
+		}
+	}
+
+	fmt.Fprintln(out, "detonate environment preflight")
+	fmt.Fprintln(out, "──────────────────────────────")
+
+	// 1. tart on PATH — without it, detonation is impossible.
+	_, tartErr := lookPath("tart")
+	tartDetail := ""
+	if tartErr != nil {
+		tartDetail = "not on PATH — detonation is impossible; install cirruslabs/tart"
+	}
+	check("tart installed", tartErr == nil, tartDetail)
+
+	// 2. hdiutil on PATH — needed to build the read-only sample image (macOS).
+	_, hdiErr := lookPath("hdiutil")
+	hdiDetail := ""
+	if hdiErr != nil {
+		hdiDetail = "not on PATH — cannot build the read-only sample image (macOS only)"
+	}
+	check("hdiutil available", hdiErr == nil, hdiDetail)
+
+	// 3. state dir writable — same path the store uses (honors DETONATE_STATE_DIR).
+	stateDir := detonate.StateDir()
+	stErr := stateDirWritable(stateDir)
+	stDetail := stateDir
+	if stErr != nil {
+		stDetail = fmt.Sprintf("%s: %v", stateDir, stErr)
+	}
+	check("state dir writable", stErr == nil, stDetail)
+
+	// 4. golden image — only checked when named. GoldenExists is read-only.
+	if golden != "" {
+		exists, err := r.GoldenExists(ctx, golden)
+		switch {
+		case err != nil:
+			check("golden image "+golden, false, "checking golden failed: "+err.Error())
+		case !exists:
+			check("golden image "+golden, false, "not found — provision it before a run")
+		default:
+			check("golden image "+golden, true, "")
+		}
+	}
+
+	// 5. isolation gateway — only checked when given. This is the safety-critical
+	// check: it runs the SAME validator the run path enforces, so a ✓ here means
+	// the run path would accept this CIDR as isolated.
+	if gateway != "" {
+		err := detonate.ValidateSoftnetAllow(gateway)
+		gwDetail := "private/isolated CIDR — the run path would accept it as isolated"
+		if err != nil {
+			gwDetail = err.Error()
+		}
+		check("isolation gateway "+gateway, err == nil, gwDetail)
+	}
+
+	// 6. Informational — green ≠ safe.
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Note: green means the ENVIRONMENT is ready, NOT that any sample is safe —")
+	fmt.Fprintln(out, "benign behavior in the sandbox is not proof of safety, and you must still")
+	fmt.Fprintln(out, "ensure the named gateway is a genuinely no-uplink fakenet segment.")
+
+	if failed {
+		return fmt.Errorf("preflight failed: environment is not provably ready — fix the ✗ checks above before detonating")
+	}
+	fmt.Fprintln(out, "\nAll checks passed. Environment is ready (isolation still your responsibility).")
+	return nil
 }
 
 // ─── route ──────────────────────────────────────────────────────────────
@@ -277,7 +407,7 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 		return fmt.Errorf("--gateway is required: the private CIDR allow-list of the pre-provisioned fakenet gateway (e.g. 10.0.0.0/24)")
 	}
 	// --gateway is the softnet allow-CIDR. Reject anything that isn't a valid
-	// CIDR early; the Runner (validateSoftnetAllow) fails closed on any
+	// CIDR early; the Runner (ValidateSoftnetAllow) fails closed on any
 	// non-private/routable range, so containment does not rely on this check.
 	if _, _, err := net.ParseCIDR(gateway); err != nil {
 		return fmt.Errorf("--gateway must be a CIDR (e.g. 10.0.0.0/24): %w", err)
