@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -88,7 +89,10 @@ func registerGroups() {
 }
 
 func init() {
-	rootCmd.Version = Version
+	// The template prepends "v"; strip any leading "v" the injected version
+	// already carries (release ldflags inject the git tag, e.g. "v1.2.0") so
+	// `berth --version` reads "berth v1.2.0", not "berth vv1.2.0".
+	rootCmd.Version = strings.TrimPrefix(Version, "v")
 	rootCmd.SetVersionTemplate("berth v{{.Version}}\n")
 	registerGroups()
 }

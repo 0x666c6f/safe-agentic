@@ -114,6 +114,12 @@ jobs:
           rm berth-tui-amd64 berth-tui-arm64
           chmod +x berth-tui
 
+          GOOS=darwin GOARCH=amd64 go build -o detonate-amd64 ./cmd/detonate
+          GOOS=darwin GOARCH=arm64 go build -o detonate-arm64 ./cmd/detonate
+          lipo -create -output detonate detonate-amd64 detonate-arm64
+          rm detonate-amd64 detonate-arm64
+          chmod +x detonate
+
       - name: Package tarball
         if: steps.version.outputs.skip != 'true'
         id: package
@@ -122,7 +128,7 @@ jobs:
           staging="berth-${version}"
           mkdir -p "$staging"/{bin,config,templates,vm}
 
-          cp berth berth-tui "$staging/bin/"
+          cp berth berth-tui detonate "$staging/bin/"
           cp bin/berth-claude bin/berth-codex "$staging/bin/"
           cp bin/agent-session.sh bin/repo-url.sh "$staging/bin/"
 
@@ -181,6 +187,7 @@ jobs:
               libexec.install Dir["*"]
               bin.install_symlink libexec/"bin"/"berth"
               bin.install_symlink libexec/"bin"/"berth-tui"
+              bin.install_symlink libexec/"bin"/"detonate"
               bin.install_symlink libexec/"bin"/"berth-claude"
               bin.install_symlink libexec/"bin"/"berth-codex"
             end
