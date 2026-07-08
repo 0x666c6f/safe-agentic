@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -264,7 +265,7 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().DurationVar(&runTimeout, "timeout", 180*time.Second, "hard wall-clock limit for the detonation window")
 	runCmd.Flags().BoolVar(&runYes, "yes", false, "skip the typed confirmation prompt (also requires DETONATE_I_UNDERSTAND=1)")
-	runCmd.Flags().StringVar(&runGateway, "gateway", "", "name of the pre-provisioned, operator-verified isolated (no-uplink) network gateway (required)")
+	runCmd.Flags().StringVar(&runGateway, "gateway", "", "private CIDR allow-list of the pre-provisioned fakenet gateway, e.g. 10.0.0.0/24 (required)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -273,10 +274,13 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 		return err
 	}
 	if gateway == "" {
-		return fmt.Errorf("--gateway is required: name the pre-provisioned, operator-verified isolated (no-uplink) network gateway")
+		return fmt.Errorf("--gateway is required: the private CIDR allow-list of the pre-provisioned fakenet gateway (e.g. 10.0.0.0/24)")
 	}
-	if err := validate.NameComponent(gateway, "--gateway"); err != nil {
-		return err
+	// --gateway is the softnet allow-CIDR. Reject anything that isn't a valid
+	// CIDR early; the Runner (validateSoftnetAllow) fails closed on any
+	// non-private/routable range, so containment does not rely on this check.
+	if _, _, err := net.ParseCIDR(gateway); err != nil {
+		return fmt.Errorf("--gateway must be a CIDR (e.g. 10.0.0.0/24): %w", err)
 	}
 
 	// Held for the entire gate-check-then-boot section (including the

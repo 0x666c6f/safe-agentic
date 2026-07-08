@@ -86,7 +86,7 @@ func seedDetonated(t *testing.T, fake *detonate.FakeRunner, run string) {
 	t.Helper()
 	seedInjected(t, fake, run)
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
-	if err := runRun(context.Background(), fake, run, "gw-seed", time.Second, true, strings.NewReader("")); err != nil {
+	if err := runRun(context.Background(), fake, run, "10.0.0.0/24", time.Second, true, strings.NewReader("")); err != nil {
 		t.Fatalf("seed run(%q): %v", run, err)
 	}
 }
@@ -333,7 +333,7 @@ func TestFullLifecycle_AdvancesStateAtEveryStep(t *testing.T) {
 		t.Error("InjectOffline was not called")
 	}
 
-	if err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader("")); err != nil {
+	if err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader("")); err != nil {
 		t.Fatalf("runRun() error = %v", err)
 	}
 	requireState(t, detonate.StateDetonated)
@@ -434,7 +434,7 @@ func TestRunRun_FailsClosedWhenNotIsolated(t *testing.T) {
 	fake.SetNetAttachment("run-1", detonate.NetAttachment{Mode: "bridged", HasUplink: true})
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
 
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want containment error")
 	}
@@ -453,7 +453,7 @@ func TestRunRun_AutoDestroysOnRunError(t *testing.T) {
 	fake.SetRunErr("run-1", fmt.Errorf("boom"))
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
 
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want the Run error surfaced")
 	}
@@ -497,7 +497,7 @@ func TestRunRun_DestroyFailureIsNotReportedAsAutoDestroyed(t *testing.T) {
 	fake.SetDestroyErr("run-1", fmt.Errorf("tart: vm busy"))
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
 
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want the Run error surfaced")
 	}
@@ -554,7 +554,7 @@ func TestRunRun_FailsClosedWhenLockHeld(t *testing.T) {
 	defer unlock()
 
 	before := len(fake.Log)
-	err = runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err = runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want error while the run's lock is already held")
 	}
@@ -582,9 +582,9 @@ func TestRunRun_RejectsInvalidGateway(t *testing.T) {
 	fake := detonate.NewFakeRunner()
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
 
-	err := runRun(context.Background(), fake, "run-1", "-not-a-name", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "not-a-cidr", time.Second, true, strings.NewReader(""))
 	if err == nil {
-		t.Fatal("runRun() error = nil, want error for a leading-dash --gateway value")
+		t.Fatal("runRun() error = nil, want error for a non-CIDR --gateway value")
 	}
 	if len(fake.Log) != 0 {
 		t.Errorf("Runner should not be touched before --gateway is validated, got: %+v", fake.Log)
@@ -602,7 +602,7 @@ func TestRunRun_ConfirmationGate(t *testing.T) {
 	t.Run("wrong phrase aborts without calling Run", func(t *testing.T) {
 		fake := detonate.NewFakeRunner()
 		seedInjected(t, fake, "gate-wrong")
-		err := runRun(context.Background(), fake, "gate-wrong", "gw0", time.Second, false, strings.NewReader("nope\n"))
+		err := runRun(context.Background(), fake, "gate-wrong", "10.0.0.0/24", time.Second, false, strings.NewReader("nope\n"))
 		if err == nil {
 			t.Fatal("runRun() error = nil, want confirmation mismatch error")
 		}
@@ -614,7 +614,7 @@ func TestRunRun_ConfirmationGate(t *testing.T) {
 	t.Run("exact phrase proceeds to Run", func(t *testing.T) {
 		fake := detonate.NewFakeRunner()
 		seedInjected(t, fake, "gate-exact")
-		err := runRun(context.Background(), fake, "gate-exact", "gw0", time.Second, false, strings.NewReader("detonate gate-exact\n"))
+		err := runRun(context.Background(), fake, "gate-exact", "10.0.0.0/24", time.Second, false, strings.NewReader("detonate gate-exact\n"))
 		if err != nil {
 			t.Fatalf("runRun() error = %v, want nil", err)
 		}
@@ -626,7 +626,7 @@ func TestRunRun_ConfirmationGate(t *testing.T) {
 	t.Run("--yes alone (no env) still prompts", func(t *testing.T) {
 		fake := detonate.NewFakeRunner()
 		seedInjected(t, fake, "gate-yes")
-		err := runRun(context.Background(), fake, "gate-yes", "gw0", time.Second, true, strings.NewReader(""))
+		err := runRun(context.Background(), fake, "gate-yes", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 		if err == nil {
 			t.Fatal("runRun() error = nil, want error: --yes without DETONATE_I_UNDERSTAND=1 must not bypass the prompt")
 		}
@@ -644,7 +644,7 @@ func TestRunRun_FailsClosedBeforeInject(t *testing.T) {
 	seedCreated(t, fake, "run-1") // created, but never injected
 	t.Setenv("DETONATE_I_UNDERSTAND", "1")
 
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want error when run was created but never injected")
 	}
@@ -666,7 +666,7 @@ func TestRunRun_RefusesReuseOfAlreadyDetonatedRun(t *testing.T) {
 	seedDetonated(t, fake, "run-1")
 
 	before := len(fake.Log)
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want error on a second run of an already-detonated clone")
 	}
@@ -702,7 +702,7 @@ func TestRunRun_RefusesReuseOfCollectedRun(t *testing.T) {
 	}
 
 	before := len(fake.Log)
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want refusal for a run already in Collected state")
 	}
@@ -737,7 +737,7 @@ func TestRunRun_SkipsCleanupWhenRecreatedDuringRun(t *testing.T) {
 		}
 	})
 
-	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	err := runRun(context.Background(), fake, "run-1", "10.0.0.0/24", time.Second, true, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("runRun() error = nil, want the run error surfaced")
 	}
