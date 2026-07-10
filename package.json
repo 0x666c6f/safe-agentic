@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pinned AI CLIs for berth",
   "dependencies": {
-    "@openai/codex": "0.142.5"
+    "@openai/codex": "0.143.0"
   }
 }
